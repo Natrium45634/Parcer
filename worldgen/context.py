@@ -101,22 +101,31 @@ class GenContext:
 
     def make_figure(self, rng, race, year: int, role: str, region_id: str = "",
                     title: str = "", sex: str = "", epithet_chance: float = 0.62,
-                    home_id: str = ""):
-        """Создаёт историческую личность и заносит её в базу мира."""
+                    home_id: str = "", house=None, given_name: str = "",
+                    birth_year: int = 0, father=None, mother=None,
+                    birth_order: int = 0, death_year: int = 0):
+        """Создаёт историческую личность и заносит её в базу мира.
+
+        Если передан знатный род, личность получает родовое имя (фамилию);
+        у простолюдинов фамилии нет — так и задумано.
+        """
         world = self.world
         if not sex:
             sex = "f" if rng.chance(0.45) else "m"
 
         low, high = race.lifespan
         lifespan = rng.randint(low, high)
-        # Возраст в момент деяния: зрелость, но ещё не закат.
-        age = int(lifespan * rng.uniform(0.22, 0.48))
-        birth_year = max(1, year - age)
-        death_year = birth_year + lifespan
-        if death_year <= year:
-            death_year = year + rng.randint(1, max(2, lifespan // 8))
+        if not birth_year:
+            # Возраст в момент деяния: зрелость, но ещё не закат.
+            age = int(lifespan * rng.uniform(0.22, 0.48))
+            birth_year = max(1, year - age)
+        if not death_year:
+            death_year = birth_year + lifespan
+            if death_year <= year:
+                death_year = year + rng.randint(1, max(2, lifespan // 8))
+        death_year = max(death_year, birth_year + 1)
 
-        given = self.forge.person(rng, race, sex)
+        given = given_name or self.forge.person(rng, race, sex)
         epithet = self.forge.epithet(rng, race, sex) if rng.chance(epithet_chance) else ""
 
         titles = [title] if title else []
@@ -126,7 +135,17 @@ class GenContext:
             death=Date.random_in_year(rng, death_year),
             origin_region=region_id, titles=titles, roles=[role],
             home_id=home_id,
+            surname=house.name if house is not None else "",
+            house_id=house.id if house is not None else "",
+            noble=house is not None,
+            father_id=father.id if father is not None else "",
+            mother_id=mother.id if mother is not None else "",
+            birth_order=birth_order,
         )
+        if father is not None:
+            father.children.append(figure.id)
+        if mother is not None:
+            mother.children.append(figure.id)
         return figure
 
     def title_for(self, race, kind: str, sex: str) -> str:

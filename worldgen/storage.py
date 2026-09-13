@@ -11,15 +11,45 @@ import dataclasses
 import io
 import json
 
-from .models import (Camp, EraSpan, Event, Figure, Polity, Region, Settlement,
-                     Tribe)
+from .models import (ACTIVE, Camp, EraSpan, Event, Figure, House, Polity,
+                     Region, Reign, Settlement, Tribe)
 from .timeline import Date
 from .world import World
 
 FORMAT_NAME = "fantasy-chronicle-world"
 FORMAT_VERSION = 1
 
-_DATE_FIELDS = {"birth", "death", "founded", "ended", "date"}
+_DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end"}
+
+
+def _defaults(cls) -> dict:
+    """Значения по умолчанию для полей класса."""
+    values = {}
+    for field in dataclasses.fields(cls):
+        if field.default is not dataclasses.MISSING:
+            values[field.name] = field.default
+        elif field.default_factory is not dataclasses.MISSING:   # type: ignore
+            values[field.name] = field.default_factory()          # type: ignore
+    return values
+
+
+def _compact(cls, data: dict) -> dict:
+    """Выбрасывает поля со значениями по умолчанию.
+
+    Мир на десять тысяч лет — это десятки тысяч личностей, у большинства
+    из которых половина полей пуста. Без такой чистки файл раздувается
+    вдвое без всякой пользы.
+    """
+    defaults = _defaults(cls)
+    known = {f.name for f in dataclasses.fields(cls)}
+    result = {}
+    for key, value in data.items():
+        if key not in known:
+            continue        # производные поля («name», «full_name») не храним
+        if key in defaults and value == defaults[key]:
+            continue
+        result[key] = value
+    return result
 
 
 def _clean(cls, data: dict) -> dict:
@@ -44,13 +74,16 @@ def world_to_dict(world: World) -> dict:
         "total_years": world.total_years,
         "settings": world.settings,
         "eras": [era.to_dict() for era in world.eras],
-        "regions": [item.to_dict() for item in world.regions.values()],
-        "figures": [item.to_dict() for item in world.figures.values()],
-        "tribes": [item.to_dict() for item in world.tribes.values()],
-        "settlements": [item.to_dict() for item in world.settlements.values()],
-        "polities": [item.to_dict() for item in world.polities.values()],
-        "camps": [item.to_dict() for item in world.camps.values()],
-        "events": [item.to_dict() for item in world.events],
+        "regions": [_compact(Region, item.to_dict()) for item in world.regions.values()],
+        "figures": [_compact(Figure, item.to_dict()) for item in world.figures.values()],
+        "tribes": [_compact(Tribe, item.to_dict()) for item in world.tribes.values()],
+        "settlements": [_compact(Settlement, item.to_dict())
+                        for item in world.settlements.values()],
+        "polities": [_compact(Polity, item.to_dict()) for item in world.polities.values()],
+        "camps": [_compact(Camp, item.to_dict()) for item in world.camps.values()],
+        "houses": [_compact(House, item.to_dict()) for item in world.houses.values()],
+        "reigns": [_compact(Reign, item.to_dict()) for item in world.reigns.values()],
+        "events": [_compact(Event, item.to_dict()) for item in world.events],
         "race_awakening": world.race_awakening,
         "counters": world._counters,
         "notes": world.notes,
@@ -78,23 +111,31 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("tribes", ()):
         tribe = Tribe(**_clean(Tribe, item))
         world.tribes[tribe.id] = tribe
-        if tribe.status == "активно":
+        if tribe.status == ACTIVE:
             world.active_tribes.append(tribe.id)
     for item in data.get("settlements", ()):
         settlement = Settlement(**_clean(Settlement, item))
         world.settlements[settlement.id] = settlement
-        if settlement.status == "активно":
+        if settlement.status == ACTIVE:
             world.active_settlements.append(settlement.id)
     for item in data.get("polities", ()):
         polity = Polity(**_clean(Polity, item))
         world.polities[polity.id] = polity
-        if polity.status == "активно":
+        if polity.status == ACTIVE:
             world.active_polities.append(polity.id)
     for item in data.get("camps", ()):
         camp = Camp(**_clean(Camp, item))
         world.camps[camp.id] = camp
-        if camp.status == "активно":
+        if camp.status == ACTIVE:
             world.active_camps.append(camp.id)
+    for item in data.get("houses", ()):
+        house = House(**_clean(House, item))
+        world.houses[house.id] = house
+        if house.status == ACTIVE:
+            world.active_houses.append(house.id)
+    for item in data.get("reigns", ()):
+        reign = Reign(**_clean(Reign, item))
+        world.reigns[reign.id] = reign
     for item in data.get("events", ()):
         world.events.append(Event(**_clean(Event, item)))
 
@@ -106,7 +147,8 @@ def dict_to_world(data: dict) -> World:
 
 def save_world(world: World, path: str) -> None:
     with io.open(path, "w", encoding="utf-8") as handle:
-        json.dump(world_to_dict(world), handle, ensure_ascii=False, indent=1)
+        json.dump(world_to_dict(world), handle, ensure_ascii=False,
+                  separators=(",", ":"))
 
 
 def load_world(path: str) -> World:

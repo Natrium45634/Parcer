@@ -8,7 +8,9 @@
 1. детерминированность — один сид даёт побайтово одну и ту же летопись;
 2. сохранение и загрузка мира не теряют ни одной записи;
 3. правила рас соблюдаются: зверолюды живут племенами, злые расы не
-   строят государств и городов.
+   строят государств и городов;
+4. устройство знати: фамилии только у знатных, роды только у тех рас,
+   у которых знать бывает, правления идут по порядку.
 """
 
 from __future__ import annotations
@@ -30,6 +32,60 @@ SEEDS = ("Ясень-7", "Первый мир", "проверка", "1234")
 
 def digest(world) -> str:
     return hashlib.sha256(chronicle.full_text(world).encode("utf-8")).hexdigest()
+
+
+def check_nobility(world, seed: str) -> list:
+    """Проверяет устройство знати и престолонаследия."""
+    problems = []
+
+    for figure in world.figures.values():
+        if figure.surname and not figure.house_id:
+            problems.append("сид «%s»: у %s есть фамилия без рода"
+                            % (seed, figure.name))
+            break
+    for figure in world.figures.values():
+        if figure.house_id and not figure.surname:
+            problems.append("сид «%s»: %s состоит в роду, но без фамилии"
+                            % (seed, figure.given_name))
+            break
+    for figure in world.figures.values():
+        if figure.surname and not figure.noble:
+            problems.append("сид «%s»: %s с фамилией, но не знатен"
+                            % (seed, figure.name))
+            break
+
+    for house in world.houses.values():
+        race = get_race(house.race_id)
+        if not race.has_nobility:
+            problems.append("сид «%s»: у расы «%s» завёлся род %s"
+                            % (seed, race.name, house.name))
+            break
+
+    for polity in world.polities.values():
+        previous = None
+        for index, reign_id in enumerate(polity.reign_ids, start=1):
+            reign = world.reigns.get(reign_id)
+            if reign is None:
+                problems.append("сид «%s»: у страны %s потеряно правление"
+                                % (seed, polity.name))
+                break
+            if reign.ruler_id not in world.figures:
+                problems.append("сид «%s»: правление без правителя в %s"
+                                % (seed, polity.name))
+                break
+            if reign.number != index:
+                problems.append("сид «%s»: сбит счёт правлений в %s"
+                                % (seed, polity.name))
+                break
+            if previous is not None and reign.start.ordinal < previous.start.ordinal:
+                problems.append("сид «%s»: правления идут не по порядку в %s"
+                                % (seed, polity.name))
+                break
+            previous = reign
+        if problems:
+            break
+
+    return problems
 
 
 def main() -> int:
@@ -77,8 +133,12 @@ def main() -> int:
                for i in range(len(events) - 1)):
             failures.append("сид «%s»: события идут не по порядку" % seed)
 
-        print("  сид «%-12s»  событий %5d  городов %4d  стран %3d  (%.1f c на два мира)"
-              % (seed, len(events), len(first.settlements), len(first.polities), spent))
+        failures.extend(check_nobility(first, seed))
+
+        print("  сид «%-12s»  событий %5d  городов %4d  стран %3d  родов %4d  "
+              "правлений %4d  (%.1f c на два мира)"
+              % (seed, len(events), len(first.settlements), len(first.polities),
+                 len(first.houses), len(first.reigns), spent))
 
     if failures:
         print("\nОШИБКИ:")

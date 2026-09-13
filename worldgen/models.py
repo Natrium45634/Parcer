@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 
+from .morph import roman
 from .timeline import Date
 
 # --- состояния ---------------------------------------------------------
@@ -18,6 +19,12 @@ SETTLED = "осело"
 GONE = "исчезло"
 RUINED = "разрушено"
 FALLEN = "пало"
+EXTINCT = "пресёкся"
+
+# Ранги знатных родов.
+ROYAL = "правящий"
+GREAT = "великий"
+MINOR = "малый"
 
 
 def _date_out(value):
@@ -42,9 +49,43 @@ class Figure:
     home_id: str = ""                             # где жил(а): племя/город
     notes: list = field(default_factory=list)
 
+    # --- знатность и родство (блок 2) ---
+    surname: str = ""            # родовое имя; у простолюдинов его нет
+    house_id: str = ""
+    father_id: str = ""
+    mother_id: str = ""
+    spouse_id: str = ""
+    children: list = field(default_factory=list)
+    birth_order: int = 0         # порядок рождения среди детей
+    regnal_number: int = 0       # «Ронвальд II»
+    noble: bool = False
+    death_cause: str = ""
+
     @property
     def name(self) -> str:
-        return ("%s %s" % (self.given_name, self.epithet)).strip()
+        parts = [self.given_name]
+        if self.regnal_number >= 2:
+            parts.append(roman(self.regnal_number))
+        if self.surname:
+            parts.append(self.surname)
+        if self.epithet:
+            parts.append(self.epithet)
+        return " ".join(part for part in parts if part)
+
+    @property
+    def plain_name(self) -> str:
+        """Имя без прозвища — для таблиц и перечислений."""
+        parts = [self.given_name]
+        if self.regnal_number >= 2:
+            parts.append(roman(self.regnal_number))
+        if self.surname:
+            parts.append(self.surname)
+        return " ".join(part for part in parts if part)
+
+    def age_at(self, year: int) -> int:
+        if self.birth is None:
+            return 0
+        return max(0, year - self.birth.year)
 
     def alive_at(self, year: int) -> bool:
         """Жив(а) ли персонаж в указанном году."""
@@ -161,6 +202,12 @@ class Polity:
     ended: Date = None
     end_reason: str = ""
     predecessor_id: str = ""
+    # --- династия (блок 2) ---
+    house_id: str = ""             # правящий род
+    succession: str = ""           # закон наследования
+    reign_ids: list = field(default_factory=list)
+    house_ids: list = field(default_factory=list)   # знатные роды страны
+    interregnum: bool = False      # престол пуст
 
     @property
     def full_name(self) -> str:
@@ -199,6 +246,66 @@ class Camp:
         data["founded"] = _date_out(self.founded)
         data["ended"] = _date_out(self.ended)
         data["full_name"] = self.full_name
+        return data
+
+
+@dataclass
+class House:
+    """Знатный род: королевская династия, великий дом или малый род."""
+
+    id: str
+    name: str                  # родовое имя, оно же фамилия членов
+    word: str                  # «Дом», «Клан», «Род», «Стая», «Гнездо»
+    race_id: str
+    founded: Date
+    founder_id: str
+    seat_id: str = ""          # родовое гнездо — поселение
+    polity_id: str = ""        # страна, где род правит (если правит)
+    rank: str = MINOR
+    head_id: str = ""
+    members: list = field(default_factory=list)   # все, кто когда-либо был в роду
+    living: list = field(default_factory=list)    # ещё не умершие
+    alive_count: int = 0
+    prestige: float = 1.0
+    parent_id: str = ""        # от какого дома отделилась младшая ветвь
+    status: str = ACTIVE
+    ended: Date = None
+    end_reason: str = ""
+    thrones: int = 0           # сколько раз род всходил на престол
+
+    @property
+    def full_name(self) -> str:
+        return "%s %s" % (self.word, self.name)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["founded"] = _date_out(self.founded)
+        data["ended"] = _date_out(self.ended)
+        data["full_name"] = self.full_name
+        return data
+
+
+@dataclass
+class Reign:
+    """Одно правление: кто, где, когда и чем кончилось."""
+
+    id: str
+    polity_id: str
+    ruler_id: str
+    house_id: str
+    start: Date
+    number: int = 1            # какое по счёту правление в этой стране
+    end: Date = None
+    end_reason: str = ""       # «смерть», «переворот», «низложение», …
+    regent_id: str = ""        # если правитель был малолетним
+    regency_until: int = 0     # год совершеннолетия
+    legitimacy: str = "законное"   # «законное», «узурпация», «избрание»
+    title: str = ""
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["start"] = _date_out(self.start)
+        data["end"] = _date_out(self.end)
         return data
 
 

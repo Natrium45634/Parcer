@@ -52,6 +52,36 @@ CATEGORY_NAMES = {
     EVIL: "Злые расы",
 }
 
+# --- законы наследования -----------------------------------------------
+#
+# Порядок престолонаследия — главное культурное различие между народами.
+# Человеческий трон переходит старшему сыну, дворфийский — старшему в клане,
+# у тёмных эльфов правят женщины, у волколюдов власть берут с боем.
+
+MALE_PRIMOGENITURE = "male_primogeniture"      # старший сын, потом дочери
+ABSOLUTE_PRIMOGENITURE = "absolute_primogeniture"  # старший ребёнок любого пола
+SENIORITY = "seniority"                        # старший в роду (брат раньше сына)
+MATRILINEAL = "matrilineal"                    # старшая дочь, женская линия
+COUNCIL = "council"                            # совет выбирает достойнейшего в доме
+ELECTIVE = "elective"                          # знать выбирает из всех домов
+STRENGTH = "strength"                          # власть берёт сильнейший
+
+SUCCESSION_NAMES = {
+    MALE_PRIMOGENITURE: "престол наследует старший сын",
+    ABSOLUTE_PRIMOGENITURE: "престол наследует старший из детей",
+    SENIORITY: "престол наследует старший в роду",
+    MATRILINEAL: "престол наследует старшая дочь",
+    COUNCIL: "правителя выбирает совет дома",
+    ELECTIVE: "правителя выбирает знать из всех домов",
+    STRENGTH: "власть берёт сильнейший",
+}
+
+# Формы правления, при которых наследование всегда выборное.
+ELECTIVE_FORMS = (
+    "Вольный Союз", "Клановый Союз", "Союз Стай", "Союз Гнёзд",
+    "Песчаный Союз", "Горный Союз", "Ковенант",
+)
+
 
 @dataclass(frozen=True)
 class Race:
@@ -82,12 +112,36 @@ class Race:
     settles: bool = True           # может ли строить постоянные поселения
     builds_states: bool = True     # может ли основывать страны
 
+    # --- знать и наследование (блок 2) ---
+    succession: str = MALE_PRIMOGENITURE
+    adulthood: int = 16            # возраст совершеннолетия
+    fertility: tuple = (1, 5)      # сколько детей бывает в семье
+    coup_propensity: float = 1.0   # склонность к переворотам и мятежам
+    has_nobility: bool = True      # есть ли знатные роды
+    house_words: tuple = ("Дом",)  # «Дом», «Клан», «Род», «Стая», «Гнездо»
+    noble_titles: tuple = ()       # титулы знати от старшего к младшему
+    heir_titles: tuple = ()        # титул наследника
+    regent_titles: tuple = ()      # титул регента
+
     @property
     def is_evil(self) -> bool:
         return self.category == EVIL
 
     def noun(self, sex: str) -> str:
         return self.noun_f if sex == "f" else self.noun_m
+
+    def noble_title(self, rank: int, sex: str) -> str:
+        """Титул знатного лица: 0 — глава великого дома, дальше — помельче."""
+        if not self.noble_titles:
+            return "лорд" if sex != "f" else "леди"
+        pair = self.noble_titles[min(rank, len(self.noble_titles) - 1)]
+        return pair[1] if (sex == "f" and len(pair) > 1) else pair[0]
+
+    def succession_for(self, form: str) -> str:
+        """Закон наследования с поправкой на форму правления."""
+        if form in ELECTIVE_FORMS:
+            return ELECTIVE
+        return self.succession
 
 
 def _t(*names) -> tuple:
@@ -111,6 +165,12 @@ RACES = (
         chief_titles=_t("вождь", "вождица"),
         founder_titles=_t("основатель", "основательница"),
         ruler_titles=_t("король", "королева"),
+        succession=MALE_PRIMOGENITURE, adulthood=16, fertility=(1, 6),
+        coup_propensity=1.0, house_words=_t("Дом", "Род"),
+        noble_titles=(("герцог", "герцогиня"), ("граф", "графиня"),
+                      ("барон", "баронесса"), ("лорд", "леди")),
+        heir_titles=("наследный принц", "наследная принцесса"),
+        regent_titles=("регент", "регентша"),
     ),
     Race(
         id="dwarf", name="Дворфы", gen_plural="дворфов", adj="Дворфийский",
@@ -125,6 +185,12 @@ RACES = (
         chief_titles=_t("старейшина", "старейшина"),
         founder_titles=_t("тан", "тана"),
         ruler_titles=_t("король-под-горой", "королева-под-горой"),
+        succession=SENIORITY, adulthood=40, fertility=(1, 4),
+        coup_propensity=0.45, house_words=_t("Клан"),
+        noble_titles=(("тан", "тана"), ("старейшина клана", "старейшина клана"),
+                      ("мастер", "мастерица")),
+        heir_titles=("наследник клана", "наследница клана"),
+        regent_titles=("наместник", "наместница"),
     ),
     Race(
         id="elf", name="Эльфы", gen_plural="эльфов", adj="Эльфийский",
@@ -139,6 +205,11 @@ RACES = (
         chief_titles=_t("хранитель", "хранительница"),
         founder_titles=_t("зодчий", "зодчая"),
         ruler_titles=_t("владыка", "владычица"),
+        succession=COUNCIL, adulthood=90, fertility=(1, 4),
+        coup_propensity=0.35, house_words=_t("Дом", "Сень"),
+        noble_titles=(("лорд", "леди"), ("хранитель", "хранительница")),
+        heir_titles=("преемник", "преемница"),
+        regent_titles=("наместник", "наместница"),
     ),
     Race(
         id="high_elf", name="Высшие эльфы", gen_plural="высших эльфов",
@@ -153,6 +224,11 @@ RACES = (
         chief_titles=_t("старший", "старшая"),
         founder_titles=_t("архитектор", "архитекторша"),
         ruler_titles=_t("архонт", "архонтесса"),
+        succession=ABSOLUTE_PRIMOGENITURE, adulthood=110, fertility=(1, 3),
+        coup_propensity=0.28, house_words=_t("Высокий Дом", "Дом"),
+        noble_titles=(("высокий лорд", "высокая леди"), ("лорд", "леди")),
+        heir_titles=("первородный", "первородная"),
+        regent_titles=("наместник", "наместница"),
     ),
     Race(
         id="dark_elf", name="Тёмные эльфы", gen_plural="тёмных эльфов",
@@ -167,6 +243,11 @@ RACES = (
         chief_titles=_t("матрон", "матрона"),
         founder_titles=_t("зодчий тьмы", "зодчая тьмы"),
         ruler_titles=_t("владыка", "владычица"),
+        succession=MATRILINEAL, adulthood=80, fertility=(1, 4),
+        coup_propensity=1.75, house_words=_t("Дом"),
+        noble_titles=(("матрон", "матрона"), ("наставник", "наставница")),
+        heir_titles=("наследник дома", "наследница дома"),
+        regent_titles=("наместник", "наместница"),
     ),
     Race(
         id="catfolk", name="Кошколюды", gen_plural="кошколюдов", adj="Кошачий",
@@ -181,6 +262,11 @@ RACES = (
         chief_titles=_t("вожак", "вожачиха"),
         founder_titles=_t("основатель", "основательница"),
         ruler_titles=_t("хан", "ханша"),
+        succession=ELECTIVE, adulthood=15, fertility=(2, 6),
+        coup_propensity=1.15, house_words=_t("Род", "Прайд"),
+        noble_titles=(("бек", "бека"), ("старший каравана", "старшая каравана")),
+        heir_titles=("наследник", "наследница"),
+        regent_titles=("опекун", "опекунша"),
     ),
     Race(
         id="wolfkin", name="Волколюды", gen_plural="волколюдов", adj="Волчий",
@@ -195,6 +281,11 @@ RACES = (
         chief_titles=_t("вожак стаи", "вожачиха стаи"),
         founder_titles=_t("основатель", "основательница"),
         ruler_titles=_t("вождь-король", "вождь-королева"),
+        succession=STRENGTH, adulthood=15, fertility=(2, 6),
+        coup_propensity=1.45, house_words=_t("Стая", "Род"),
+        noble_titles=(("ярл", "ярла"), ("вожак", "вожачиха")),
+        heir_titles=("наследник", "наследница"),
+        regent_titles=("опекун", "опекунша"),
     ),
     Race(
         id="bearkin", name="Медведолюды", gen_plural="медведолюдов", adj="Медвежий",
@@ -209,6 +300,11 @@ RACES = (
         chief_titles=_t("старший", "старшая"),
         founder_titles=_t("основатель", "основательница"),
         ruler_titles=_t("князь", "княгиня"),
+        succession=SENIORITY, adulthood=18, fertility=(1, 4),
+        coup_propensity=0.7, house_words=_t("Род"),
+        noble_titles=(("князь", "княгиня"), ("старший рода", "старшая рода")),
+        heir_titles=("наследник", "наследница"),
+        regent_titles=("опекун", "опекунша"),
     ),
     Race(
         id="foxkin", name="Лисолюды", gen_plural="лисолюдов", adj="Лисий",
@@ -223,6 +319,11 @@ RACES = (
         chief_titles=_t("старший", "старшая"),
         founder_titles=_t("основатель", "основательница"),
         ruler_titles=_t("князь", "княгиня"),
+        succession=ELECTIVE, adulthood=15, fertility=(2, 6),
+        coup_propensity=1.05, house_words=_t("Дом"),
+        noble_titles=(("господин", "госпожа"), ("старший дома", "старшая дома")),
+        heir_titles=("наследник", "наследница"),
+        regent_titles=("опекун", "опекунша"),
     ),
     Race(
         id="birdkin", name="Птицелюды", gen_plural="птицелюдов", adj="Птичий",
@@ -237,6 +338,11 @@ RACES = (
         chief_titles=_t("старший", "старшая"),
         founder_titles=_t("основатель", "основательница"),
         ruler_titles=_t("владыка небес", "владычица небес"),
+        succession=ABSOLUTE_PRIMOGENITURE, adulthood=15, fertility=(1, 4),
+        coup_propensity=0.8, house_words=_t("Гнездо", "Клин"),
+        noble_titles=(("старший гнезда", "старшая гнезда"), ("дозорный", "дозорная")),
+        heir_titles=("первенец", "первенец"),
+        regent_titles=("опекун", "опекунша"),
     ),
 
     # ------------------------------------------------------------------
@@ -252,6 +358,8 @@ RACES = (
         tribe_words=_t("Выводок", "Племя", "Кладка"),
         chief_titles=_t("вождь", "вождица"),
         settles=False, builds_states=False,
+        succession=STRENGTH, adulthood=14, fertility=(2, 7),
+        coup_propensity=1.2, has_nobility=False,
     ),
     Race(
         id="serpentfolk", name="Змеелюды", gen_plural="змеелюдов", adj="Змеиный",
@@ -263,6 +371,8 @@ RACES = (
         tribe_words=_t("Гнездо", "Племя", "Кольцо"),
         chief_titles=_t("старший", "старшая"),
         settles=False, builds_states=False,
+        succession=COUNCIL, adulthood=30, fertility=(1, 4),
+        coup_propensity=0.9, has_nobility=False,
     ),
     Race(
         id="toadfolk", name="Жаболюды", gen_plural="жаболюдов", adj="Жаболюдский",
@@ -274,6 +384,8 @@ RACES = (
         tribe_words=_t("Племя", "Трясина", "Хор"),
         chief_titles=_t("вождь", "вождица"),
         settles=False, builds_states=False,
+        succession=STRENGTH, adulthood=10, fertility=(3, 8),
+        coup_propensity=1.1, has_nobility=False,
     ),
     Race(
         id="turtlefolk", name="Черепахолюды", gen_plural="черепахолюдов",
@@ -285,6 +397,8 @@ RACES = (
         tribe_words=_t("Племя", "Отмель", "Круг"),
         chief_titles=_t("старейший", "старейшая"),
         settles=False, builds_states=False,
+        succession=SENIORITY, adulthood=40, fertility=(1, 3),
+        coup_propensity=0.4, has_nobility=False,
     ),
     Race(
         id="crabfolk", name="Панцирный народ", gen_plural="панцирников",
@@ -296,6 +410,8 @@ RACES = (
         tribe_words=_t("Стая", "Племя", "Клешня"),
         chief_titles=_t("вождь", "вождица"),
         settles=False, builds_states=False,
+        succession=STRENGTH, adulthood=10, fertility=(2, 7),
+        coup_propensity=1.0, has_nobility=False,
     ),
 
     # ------------------------------------------------------------------
@@ -312,6 +428,8 @@ RACES = (
         camp_words=_t("Лагерь", "Стан", "Костровище", "Орда"),
         chief_titles=_t("вожак", "вожачиха"),
         settles=False, builds_states=False,
+        succession=STRENGTH, adulthood=13, fertility=(2, 7),
+        coup_propensity=1.9, has_nobility=False,
     ),
     Race(
         id="goblin", name="Гоблины", gen_plural="гоблинов", adj="Гоблинский",
@@ -324,6 +442,8 @@ RACES = (
         camp_words=_t("Логово", "Нора", "Яма", "Гнездовище"),
         chief_titles=_t("главарь", "главариха"),
         settles=False, builds_states=False,
+        succession=STRENGTH, adulthood=10, fertility=(3, 9),
+        coup_propensity=2.1, has_nobility=False,
     ),
     Race(
         id="troll", name="Тролли", gen_plural="троллей", adj="Троллий",
@@ -336,6 +456,8 @@ RACES = (
         camp_words=_t("Логово", "Пещера", "Мостовище"),
         chief_titles=_t("старший", "старшая"),
         settles=False, builds_states=False,
+        succession=STRENGTH, adulthood=30, fertility=(1, 3),
+        coup_propensity=1.3, has_nobility=False,
     ),
     Race(
         id="ogre", name="Огры", gen_plural="огров", adj="Огрский",
@@ -348,6 +470,8 @@ RACES = (
         camp_words=_t("Стан", "Логово", "Костровище"),
         chief_titles=_t("вожак", "вожачиха"),
         settles=False, builds_states=False,
+        succession=STRENGTH, adulthood=16, fertility=(1, 4),
+        coup_propensity=1.6, has_nobility=False,
     ),
     Race(
         id="kobold", name="Кобольды", gen_plural="кобольдов", adj="Кобольдский",
@@ -360,6 +484,8 @@ RACES = (
         camp_words=_t("Нора", "Штольня", "Логово", "Яма"),
         chief_titles=_t("главарь", "главариха"),
         settles=False, builds_states=False,
+        succession=STRENGTH, adulthood=8, fertility=(3, 9),
+        coup_propensity=2.0, has_nobility=False,
     ),
     Race(
         id="gnoll", name="Гноллы", gen_plural="гноллов", adj="Гнолльский",
@@ -372,6 +498,8 @@ RACES = (
         camp_words=_t("Стан", "Логово", "Костровище", "Свалка"),
         chief_titles=_t("вожак", "вожачиха"),
         settles=False, builds_states=False,
+        succession=STRENGTH, adulthood=12, fertility=(2, 7),
+        coup_propensity=1.8, has_nobility=False,
     ),
 )
 

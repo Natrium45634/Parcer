@@ -11,8 +11,8 @@ from __future__ import annotations
 import heapq
 
 from . import races as races_mod
-from .models import (ACTIVE, FALLEN, GONE, RUINED, Camp, Event, Figure,
-                     Polity, Region, Settlement, Tribe)
+from .models import (ACTIVE, EXTINCT, FALLEN, GONE, RUINED, Camp, Event,
+                     Figure, House, Polity, Region, Reign, Settlement, Tribe)
 from .timeline import Date
 
 
@@ -32,6 +32,8 @@ class World:
         self.settlements = {}          # id -> Settlement
         self.polities = {}             # id -> Polity
         self.camps = {}                # id -> Camp
+        self.houses = {}               # id -> House  (знатные роды)
+        self.reigns = {}               # id -> Reign  (правления)
         self.events = []               # список Event в хронологическом порядке
 
         # Быстрые списки активных сущностей (поддерживаются в актуальном виде).
@@ -39,6 +41,7 @@ class World:
         self.active_settlements = []
         self.active_polities = []
         self.active_camps = []
+        self.active_houses = []
 
         # Служебное
         self._counters = {}
@@ -68,11 +71,42 @@ class World:
     def add_figure(self, **kwargs) -> Figure:
         figure = Figure(id=self.next_id("F"), **kwargs)
         self.figures[figure.id] = figure
-        if figure.death is not None:
-            self._death_order += 1
-            heapq.heappush(self._death_queue,
-                           (figure.death.ordinal, self._death_order, figure.id))
+        self._queue_death(figure)
+        if figure.house_id:
+            house = self.houses.get(figure.house_id)
+            if house is not None:
+                house.members.append(figure.id)
+                house.living.append(figure.id)
+                house.alive_count = len(house.living)
         return figure
+
+    def _queue_death(self, figure) -> None:
+        if figure.death is None:
+            return
+        self._death_order += 1
+        heapq.heappush(self._death_queue,
+                       (figure.death.ordinal, self._death_order, figure.id))
+
+    def schedule_death(self, figure, date: Date, cause: str = "") -> None:
+        """Переносит дату смерти (убийство, казнь, гибель) и обновляет очередь."""
+        figure.death = date
+        if cause:
+            figure.death_cause = cause
+        self._queue_death(figure)
+
+    def add_house(self, **kwargs) -> House:
+        house = House(id=self.next_id("H"), **kwargs)
+        self.houses[house.id] = house
+        self.active_houses.append(house.id)
+        return house
+
+    def add_reign(self, **kwargs) -> Reign:
+        reign = Reign(id=self.next_id("G"), **kwargs)
+        self.reigns[reign.id] = reign
+        polity = self.polities.get(reign.polity_id)
+        if polity is not None:
+            polity.reign_ids.append(reign.id)
+        return reign
 
     def add_tribe(self, **kwargs) -> Tribe:
         tribe = Tribe(id=self.next_id("T"), **kwargs)
@@ -119,12 +153,18 @@ class World:
     # ------------------------------------------------------------------
 
     def due_deaths(self, year: int) -> list:
-        """Личности, чей срок вышел к концу указанного года."""
+        """Личности, чей срок вышел к концу указанного года.
+
+        Запись могла устареть: если персонажа убили раньше срока, в очереди
+        осталась его прежняя дата. Такие записи отбрасываются.
+        """
         limit = year * 360
         result = []
         while self._death_queue and self._death_queue[0][0] < limit:
-            _, _, figure_id = heapq.heappop(self._death_queue)
-            result.append(self.figures[figure_id])
+            ordinal, _, figure_id = heapq.heappop(self._death_queue)
+            figure = self.figures[figure_id]
+            if figure.death is not None and figure.death.ordinal == ordinal:
+                result.append(figure)
         return result
 
     # ------------------------------------------------------------------
@@ -156,6 +196,13 @@ class World:
     def end_polity(self, polity, date: Date, reason: str, status: str = FALLEN) -> None:
         if polity.status != ACTIVE:
             return
+        reign = self.current_reign(polity)
+        if reign is not None and reign.end is None:
+            reign.end = date
+            reign.end_reason = "гибель страны"
+        house = self.houses.get(polity.house_id)
+        if house is not None and house.rank == "правящий":
+            house.rank = "великий"
         polity.status = status
         polity.ended = date
         polity.end_reason = reason
@@ -176,9 +223,47 @@ class World:
         if camp.id in self.active_camps:
             self.active_camps.remove(camp.id)
 
+    def end_house(self, house, date: Date, reason: str,
+                  status: str = EXTINCT) -> None:
+        if house.status != ACTIVE:
+            return
+        house.status = status
+        house.ended = date
+        house.end_reason = reason
+        if house.id in self.active_houses:
+            self.active_houses.remove(house.id)
+        polity = self.polities.get(house.polity_id)
+        if polity is not None and house.id in polity.house_ids:
+            polity.house_ids.remove(house.id)
+
     # ------------------------------------------------------------------
     # Выборки
     # ------------------------------------------------------------------
+
+    def house_members(self, house, alive_in_year: int = 0) -> list:
+        """Члены рода; при указании года — только живые в этом году.
+
+        Для живых перебирается короткий список house.living, а не вся
+        история рода: за десять тысяч лет она вырастает до сотен имён.
+        """
+        source = house.living if alive_in_year else house.members
+        people = [self.figures[fid] for fid in source if fid in self.figures]
+        if alive_in_year:
+            people = [p for p in people if p.alive_at(alive_in_year)]
+        return people
+
+    def current_reign(self, polity):
+        if not polity.reign_ids:
+            return None
+        return self.reigns.get(polity.reign_ids[-1])
+
+    def houses_of_polity(self, polity) -> list:
+        return [self.houses[hid] for hid in polity.house_ids
+                if hid in self.houses and self.houses[hid].status == ACTIVE]
+
+    def houses_of_race(self, race_id: str) -> list:
+        return [self.houses[hid] for hid in self.active_houses
+                if self.houses[hid].race_id == race_id]
 
     def era_at(self, year: int):
         for span in self.eras:
@@ -217,6 +302,7 @@ class World:
         table = {
             "R": self.regions, "F": self.figures, "T": self.tribes,
             "C": self.settlements, "P": self.polities, "K": self.camps,
+            "H": self.houses, "G": self.reigns,
         }.get(prefix)
         return table.get(entity_id) if table else None
 
@@ -250,6 +336,9 @@ class World:
             "Стран (живых)": len(self.active_polities),
             "Лагерей (всего)": len(self.camps),
             "Лагерей (живых)": len(self.active_camps),
+            "Знатных родов (всего)": len(self.houses),
+            "Знатных родов (живых)": len(self.active_houses),
+            "Правлений": len(self.reigns),
         }
 
     def race_summary(self) -> list:

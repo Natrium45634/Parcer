@@ -212,6 +212,11 @@ class ChronicleApp(tk.Tk):
     def _build_tabs(self) -> None:
         self.tabs = ttk.Notebook(self)
         self.tabs.pack(fill="both", expand=True, padx=8, pady=8)
+        # Таблицы заполняются лениво: на десять тысяч лет истории их строки
+        # считаются десятками тысяч, и заполнять всё сразу — значит заставить
+        # человека ждать впустую.
+        self._fillers = {}
+        self._filled = set()
 
         self._build_chronicle_tab()
         self.eras_text = self._add_text_tab("Эпохи")
@@ -219,23 +224,38 @@ class ChronicleApp(tk.Tk):
             "Страны",
             ("Название", "Форма", "Раса", "Основана", "Основатель", "Столица",
              "Городов", "Состояние"),
-            (210, 170, 120, 90, 210, 170, 80, 110), self._on_polity_open)
+            (210, 170, 120, 90, 210, 170, 80, 110), self._on_polity_open,
+            filler=lambda: self._fill_polities())
         self.city_tree = self._add_tree_tab(
             "Города",
             ("Название", "Тип", "Раса", "Основан", "Основатель", "Страна",
              "Население", "Состояние"),
-            (200, 110, 120, 90, 210, 190, 90, 110), self._on_city_open)
+            (200, 110, 120, 90, 210, 190, 90, 110), self._on_city_open,
+            filler=lambda: self._fill_cities())
         self.group_tree = self._add_tree_tab(
             "Племена и лагеря",
             ("Название", "Тип", "Раса", "Основано", "Основатель", "Земля",
              "Население", "Состояние"),
-            (200, 110, 120, 90, 200, 160, 90, 120), self._on_group_open)
+            (200, 110, 120, 90, 200, 160, 90, 120), self._on_group_open,
+            filler=lambda: self._fill_groups())
+        self.house_tree = self._add_tree_tab(
+            "Знатные рода",
+            ("Род", "Раса", "Основан", "Основатель", "Ранг", "Страна",
+             "Гнездо", "Живых", "Престолов", "Состояние"),
+            (200, 120, 80, 190, 90, 180, 150, 60, 80, 120), self._on_house_open,
+            filler=lambda: self._fill_houses())
+        self.dynasty_text = self._add_text_tab(
+            "Правители",
+            filler=lambda: self._set_text(self.dynasty_text,
+                                          chronicle.render_dynasties(self.world)))
         self.figure_tree = self._add_tree_tab(
             "Личности",
-            ("Имя", "Раса", "Пол", "Годы жизни", "Титул", "Деяния", "Событий"),
-            (220, 130, 60, 110, 160, 230, 70), self._on_figure_open)
+            ("Имя", "Раса", "Пол", "Годы жизни", "Род", "Титул", "Роли", "Событий"),
+            (230, 120, 60, 110, 150, 150, 200, 70), self._on_figure_open,
+            toolbar=self._figures_toolbar, filler=lambda: self._fill_figures())
         self.regions_text = self._add_text_tab("Земли")
         self.stats_text = self._add_text_tab("Итоги")
+        self.tabs.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
     def _build_chronicle_tab(self) -> None:
         frame = ttk.Frame(self.tabs)
@@ -282,14 +302,29 @@ class ChronicleApp(tk.Tk):
         widget.config(state="disabled")
         return widget
 
-    def _add_text_tab(self, title: str) -> tk.Text:
+    def _add_text_tab(self, title: str, filler=None) -> tk.Text:
         frame = ttk.Frame(self.tabs)
         self.tabs.add(frame, text=title)
+        if filler is not None:
+            self._fillers[str(frame)] = filler
         return self._make_text(frame)
 
-    def _add_tree_tab(self, title, columns, widths, on_open) -> ttk.Treeview:
+    def _figures_toolbar(self, parent) -> None:
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", pady=(6, 2))
+        self.only_noble = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text="Только те, кто попал в летопись",
+                        variable=self.only_noble,
+                        command=self._refill_figures).pack(side="left", padx=6)
+        self.figures_note = tk.StringVar(value="")
+        ttk.Label(bar, textvariable=self.figures_note).pack(side="left", padx=10)
+
+    def _add_tree_tab(self, title, columns, widths, on_open,
+                      toolbar=None, filler=None) -> ttk.Treeview:
         frame = ttk.Frame(self.tabs)
         self.tabs.add(frame, text=title)
+        if toolbar is not None:
+            toolbar(frame)
         scroll = ttk.Scrollbar(frame, orient="vertical")
         scroll.pack(side="right", fill="y")
         tree = ttk.Treeview(frame, columns=columns, show="headings",
@@ -301,6 +336,8 @@ class ChronicleApp(tk.Tk):
         tree.pack(side="left", fill="both", expand=True)
         scroll.config(command=tree.yview)
         tree.bind("<Double-1>", on_open)
+        if filler is not None:
+            self._fillers[str(frame)] = filler
         return tree
 
     def _build_status(self) -> None:
@@ -403,20 +440,43 @@ class ChronicleApp(tk.Tk):
             "  Один и тот же сид всегда даёт одну и ту же историю.\n"
         ))
 
+    def _on_tab_changed(self, event=None) -> None:
+        """Заполняет открываемую вкладку, если руки до неё ещё не дошли."""
+        if self.world is None:
+            return
+        try:
+            current = self.tabs.select()
+        except tk.TclError:
+            return
+        if not current or current in self._filled:
+            return
+        self._filled.add(current)
+        filler = self._fillers.get(current)
+        if filler is None:
+            return
+        self.status_var.set("Собираю таблицу…")
+        self.update_idletasks()
+        filler()
+        self._say_ready()
+
     def _fill_all(self) -> None:
         world = self.world
+        self._filled = set()
         self.refresh_chronicle()
         self._set_text(self.eras_text, chronicle.render_eras(world))
         self._set_text(self.regions_text, chronicle.render_regions(world))
         self._set_text(self.stats_text, chronicle.render_stats(world))
-        self._fill_polities()
-        self._fill_cities()
-        self._fill_groups()
-        self._fill_figures()
+        self._on_tab_changed()
+        self._say_ready()
+
+    def _say_ready(self) -> None:
+        world = self.world
         self.status_var.set(
-            "Мир «%s» готов: %s, событий %d, стран %d, поселений %d, личностей %d."
+            "Мир «%s» готов: %s, событий %d, стран %d, поселений %d, родов %d, "
+            "личностей %d."
             % (world.seed_text, years_text(world.total_years), len(world.events),
-               len(world.polities), len(world.settlements), len(world.figures)))
+               len(world.polities), len(world.settlements), len(world.houses),
+               len(world.figures)))
 
     def refresh_chronicle(self) -> None:
         if self.world is None:
@@ -495,18 +555,52 @@ class ChronicleApp(tk.Tk):
         rows.sort(key=lambda row: row[1][3])
         self._fill_tree(self.group_tree, rows)
 
-    def _fill_figures(self) -> None:
+    def _refill_figures(self) -> None:
+        if self.world is None:
+            return
+        self.status_var.set("Собираю таблицу…")
+        self.update_idletasks()
+        self._fill_figures()
+        self._say_ready()
+
+    def _fill_houses(self) -> None:
         world = self.world
         rows = []
+        for house in world.houses.values():
+            founder = world.figures.get(house.founder_id)
+            polity = world.polities.get(house.polity_id)
+            seat = world.settlements.get(house.seat_id)
+            state = house.status
+            if house.ended is not None:
+                state = "%s (%d)" % (house.status, house.ended.year)
+            rows.append((house.id, (
+                house.full_name, get_race(house.race_id).name,
+                house.founded.year, founder.name if founder else "—",
+                house.rank, polity.full_name if polity else "—",
+                seat.name if seat else "—", house.alive_count,
+                house.thrones, state)))
+        self._fill_tree(self.house_tree, rows)
+
+    def _fill_figures(self) -> None:
+        world = self.world
+        only_noble = getattr(self, "only_noble", None)
+        filtered = only_noble.get() if only_noble is not None else True
+        rows = []
         for figure in world.figures.values():
+            if filtered and not figure.deeds:
+                continue
+            house = world.houses.get(figure.house_id)
             rows.append((figure.id, (
                 figure.name, get_race(figure.race_id).name,
                 "жен." if figure.sex == "f" else "муж.",
                 figure.lifespan_text(),
+                house.full_name if house else "—",
                 figure.titles[0] if figure.titles else "—",
                 ", ".join(figure.roles) if figure.roles else "—",
                 len(figure.deeds))))
         self._fill_tree(self.figure_tree, rows)
+        if hasattr(self, "figures_note"):
+            self.figures_note.set("показано %d из %d" % (len(rows), len(world.figures)))
 
     def _sort_tree(self, tree, column, descending) -> None:
         data = [(tree.set(item, column), item) for item in tree.get_children("")]
@@ -542,6 +636,9 @@ class ChronicleApp(tk.Tk):
     def _on_figure_open(self, event) -> None:
         self._open_card(self._selected(self.figure_tree))
 
+    def _on_house_open(self, event) -> None:
+        self._open_card(self._selected(self.house_tree))
+
     def _open_card(self, entity_id) -> None:
         if not entity_id or self.world is None:
             return
@@ -553,6 +650,7 @@ class ChronicleApp(tk.Tk):
         lines = [world.entity_name(entity_id), "=" * 60, ""]
         for name, value in self._card_fields(entity):
             lines.append("  %-22s %s" % (name + ":", value))
+        lines.extend(self._card_extra(entity))
 
         related = [event for event in world.events
                    if entity_id in event.subjects or entity_id in event.actors]
@@ -577,24 +675,39 @@ class ChronicleApp(tk.Tk):
 
         kind = type(entity).__name__
         if kind == "Figure":
+            children = ", ".join(name_of(child) for child in entity.children) or "—"
             fields = [
                 ("Раса", get_race(entity.race_id).name),
                 ("Пол", "женский" if entity.sex == "f" else "мужской"),
+                ("Знатность", "знатный род" if entity.noble else "простолюдин"),
+                ("Родовое имя", entity.surname or "—"),
+                ("Род", name_of(entity.house_id)),
                 ("Годы жизни", entity.lifespan_text()),
                 ("Рождение", entity.birth.long() if entity.birth else "—"),
                 ("Смерть", entity.death.long() if entity.death else "—"),
+                ("Причина смерти", entity.death_cause or "—"),
                 ("Титулы", ", ".join(entity.titles) or "—"),
                 ("Роли", ", ".join(entity.roles) or "—"),
+                ("Отец", name_of(entity.father_id)),
+                ("Мать", name_of(entity.mother_id)),
+                ("Супруг(а)", name_of(entity.spouse_id)),
+                ("Дети", children),
                 ("Родина", name_of(entity.origin_region)),
                 ("Связан с", name_of(entity.home_id)),
             ]
         elif kind == "Polity":
+            from worldgen.races import SUCCESSION_NAMES
             fields = [
                 ("Форма правления", entity.form),
                 ("Раса", get_race(entity.race_id).name),
                 ("Основана", entity.founded.long()),
                 ("Основатель", name_of(entity.founder_id)),
                 ("Столица", name_of(entity.capital_id)),
+                ("Правящий род", name_of(entity.house_id)),
+                ("Наследование", SUCCESSION_NAMES.get(entity.succession, "—")),
+                ("Нынешний правитель", name_of(entity.ruler_id)),
+                ("Правлений", len(entity.reign_ids)),
+                ("Знатных родов", len(entity.house_ids)),
                 ("Поселений", len(entity.settlement_ids)),
                 ("Земли", ", ".join(name_of(rid) for rid in entity.region_ids) or "—"),
                 ("Состояние", entity.status),
@@ -628,6 +741,24 @@ class ChronicleApp(tk.Tk):
                 ("Состояние", entity.status),
                 ("Конец", entity.ended.long() if entity.ended else "—"),
             ]
+        elif kind == "House":
+            fields = [
+                ("Тип", entity.word),
+                ("Раса", get_race(entity.race_id).name),
+                ("Основан", entity.founded.long()),
+                ("Основатель", name_of(entity.founder_id)),
+                ("Ранг", entity.rank),
+                ("Глава рода", name_of(entity.head_id)),
+                ("Родовое гнездо", name_of(entity.seat_id)),
+                ("Страна", name_of(entity.polity_id)),
+                ("Всходил на престол", entity.thrones),
+                ("Влияние", "%.1f" % entity.prestige),
+                ("Членов рода", len(entity.members)),
+                ("Живых", entity.alive_count),
+                ("Отделился от", name_of(entity.parent_id)),
+                ("Состояние", entity.status),
+                ("Конец", entity.ended.long() if entity.ended else "—"),
+            ]
         elif kind == "Camp":
             fields = [
                 ("Тип", entity.word),
@@ -640,6 +771,61 @@ class ChronicleApp(tk.Tk):
                 ("Конец", entity.ended.long() if entity.ended else "—"),
             ]
         return fields
+
+    def _card_extra(self, entity) -> list:
+        """Дополнительные разделы карточки: правления и члены рода."""
+        world = self.world
+        kind = type(entity).__name__
+        lines = []
+
+        def reign_rows(reigns):
+            out = []
+            for reign in reigns:
+                ruler = world.figures.get(reign.ruler_id)
+                house = world.houses.get(reign.house_id)
+                polity = world.polities.get(reign.polity_id)
+                out.append("  %-4d %5d—%-7s %-32s %-22s %s" % (
+                    reign.number, reign.start.year,
+                    reign.end.year if reign.end else "…",
+                    (ruler.plain_name if ruler else "?")[:32],
+                    (polity.full_name if polity else (house.full_name if house else "—"))[:22],
+                    reign.end_reason or "правит"))
+            return out
+
+        if kind == "Polity":
+            reigns = [world.reigns[r] for r in entity.reign_ids if r in world.reigns]
+            if reigns:
+                lines.extend(["", "ПРАВИТЕЛИ", "-" * 60])
+                lines.extend(reign_rows(reigns))
+            houses = [world.houses[h] for h in entity.house_ids if h in world.houses]
+            if houses:
+                lines.extend(["", "ЗНАТНЫЕ РОДА СТРАНЫ", "-" * 60])
+                for house in houses:
+                    lines.append("  %-26s %-12s влияние %.1f" % (
+                        house.full_name, house.rank, house.prestige))
+
+        elif kind == "House":
+            reigns = [r for r in world.reigns.values() if r.house_id == entity.id]
+            reigns.sort(key=lambda r: r.start.ordinal)
+            if reigns:
+                lines.extend(["", "ПРАВЛЕНИЯ РОДА", "-" * 60])
+                lines.extend(reign_rows(reigns))
+            members = [world.figures[m] for m in entity.members if m in world.figures]
+            if members:
+                lines.extend(["", "ЧЛЕНЫ РОДА", "-" * 60])
+                for member in members:
+                    mark = " (глава)" if member.id == entity.head_id else ""
+                    lines.append("  %-34s %-14s %s%s" % (
+                        member.plain_name[:34], member.lifespan_text(),
+                        ", ".join(member.roles[:2]) or "—", mark))
+
+        elif kind == "Figure":
+            reigns = [r for r in world.reigns.values() if r.ruler_id == entity.id]
+            reigns.sort(key=lambda r: r.start.ordinal)
+            if reigns:
+                lines.extend(["", "ПРАВЛЕНИЯ", "-" * 60])
+                lines.extend(reign_rows(reigns))
+        return lines
 
     # ------------------------------------------------------------------
     # Файлы

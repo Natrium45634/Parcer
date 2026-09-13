@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from . import houses as houses_mod
 from .. import narrative
 from .. import races as races_mod
 from ..models import ACTIVE
@@ -25,6 +26,11 @@ def tick(ctx, year: int) -> None:
     for figure in departed:
         race = races_mod.get_race(figure.race_id)
         age = max(1, figure.death.year - figure.birth.year)
+        houses_mod.note_death(ctx, figure, figure.death, year)
+
+        # О смерти правящих монархов пишет система престолонаследия.
+        if "правитель" in figure.roles:
+            continue
 
         if "основатель страны" in figure.roles:
             importance = 3

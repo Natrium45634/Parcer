@@ -24,6 +24,21 @@ KIND_LABELS = {
     "camp_found": "Лагерь",
     "camp_end": "Разорение лагеря",
     "figure_death": "Смерть",
+    "house_found": "Новый род",
+    "house_cadet": "Младшая ветвь",
+    "house_royal": "Династия",
+    "house_extinct": "Пресечение рода",
+    "accession": "Восшествие на престол",
+    "dynasty_change": "Смена династии",
+    "coup": "Переворот",
+    "plot_failed": "Раскрытый заговор",
+    "abdication": "Отречение",
+    "regency_start": "Регентство",
+    "regency_end": "Конец регентства",
+    "marriage": "Брак",
+    "heir_birth": "Рождение наследника",
+    "ruler_death": "Смерть правителя",
+    "interregnum": "Междуцарствие",
 }
 
 
@@ -161,11 +176,84 @@ def render_regions(world) -> str:
     return "\n".join(rows)
 
 
+def render_houses(world) -> str:
+    """Справочник знатных родов."""
+    from . import races as races_mod
+
+    rows = ["ЗНАТНЫЕ РОДА", ""]
+    header = "  %-24s %-16s %8s %-12s %-22s %6s %s" % (
+        "Род", "Раса", "Основан", "Ранг", "Родовое гнездо", "Живых", "Состояние")
+    rows.append(header)
+    rows.append("  " + "-" * (len(header) - 2))
+    houses = sorted(world.houses.values(), key=lambda h: h.founded.ordinal)
+    for house in houses:
+        seat = world.settlements.get(house.seat_id)
+        state = house.status
+        if house.ended is not None:
+            state = "%s (%d)" % (house.status, house.ended.year)
+        rows.append("  %-24s %-16s %8d %-12s %-22s %6d %s" % (
+            house.full_name, races_mod.get_race(house.race_id).name,
+            house.founded.year, house.rank, seat.name if seat else "—",
+            house.alive_count, state))
+    rows.append("")
+    rows.append("  Всего родов: %d, из них живы: %d" % (
+        len(world.houses), len(world.active_houses)))
+    return "\n".join(rows)
+
+
+def render_dynasties(world) -> str:
+    """Списки правителей по странам — родословная власти."""
+    from . import races as races_mod
+
+    rows = ["ДИНАСТИИ И ПРАВИТЕЛИ", ""]
+    polities = sorted(world.polities.values(), key=lambda p: p.founded.ordinal)
+    for polity in polities:
+        if not polity.reign_ids:
+            continue
+        house = world.houses.get(polity.house_id)
+        race = races_mod.get_race(polity.race_id)
+        life = "основана %d" % polity.founded.year
+        if polity.ended is not None:
+            life += ", пала %d" % polity.ended.year
+        rows.append("%s   (%s, %s)" % (polity.full_name, race.name, life))
+        rows.append("    закон наследования: %s" % races_mod.SUCCESSION_NAMES.get(
+            polity.succession, "не определён"))
+        if house is not None:
+            rows.append("    правящий род на конец истории: %s" % house.full_name)
+        rows.append("    %-4s %-14s %-40s %-24s %s" % (
+            "№", "годы", "правитель", "род", "чем кончилось"))
+        for reign_id in polity.reign_ids:
+            reign = world.reigns.get(reign_id)
+            if reign is None:
+                continue
+            ruler = world.figures.get(reign.ruler_id)
+            reign_house = world.houses.get(reign.house_id)
+            years = "%d—%s" % (reign.start.year,
+                               reign.end.year if reign.end else "…")
+            name = ruler.plain_name if ruler is not None else "?"
+            if reign.title:
+                name = "%s %s" % (reign.title, name)
+            mark = ""
+            if reign.legitimacy == "узурпация":
+                mark = " *"
+            elif reign.regent_id:
+                mark = " (регент)"
+            rows.append("    %-4d %-14s %-40s %-24s %s" % (
+                reign.number, years, (name + mark)[:40],
+                (reign_house.full_name if reign_house else "—")[:24],
+                reign.end_reason or "правит"))
+        rows.append("")
+    rows.append("  * — власть получена не по закону.")
+    return "\n".join(rows)
+
+
 def full_text(world) -> str:
     """Полный экспорт: летопись + справочники."""
     return "\n\n".join((
         render_chronicle(world),
         render_eras(world),
         render_regions(world),
+        render_dynasties(world),
+        render_houses(world),
         render_stats(world),
     ))

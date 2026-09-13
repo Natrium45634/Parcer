@@ -10,10 +10,12 @@
 
 from __future__ import annotations
 
+from . import houses as houses_mod
 from . import peoples
+from . import succession
 from .. import narrative
 from .. import races as races_mod
-from ..models import ACTIVE, GONE, RUINED, SETTLED
+from ..models import ACTIVE, GONE, GREAT, MINOR, RUINED, SETTLED
 
 SETTLE_MIN_POPULATION = 380
 
@@ -113,6 +115,8 @@ def tick_settling(ctx, year: int) -> None:
         title=title, text=text, importance=3, actors=[leader.id],
         subjects=[settlement.id, tribe.id], region_id=region.id, race_id=race.id,
     )
+    # Основатель города кладёт начало знатному роду — так рождается знать.
+    houses_mod.found_house(ctx, leader, year, date, seat=settlement, rank=MINOR)
 
     # Не все согласны жить за стенами: часть племени уходит кочевать дальше.
     if rng.chance(0.38) and settlement.population > 500:
@@ -199,6 +203,8 @@ def tick_colonies(ctx, year: int) -> None:
         title=title, text=text, importance=3, actors=[leader.id],
         subjects=subjects, region_id=region.id, race_id=race.id,
     )
+    houses_mod.found_house(ctx, leader, year, date, seat=settlement, rank=MINOR,
+                           polity=polity)
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +288,16 @@ def tick_polities(ctx, year: int) -> None:
         subjects=[polity.id, capital.id], region_id=capital.region_id,
         race_id=race.id,
     )
+
+    # Роды основателей вошедших городов становятся знатью новой страны.
+    for settlement in members:
+        house = world.houses.get(
+            world.figures[settlement.founder_id].house_id
+            if settlement.founder_id in world.figures else "")
+        if house is not None and house.status == ACTIVE:
+            house.rank = GREAT if settlement.id == capital.id else house.rank
+            houses_mod.attach(world, house, polity)
+    succession.install_founder(ctx, polity, leader, capital, date, year)
 
 
 # ---------------------------------------------------------------------------

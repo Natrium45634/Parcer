@@ -20,7 +20,8 @@ from dataclasses import dataclass, asdict
 from .context import GenContext
 from .eras import build_eras
 from .rng import seed_to_int
-from .systems import era_events, founding, geography, lives, peoples
+from .systems import (era_events, founding, geography, houses, lives,
+                      peoples, succession)
 from .timeline import Date
 from .world import World
 from . import narrative
@@ -90,11 +91,14 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         founding.tick_polities(ctx, year)
         founding.tick_colonies(ctx, year)
         founding.tick_camps(ctx, year)
+        succession.tick(ctx, year)
         lives.tick(ctx, year)
 
         if year % UPKEEP_PERIOD == 0:
             peoples.upkeep(ctx, year, UPKEEP_PERIOD)
             founding.upkeep(ctx, year, UPKEEP_PERIOD)
+            houses.upkeep(ctx, year, UPKEEP_PERIOD)
+            succession.upkeep(ctx, year, UPKEEP_PERIOD)
 
         era = era_ends.get(year)
         if era is not None:
