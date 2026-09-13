@@ -1,0 +1,701 @@
+# -*- coding: utf-8 -*-
+"""Окно программы: настройки, генерация и просмотр мира."""
+
+from __future__ import annotations
+
+import os
+import queue
+import threading
+import tkinter as tk
+import tkinter.font as tkfont
+from tkinter import filedialog, messagebox, ttk
+
+from worldgen import chronicle, storage
+from worldgen.engine import GenerationCancelled, Settings, generate
+from worldgen.models import ACTIVE
+from worldgen.races import RACES, get_race
+from worldgen.rng import random_seed_text
+from worldgen.timeline import years_text
+
+APP_TITLE = "Хронист — генератор фэнтезийных историй"
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASSETS_DIR = os.path.join(ROOT_DIR, "assets")
+
+DENSITY_CHOICES = (
+    ("Редкая — крупные события, мало мелочей", 0.6),
+    ("Обычная", 1.0),
+    ("Густая — больше народов и городов", 1.5),
+    ("Очень густая — летопись на каждый год", 2.2),
+)
+
+IMPORTANCE_CHOICES = (
+    ("Только эпохальное", 5),
+    ("Главное: страны, расы, эпохи", 4),
+    ("Важное: + города и падения", 3),
+    ("Подробно: + лагеря и смерти", 2),
+    ("Всё до последнего племени", 1),
+)
+
+BG = "#1d1b26"
+PANEL = "#262433"
+INK = "#e8e3d8"
+ACCENT = "#c6a14a"
+
+
+def pick_font(candidates, size, weight="normal"):
+    families = set(tkfont.families())
+    for name in candidates:
+        if name in families:
+            return tkfont.Font(family=name, size=size, weight=weight)
+    return tkfont.Font(size=size, weight=weight)
+
+
+class ChronicleApp(tk.Tk):
+    def __init__(self):
+        tk.Tk.__init__(self)
+        self.title(APP_TITLE)
+        self.geometry("1240x820")
+        self.minsize(980, 640)
+        self.configure(bg=BG)
+
+        self.world = None
+        self.worker = None
+        self.progress_queue = queue.Queue()
+        self.stop_flag = False
+
+        self.mono = pick_font(("Consolas", "DejaVu Sans Mono", "Menlo",
+                               "Courier New", "TkFixedFont"), 10)
+        self.ui_font = pick_font(("Segoe UI", "DejaVu Sans", "Helvetica"), 10)
+
+        self._set_icon()
+        self._setup_style()
+        self._build_menu()
+        self._build_settings()
+        self._build_tabs()
+        self._build_status()
+        self._show_welcome()
+
+    # ------------------------------------------------------------------
+    # Оформление
+    # ------------------------------------------------------------------
+
+    def _set_icon(self) -> None:
+        png = os.path.join(ASSETS_DIR, "icon.png")
+        ico = os.path.join(ASSETS_DIR, "icon.ico")
+        try:
+            if os.path.exists(ico) and os.name == "nt":
+                self.iconbitmap(ico)
+            elif os.path.exists(png):
+                self._icon_image = tk.PhotoImage(file=png)
+                self.iconphoto(True, self._icon_image)
+        except tk.TclError:
+            pass
+
+    def _setup_style(self) -> None:
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(".", background=BG, foreground=INK, font=self.ui_font)
+        style.configure("TFrame", background=BG)
+        style.configure("Panel.TFrame", background=PANEL)
+        style.configure("TLabel", background=BG, foreground=INK)
+        style.configure("Panel.TLabel", background=PANEL, foreground=INK)
+        style.configure("Head.TLabel", background=PANEL, foreground=ACCENT,
+                        font=pick_font(("Segoe UI", "DejaVu Sans"), 11, "bold"))
+        style.configure("TButton", background="#3a3550", foreground=INK, padding=5)
+        style.map("TButton", background=[("active", "#4a4368")])
+        style.configure("Go.TButton", background=ACCENT, foreground="#221d14",
+                        font=pick_font(("Segoe UI", "DejaVu Sans"), 10, "bold"))
+        style.map("Go.TButton", background=[("active", "#e0bc63")])
+        style.configure("TNotebook", background=BG, borderwidth=0)
+        style.configure("TNotebook.Tab", background=PANEL, foreground=INK, padding=(14, 6))
+        style.map("TNotebook.Tab", background=[("selected", "#3a3550")],
+                  foreground=[("selected", ACCENT)])
+        style.configure("Treeview", background="#211f2c", fieldbackground="#211f2c",
+                        foreground=INK, rowheight=22, borderwidth=0)
+        style.configure("Treeview.Heading", background="#3a3550", foreground=ACCENT)
+        style.map("Treeview", background=[("selected", "#4a4368")])
+        style.configure("TEntry", fieldbackground="#2f2c3e", foreground=INK)
+        style.configure("TSpinbox", fieldbackground="#2f2c3e", foreground=INK,
+                        arrowcolor=INK)
+        style.configure("TCombobox", fieldbackground="#2f2c3e", foreground=INK,
+                        arrowcolor=INK, selectbackground="#2f2c3e",
+                        selectforeground=INK)
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", "#2f2c3e")],
+                  foreground=[("readonly", INK)],
+                  selectbackground=[("readonly", "#2f2c3e")],
+                  selectforeground=[("readonly", INK)])
+        # Выпадающий список рисуется не через ttk, ему нужны свои настройки.
+        self.option_add("*TCombobox*Listbox.background", "#2f2c3e")
+        self.option_add("*TCombobox*Listbox.foreground", INK)
+        self.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        self.option_add("*TCombobox*Listbox.selectForeground", "#221d14")
+        style.configure("TProgressbar", background=ACCENT, troughcolor=PANEL)
+
+    # ------------------------------------------------------------------
+    # Меню
+    # ------------------------------------------------------------------
+
+    def _build_menu(self) -> None:
+        menu = tk.Menu(self)
+        file_menu = tk.Menu(menu, tearoff=0)
+        file_menu.add_command(label="Сохранить мир…", command=self.save_world)
+        file_menu.add_command(label="Открыть мир…", command=self.open_world)
+        file_menu.add_separator()
+        file_menu.add_command(label="Сохранить летопись в текст…",
+                              command=self.export_text)
+        file_menu.add_separator()
+        file_menu.add_command(label="Выход", command=self.destroy)
+        menu.add_cascade(label="Файл", menu=file_menu)
+
+        help_menu = tk.Menu(menu, tearoff=0)
+        help_menu.add_command(label="О программе", command=self.show_about)
+        menu.add_cascade(label="Справка", menu=help_menu)
+        self.config(menu=menu)
+
+    # ------------------------------------------------------------------
+    # Панель настроек
+    # ------------------------------------------------------------------
+
+    def _build_settings(self) -> None:
+        panel = ttk.Frame(self, style="Panel.TFrame", padding=10)
+        panel.pack(fill="x", side="top")
+
+        ttk.Label(panel, text="Настройки мира", style="Head.TLabel").grid(
+            row=0, column=0, columnspan=8, sticky="w", pady=(0, 8))
+
+        self.seed_var = tk.StringVar(value="Начало")
+        self.years_var = tk.StringVar(value="10000")
+        self.regions_var = tk.StringVar(value="18")
+        self.density_var = tk.StringVar(value=DENSITY_CHOICES[1][0])
+
+        ttk.Label(panel, text="Сид:", style="Panel.TLabel").grid(
+            row=1, column=0, sticky="e", padx=(0, 6))
+        seed_entry = ttk.Entry(panel, textvariable=self.seed_var, width=28)
+        seed_entry.grid(row=1, column=1, sticky="w")
+        ttk.Button(panel, text="Случайный", command=self.randomize_seed).grid(
+            row=1, column=2, sticky="w", padx=6)
+
+        ttk.Label(panel, text="Длительность, лет:", style="Panel.TLabel").grid(
+            row=1, column=3, sticky="e", padx=(18, 6))
+        ttk.Spinbox(panel, from_=50, to=100000, increment=500, width=10,
+                    textvariable=self.years_var).grid(row=1, column=4, sticky="w")
+
+        ttk.Label(panel, text="Земель на карте:", style="Panel.TLabel").grid(
+            row=1, column=5, sticky="e", padx=(18, 6))
+        ttk.Spinbox(panel, from_=6, to=60, increment=1, width=6,
+                    textvariable=self.regions_var).grid(row=1, column=6, sticky="w")
+
+        ttk.Label(panel, text="Плотность событий:", style="Panel.TLabel").grid(
+            row=2, column=0, sticky="e", padx=(0, 6), pady=(8, 0))
+        ttk.Combobox(panel, textvariable=self.density_var, state="readonly",
+                     width=38,
+                     values=[name for name, _ in DENSITY_CHOICES]).grid(
+            row=2, column=1, columnspan=2, sticky="w", pady=(8, 0))
+
+        self.go_button = ttk.Button(panel, text="Сгенерировать мир",
+                                    style="Go.TButton", command=self.start_generation)
+        self.go_button.grid(row=2, column=4, columnspan=3, sticky="w",
+                            padx=(18, 0), pady=(8, 0))
+
+        self.progress = ttk.Progressbar(panel, mode="determinate", maximum=1000)
+        self.progress.grid(row=3, column=0, columnspan=8, sticky="we", pady=(10, 0))
+        panel.columnconfigure(7, weight=1)
+
+    # ------------------------------------------------------------------
+    # Вкладки
+    # ------------------------------------------------------------------
+
+    def _build_tabs(self) -> None:
+        self.tabs = ttk.Notebook(self)
+        self.tabs.pack(fill="both", expand=True, padx=8, pady=8)
+
+        self._build_chronicle_tab()
+        self.eras_text = self._add_text_tab("Эпохи")
+        self.polity_tree = self._add_tree_tab(
+            "Страны",
+            ("Название", "Форма", "Раса", "Основана", "Основатель", "Столица",
+             "Городов", "Состояние"),
+            (210, 170, 120, 90, 210, 170, 80, 110), self._on_polity_open)
+        self.city_tree = self._add_tree_tab(
+            "Города",
+            ("Название", "Тип", "Раса", "Основан", "Основатель", "Страна",
+             "Население", "Состояние"),
+            (200, 110, 120, 90, 210, 190, 90, 110), self._on_city_open)
+        self.group_tree = self._add_tree_tab(
+            "Племена и лагеря",
+            ("Название", "Тип", "Раса", "Основано", "Основатель", "Земля",
+             "Население", "Состояние"),
+            (200, 110, 120, 90, 200, 160, 90, 120), self._on_group_open)
+        self.figure_tree = self._add_tree_tab(
+            "Личности",
+            ("Имя", "Раса", "Пол", "Годы жизни", "Титул", "Деяния", "Событий"),
+            (220, 130, 60, 110, 160, 230, 70), self._on_figure_open)
+        self.regions_text = self._add_text_tab("Земли")
+        self.stats_text = self._add_text_tab("Итоги")
+
+    def _build_chronicle_tab(self) -> None:
+        frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text="Летопись")
+
+        bar = ttk.Frame(frame)
+        bar.pack(fill="x", pady=(6, 4))
+
+        ttk.Label(bar, text="Подробность:").pack(side="left", padx=(4, 6))
+        self.importance_var = tk.StringVar(value=IMPORTANCE_CHOICES[2][0])
+        ttk.Combobox(bar, textvariable=self.importance_var, state="readonly",
+                     width=32,
+                     values=[name for name, _ in IMPORTANCE_CHOICES]).pack(side="left")
+
+        ttk.Label(bar, text="Раса:").pack(side="left", padx=(14, 6))
+        self.race_var = tk.StringVar(value="Все расы")
+        ttk.Combobox(bar, textvariable=self.race_var, state="readonly", width=26,
+                     values=["Все расы"] + [race.name for race in RACES]).pack(side="left")
+
+        ttk.Label(bar, text="Поиск:").pack(side="left", padx=(14, 6))
+        self.search_var = tk.StringVar()
+        entry = ttk.Entry(bar, textvariable=self.search_var, width=24)
+        entry.pack(side="left")
+        entry.bind("<Return>", lambda event: self.refresh_chronicle())
+
+        ttk.Button(bar, text="Показать", command=self.refresh_chronicle).pack(
+            side="left", padx=10)
+
+        self.chronicle_text = self._make_text(frame)
+
+    def _make_text(self, parent) -> tk.Text:
+        holder = ttk.Frame(parent)
+        holder.pack(fill="both", expand=True)
+        scroll = ttk.Scrollbar(holder, orient="vertical")
+        scroll.pack(side="right", fill="y")
+        widget = tk.Text(holder, wrap="none", font=self.mono, bg="#211f2c",
+                         fg=INK, insertbackground=INK, relief="flat",
+                         yscrollcommand=scroll.set, padx=10, pady=8)
+        widget.pack(side="left", fill="both", expand=True)
+        scroll.config(command=widget.yview)
+        bottom = ttk.Scrollbar(parent, orient="horizontal", command=widget.xview)
+        bottom.pack(fill="x")
+        widget.config(xscrollcommand=bottom.set)
+        widget.config(state="disabled")
+        return widget
+
+    def _add_text_tab(self, title: str) -> tk.Text:
+        frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text=title)
+        return self._make_text(frame)
+
+    def _add_tree_tab(self, title, columns, widths, on_open) -> ttk.Treeview:
+        frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text=title)
+        scroll = ttk.Scrollbar(frame, orient="vertical")
+        scroll.pack(side="right", fill="y")
+        tree = ttk.Treeview(frame, columns=columns, show="headings",
+                            yscrollcommand=scroll.set)
+        for name, width in zip(columns, widths):
+            tree.heading(name, text=name,
+                         command=lambda t=tree, c=name: self._sort_tree(t, c, False))
+            tree.column(name, width=width, anchor="w")
+        tree.pack(side="left", fill="both", expand=True)
+        scroll.config(command=tree.yview)
+        tree.bind("<Double-1>", on_open)
+        return tree
+
+    def _build_status(self) -> None:
+        self.status_var = tk.StringVar(value="Готов к работе.")
+        bar = ttk.Frame(self, style="Panel.TFrame", padding=(10, 4))
+        bar.pack(fill="x", side="bottom")
+        ttk.Label(bar, textvariable=self.status_var, style="Panel.TLabel").pack(
+            side="left")
+
+    # ------------------------------------------------------------------
+    # Генерация
+    # ------------------------------------------------------------------
+
+    def randomize_seed(self) -> None:
+        self.seed_var.set(random_seed_text())
+
+    def _read_settings(self) -> Settings:
+        try:
+            years = int(float(self.years_var.get()))
+        except ValueError:
+            years = 10000
+        try:
+            regions = int(float(self.regions_var.get()))
+        except ValueError:
+            regions = 18
+        density = dict(DENSITY_CHOICES).get(self.density_var.get(), 1.0)
+        seed = self.seed_var.get().strip() or "Начало"
+        return Settings(seed=seed, years=years, regions=regions, density=density)
+
+    def start_generation(self) -> None:
+        if self.worker is not None and self.worker.is_alive():
+            return
+        settings = self._read_settings().normalized()
+        self.seed_var.set(settings.seed)
+        self.years_var.set(str(settings.years))
+        self.regions_var.set(str(settings.regions))
+        self.go_button.config(state="disabled")
+        self.status_var.set("Творение мира…")
+        self.progress["value"] = 0
+        self.stop_flag = False
+
+        def work():
+            try:
+                world = generate(
+                    settings,
+                    progress=lambda part, note: self.progress_queue.put(("step", part, note)),
+                    should_stop=lambda: self.stop_flag)
+                self.progress_queue.put(("done", world, ""))
+            except GenerationCancelled:
+                self.progress_queue.put(("cancelled", None, ""))
+            except Exception as error:                      # показать, а не молчать
+                self.progress_queue.put(("error", None, repr(error)))
+
+        self.worker = threading.Thread(target=work, daemon=True)
+        self.worker.start()
+        self.after(60, self._poll_progress)
+
+    def _poll_progress(self) -> None:
+        try:
+            while True:
+                kind, payload, note = self.progress_queue.get_nowait()
+                if kind == "step":
+                    self.progress["value"] = payload * 1000
+                    self.status_var.set("Творение мира: %s" % note)
+                elif kind == "done":
+                    self.progress["value"] = 1000
+                    self.go_button.config(state="normal")
+                    self.world = payload
+                    self._fill_all()
+                    return
+                elif kind == "cancelled":
+                    self.go_button.config(state="normal")
+                    self.status_var.set("Генерация прервана.")
+                    return
+                else:
+                    self.go_button.config(state="normal")
+                    self.status_var.set("Ошибка генерации.")
+                    messagebox.showerror("Ошибка", note)
+                    return
+        except queue.Empty:
+            pass
+        self.after(60, self._poll_progress)
+
+    # ------------------------------------------------------------------
+    # Заполнение вкладок
+    # ------------------------------------------------------------------
+
+    def _set_text(self, widget: tk.Text, text: str) -> None:
+        widget.config(state="normal")
+        widget.delete("1.0", "end")
+        widget.insert("1.0", text)
+        widget.config(state="disabled")
+
+    def _show_welcome(self) -> None:
+        self._set_text(self.chronicle_text, (
+            "\n  Здесь появится летопись мира.\n\n"
+            "  1. Впишите сид (любое слово) или нажмите «Случайный».\n"
+            "  2. Укажите, сколько лет истории нужно сгенерировать.\n"
+            "  3. Нажмите «Сгенерировать мир».\n\n"
+            "  Один и тот же сид всегда даёт одну и ту же историю.\n"
+        ))
+
+    def _fill_all(self) -> None:
+        world = self.world
+        self.refresh_chronicle()
+        self._set_text(self.eras_text, chronicle.render_eras(world))
+        self._set_text(self.regions_text, chronicle.render_regions(world))
+        self._set_text(self.stats_text, chronicle.render_stats(world))
+        self._fill_polities()
+        self._fill_cities()
+        self._fill_groups()
+        self._fill_figures()
+        self.status_var.set(
+            "Мир «%s» готов: %s, событий %d, стран %d, поселений %d, личностей %d."
+            % (world.seed_text, years_text(world.total_years), len(world.events),
+               len(world.polities), len(world.settlements), len(world.figures)))
+
+    def refresh_chronicle(self) -> None:
+        if self.world is None:
+            return
+        level = dict(IMPORTANCE_CHOICES).get(self.importance_var.get(), 3)
+        race_id = ""
+        chosen = self.race_var.get()
+        for race in RACES:
+            if race.name == chosen:
+                race_id = race.id
+                break
+        self.status_var.set("Собираю летопись…")
+        self.update_idletasks()
+        text = chronicle.render_chronicle(
+            self.world, min_importance=level, race_id=race_id,
+            search=self.search_var.get())
+        self._set_text(self.chronicle_text, text)
+        self.status_var.set("Летопись обновлена.")
+
+    def _fill_tree(self, tree, rows) -> None:
+        tree.delete(*tree.get_children())
+        for key, values in rows:
+            tree.insert("", "end", iid=key, values=values)
+
+    def _fill_polities(self) -> None:
+        world = self.world
+        rows = []
+        for polity in world.polities.values():
+            founder = world.figures.get(polity.founder_id)
+            capital = world.settlements.get(polity.capital_id)
+            rows.append((polity.id, (
+                polity.name, polity.form, get_race(polity.race_id).name,
+                polity.founded.year, founder.name if founder else "—",
+                capital.name if capital else "—",
+                len(polity.settlement_ids),
+                polity.status if polity.status == ACTIVE
+                else "%s (%d)" % (polity.status, polity.ended.year))))
+        self._fill_tree(self.polity_tree, rows)
+
+    def _fill_cities(self) -> None:
+        world = self.world
+        rows = []
+        for settlement in world.settlements.values():
+            founder = world.figures.get(settlement.founder_id)
+            polity = world.polities.get(settlement.polity_id)
+            rows.append((settlement.id, (
+                settlement.name, settlement.kind, get_race(settlement.race_id).name,
+                settlement.founded.year, founder.name if founder else "—",
+                polity.full_name if polity else "—",
+                settlement.population,
+                settlement.status if settlement.status == ACTIVE
+                else "%s (%d)" % (settlement.status, settlement.ended.year))))
+        self._fill_tree(self.city_tree, rows)
+
+    def _fill_groups(self) -> None:
+        world = self.world
+        rows = []
+        for tribe in world.tribes.values():
+            founder = world.figures.get(tribe.founder_id)
+            region = world.regions.get(tribe.region_id)
+            rows.append((tribe.id, (
+                tribe.name, tribe.word, get_race(tribe.race_id).name,
+                tribe.founded.year, founder.name if founder else "—",
+                region.name if region else "—", tribe.population,
+                tribe.status if tribe.status == ACTIVE
+                else "%s (%d)" % (tribe.status, tribe.ended.year))))
+        for camp in world.camps.values():
+            founder = world.figures.get(camp.founder_id)
+            region = world.regions.get(camp.region_id)
+            rows.append((camp.id, (
+                camp.name, camp.word, get_race(camp.race_id).name,
+                camp.founded.year, founder.name if founder else "—",
+                region.name if region else "—", camp.population,
+                camp.status if camp.status == ACTIVE
+                else "%s (%d)" % (camp.status, camp.ended.year))))
+        rows.sort(key=lambda row: row[1][3])
+        self._fill_tree(self.group_tree, rows)
+
+    def _fill_figures(self) -> None:
+        world = self.world
+        rows = []
+        for figure in world.figures.values():
+            rows.append((figure.id, (
+                figure.name, get_race(figure.race_id).name,
+                "жен." if figure.sex == "f" else "муж.",
+                figure.lifespan_text(),
+                figure.titles[0] if figure.titles else "—",
+                ", ".join(figure.roles) if figure.roles else "—",
+                len(figure.deeds))))
+        self._fill_tree(self.figure_tree, rows)
+
+    def _sort_tree(self, tree, column, descending) -> None:
+        data = [(tree.set(item, column), item) for item in tree.get_children("")]
+
+        def key(pair):
+            try:
+                return (0, float(pair[0]), "")
+            except ValueError:
+                return (1, 0.0, pair[0])
+
+        data.sort(key=key, reverse=descending)
+        for position, (_, item) in enumerate(data):
+            tree.move(item, "", position)
+        tree.heading(column, command=lambda: self._sort_tree(tree, column, not descending))
+
+    # ------------------------------------------------------------------
+    # Карточки сущностей
+    # ------------------------------------------------------------------
+
+    def _selected(self, tree):
+        items = tree.selection()
+        return items[0] if items else None
+
+    def _on_polity_open(self, event) -> None:
+        self._open_card(self._selected(self.polity_tree))
+
+    def _on_city_open(self, event) -> None:
+        self._open_card(self._selected(self.city_tree))
+
+    def _on_group_open(self, event) -> None:
+        self._open_card(self._selected(self.group_tree))
+
+    def _on_figure_open(self, event) -> None:
+        self._open_card(self._selected(self.figure_tree))
+
+    def _open_card(self, entity_id) -> None:
+        if not entity_id or self.world is None:
+            return
+        world = self.world
+        entity = world.entity(entity_id)
+        if entity is None:
+            return
+
+        lines = [world.entity_name(entity_id), "=" * 60, ""]
+        for name, value in self._card_fields(entity):
+            lines.append("  %-22s %s" % (name + ":", value))
+
+        related = [event for event in world.events
+                   if entity_id in event.subjects or entity_id in event.actors]
+        if related:
+            lines.extend(["", "СОБЫТИЯ", "-" * 60])
+            for event in related:
+                lines.append(chronicle.format_event(event, width=86))
+
+        window = tk.Toplevel(self)
+        window.title(world.entity_name(entity_id))
+        window.geometry("900x560")
+        window.configure(bg=BG)
+        text = self._make_text(window)
+        self._set_text(text, "\n".join(lines))
+
+    def _card_fields(self, entity) -> list:
+        world = self.world
+        fields = []
+
+        def name_of(entity_id):
+            return world.entity_name(entity_id) if entity_id else "—"
+
+        kind = type(entity).__name__
+        if kind == "Figure":
+            fields = [
+                ("Раса", get_race(entity.race_id).name),
+                ("Пол", "женский" if entity.sex == "f" else "мужской"),
+                ("Годы жизни", entity.lifespan_text()),
+                ("Рождение", entity.birth.long() if entity.birth else "—"),
+                ("Смерть", entity.death.long() if entity.death else "—"),
+                ("Титулы", ", ".join(entity.titles) or "—"),
+                ("Роли", ", ".join(entity.roles) or "—"),
+                ("Родина", name_of(entity.origin_region)),
+                ("Связан с", name_of(entity.home_id)),
+            ]
+        elif kind == "Polity":
+            fields = [
+                ("Форма правления", entity.form),
+                ("Раса", get_race(entity.race_id).name),
+                ("Основана", entity.founded.long()),
+                ("Основатель", name_of(entity.founder_id)),
+                ("Столица", name_of(entity.capital_id)),
+                ("Поселений", len(entity.settlement_ids)),
+                ("Земли", ", ".join(name_of(rid) for rid in entity.region_ids) or "—"),
+                ("Состояние", entity.status),
+                ("Конец", entity.ended.long() if entity.ended else "—"),
+                ("Причина", entity.end_reason or "—"),
+            ]
+        elif kind == "Settlement":
+            fields = [
+                ("Тип", entity.kind),
+                ("Раса", get_race(entity.race_id).name),
+                ("Основан", entity.founded.long()),
+                ("Основатель", name_of(entity.founder_id)),
+                ("Земля", name_of(entity.region_id)),
+                ("Страна", name_of(entity.polity_id)),
+                ("Столица", "да" if entity.is_capital else "нет"),
+                ("Население", entity.population),
+                ("Из племени", name_of(entity.origin_tribe_id)),
+                ("Состояние", entity.status),
+                ("Конец", entity.ended.long() if entity.ended else "—"),
+            ]
+        elif kind == "Tribe":
+            fields = [
+                ("Тип", entity.word),
+                ("Раса", get_race(entity.race_id).name),
+                ("Основано", entity.founded.long()),
+                ("Основатель", name_of(entity.founder_id)),
+                ("Земля", name_of(entity.region_id)),
+                ("Население", entity.population),
+                ("Отделилось от", name_of(entity.parent_id)),
+                ("Осело в", name_of(entity.settlement_id)),
+                ("Состояние", entity.status),
+                ("Конец", entity.ended.long() if entity.ended else "—"),
+            ]
+        elif kind == "Camp":
+            fields = [
+                ("Тип", entity.word),
+                ("Раса", get_race(entity.race_id).name),
+                ("Основан", entity.founded.long()),
+                ("Вожак", name_of(entity.founder_id)),
+                ("Земля", name_of(entity.region_id)),
+                ("Население", entity.population),
+                ("Состояние", entity.status),
+                ("Конец", entity.ended.long() if entity.ended else "—"),
+            ]
+        return fields
+
+    # ------------------------------------------------------------------
+    # Файлы
+    # ------------------------------------------------------------------
+
+    def save_world(self) -> None:
+        if self.world is None:
+            messagebox.showinfo("Нечего сохранять", "Сначала сгенерируйте мир.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Сохранить мир", defaultextension=".json",
+            initialfile="мир-%s.json" % self.world.seed_text,
+            filetypes=[("Мир генератора", "*.json"), ("Все файлы", "*.*")])
+        if not path:
+            return
+        storage.save_world(self.world, path)
+        self.status_var.set("Мир сохранён: %s" % path)
+
+    def open_world(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Открыть мир",
+            filetypes=[("Мир генератора", "*.json"), ("Все файлы", "*.*")])
+        if not path:
+            return
+        try:
+            self.world = storage.load_world(path)
+        except Exception as error:
+            messagebox.showerror("Не удалось открыть", str(error))
+            return
+        settings = self.world.settings or {}
+        self.seed_var.set(self.world.seed_text)
+        self.years_var.set(str(self.world.total_years))
+        self.regions_var.set(str(settings.get("regions", len(self.world.regions))))
+        self._fill_all()
+
+    def export_text(self) -> None:
+        if self.world is None:
+            messagebox.showinfo("Нечего сохранять", "Сначала сгенерируйте мир.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Сохранить летопись", defaultextension=".txt",
+            initialfile="летопись-%s.txt" % self.world.seed_text,
+            filetypes=[("Текст", "*.txt"), ("Все файлы", "*.*")])
+        if not path:
+            return
+        storage.save_text(chronicle.full_text(self.world), path)
+        self.status_var.set("Летопись сохранена: %s" % path)
+
+    def show_about(self) -> None:
+        messagebox.showinfo(
+            "О программе",
+            "Хронист — генератор фэнтезийных историй.\n\n"
+            "Детерминированная генерация: один сид — один и тот же мир.\n"
+            "Год: 12 месяцев по 30 дней. История делится на пять эпох.\n\n"
+            "Блок 1: основа движка, расы, племена, города и страны.")
+
+
+def run() -> None:
+    ChronicleApp().mainloop()
