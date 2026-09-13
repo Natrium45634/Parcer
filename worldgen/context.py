@@ -35,6 +35,11 @@ class GenContext:
         self.awakened = []           # расы в порядке пробуждения
         self.awakened_ids = set()
         self.schedule = {}           # год -> список race_id
+        self.darkness = {}           # земля -> тяжесть тёмных веков (0…1)
+        self.world_darkness = 0.0    # общемировая тяжесть
+        self.calamity_bias = {}      # нрав мира: к каким бедам он склонен
+        self.calamity_last = {}
+        self.calamity_plans = {}
 
     # ------------------------------------------------------------------
     # Случайность
@@ -54,12 +59,25 @@ class GenContext:
         return getattr(self.settings, "density", 1.0)
 
     def rate(self, base: float) -> float:
-        """Годовая вероятность события с учётом плотности и темпа."""
-        return base * self.density() * self.rate_scale
+        """Годовая вероятность события с учётом плотности, темпа и тьмы."""
+        return base * self.density() * self.rate_scale * \
+            max(0.25, 1.0 - 0.5 * self.world_darkness)
 
-    def growth(self, base: float) -> float:
-        """Годовой прирост населения с учётом темпа."""
-        return base * self.growth_scale
+    def growth(self, base: float, region_id: str = "") -> float:
+        """Годовой прирост населения. В тёмные века он уходит в минус."""
+        gloom = self.gloom(region_id)
+        return base * self.growth_scale * max(-0.35, 1.0 - 1.15 * gloom)
+
+    def gloom(self, region_id: str = "") -> float:
+        """Насколько тяжело живётся в этой земле прямо сейчас."""
+        value = self.world_darkness
+        if region_id:
+            value = max(value, self.darkness.get(region_id, 0.0))
+        return min(1.0, value)
+
+    def refresh_darkness(self, year: int) -> None:
+        self.darkness = self.world.darkness_snapshot(year)
+        self.world_darkness = self.darkness.get("", 0.0)
 
     # ------------------------------------------------------------------
     # Земли

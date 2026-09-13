@@ -11,8 +11,14 @@ from __future__ import annotations
 import heapq
 
 from . import races as races_mod
-from .models import (ACTIVE, EXTINCT, FALLEN, GONE, RUINED, Camp, Event,
-                     Figure, House, Polity, Region, Reign, Settlement, Tribe)
+from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
+                     Battle, Calamity, Camp, Event, Figure, House, Polity,
+                     Region, Reign, Relic, Settlement, Tribe)
+
+# Поселение в летописи — это город и кормящая его округа. Чтобы потери от
+# бедствий считались в людях, а не в условных единицах, население страны
+# считается с этим множителем.
+RURAL_FACTOR = 5.5
 from .timeline import Date
 
 
@@ -34,6 +40,10 @@ class World:
         self.camps = {}                # id -> Camp
         self.houses = {}               # id -> House  (знатные роды)
         self.reigns = {}               # id -> Reign  (правления)
+        self.calamities = {}           # id -> Calamity (бедствия)
+        self.relics = {}               # id -> Relic (следы бедствий)
+        self.battles = {}              # id -> Battle (сражения)
+        self.dark_ages = []            # тёмные века: последствия бедствий
         self.events = []               # список Event в хронологическом порядке
 
         # Быстрые списки активных сущностей (поддерживаются в актуальном виде).
@@ -42,6 +52,8 @@ class World:
         self.active_polities = []
         self.active_camps = []
         self.active_houses = []
+        self.active_calamities = []
+        self.sleeping_relics = []
 
         # Служебное
         self._counters = {}
@@ -99,6 +111,42 @@ class World:
         self.houses[house.id] = house
         self.active_houses.append(house.id)
         return house
+
+    def add_calamity(self, **kwargs) -> Calamity:
+        calamity = Calamity(id=self.next_id("D"), **kwargs)
+        self.calamities[calamity.id] = calamity
+        self.active_calamities.append(calamity.id)
+        return calamity
+
+    def add_relic(self, **kwargs) -> Relic:
+        relic = Relic(id=self.next_id("L"), **kwargs)
+        self.relics[relic.id] = relic
+        if relic.status == "спит":
+            self.sleeping_relics.append(relic.id)
+        return relic
+
+    def add_battle(self, **kwargs) -> Battle:
+        battle = Battle(id=self.next_id("B"), **kwargs)
+        self.battles[battle.id] = battle
+        calamity = self.calamities.get(battle.calamity_id)
+        if calamity is not None:
+            calamity.battle_ids.append(battle.id)
+        return battle
+
+    def end_calamity(self, calamity, date: Date, resolution: str) -> None:
+        if calamity.status != ONGOING:
+            return
+        calamity.status = ENDED
+        calamity.end = date
+        calamity.resolution = resolution
+        if calamity.id in self.active_calamities:
+            self.active_calamities.remove(calamity.id)
+
+    def wake_relic(self, relic, date: Date) -> None:
+        relic.status = "потревожен"
+        relic.awakened = date
+        if relic.id in self.sleeping_relics:
+            self.sleeping_relics.remove(relic.id)
 
     def add_reign(self, **kwargs) -> Reign:
         reign = Reign(id=self.next_id("G"), **kwargs)
@@ -302,7 +350,8 @@ class World:
         table = {
             "R": self.regions, "F": self.figures, "T": self.tribes,
             "C": self.settlements, "P": self.polities, "K": self.camps,
-            "H": self.houses, "G": self.reigns,
+            "H": self.houses, "G": self.reigns, "D": self.calamities,
+            "L": self.relics, "B": self.battles,
         }.get(prefix)
         return table.get(entity_id) if table else None
 
@@ -311,6 +360,85 @@ class World:
         if item is None:
             return "?"
         return getattr(item, "full_name", None) or item.name
+
+    # ------------------------------------------------------------------
+    # Население
+    # ------------------------------------------------------------------
+
+    def settlement_realm(self, settlement) -> int:
+        """Город вместе с кормящей его округой."""
+        return int(settlement.population * RURAL_FACTOR)
+
+    def refresh_populations(self) -> None:
+        """Пересчитывает население стран по их поселениям."""
+        totals = {}
+        for settlement_id in self.active_settlements:
+            settlement = self.settlements[settlement_id]
+            if not settlement.polity_id:
+                continue
+            totals[settlement.polity_id] = totals.get(settlement.polity_id, 0) + \
+                self.settlement_realm(settlement)
+        for polity_id in self.active_polities:
+            polity = self.polities[polity_id]
+            polity.population = totals.get(polity_id, 0)
+            polity.peak_population = max(polity.peak_population, polity.population)
+
+    def world_population(self) -> int:
+        total = 0
+        for settlement_id in self.active_settlements:
+            total += self.settlement_realm(self.settlements[settlement_id])
+        for tribe_id in self.active_tribes:
+            total += self.tribes[tribe_id].population
+        for camp_id in self.active_camps:
+            total += self.camps[camp_id].population
+        return total
+
+    def population_by_race(self) -> dict:
+        totals = {}
+        for settlement_id in self.active_settlements:
+            settlement = self.settlements[settlement_id]
+            totals[settlement.race_id] = totals.get(settlement.race_id, 0) + \
+                self.settlement_realm(settlement)
+        for tribe_id in self.active_tribes:
+            tribe = self.tribes[tribe_id]
+            totals[tribe.race_id] = totals.get(tribe.race_id, 0) + tribe.population
+        for camp_id in self.active_camps:
+            camp = self.camps[camp_id]
+            totals[camp.race_id] = totals.get(camp.race_id, 0) + camp.population
+        return totals
+
+    # ------------------------------------------------------------------
+    # Тёмные века
+    # ------------------------------------------------------------------
+
+    def add_dark_age(self, calamity_id: str, start: int, end: int,
+                     region_ids, intensity: float, worldwide: bool = False) -> dict:
+        record = {
+            "calamity_id": calamity_id, "start": int(start), "end": int(end),
+            "regions": list(region_ids), "intensity": float(intensity),
+            "worldwide": bool(worldwide),
+        }
+        self.dark_ages.append(record)
+        return record
+
+    def darkness_snapshot(self, year: int) -> dict:
+        """Карта тьмы на год: земля -> насколько тяжело в ней живётся (0…1).
+
+        Ключ "" хранит общемировую тяжесть.
+        """
+        snapshot = {}
+        for record in self.dark_ages:
+            if not (record["start"] <= year <= record["end"]):
+                continue
+            value = record["intensity"]
+            # К концу тёмных веков становится легче.
+            span = max(1, record["end"] - record["start"])
+            value *= max(0.25, 1.0 - (year - record["start"]) / float(span) * 0.75)
+            if record["worldwide"]:
+                snapshot[""] = max(snapshot.get("", 0.0), value)
+            for region_id in record["regions"]:
+                snapshot[region_id] = max(snapshot.get(region_id, 0.0), value)
+        return snapshot
 
     # ------------------------------------------------------------------
     # Итоги
@@ -339,6 +467,13 @@ class World:
             "Знатных родов (всего)": len(self.houses),
             "Знатных родов (живых)": len(self.active_houses),
             "Правлений": len(self.reigns),
+            "Бедствий": len(self.calamities),
+            "Сражений": len(self.battles),
+            "Следов бедствий": len(self.relics),
+            "Тёмных веков": len(self.dark_ages),
+            "Население мира": "%d" % self.world_population(),
+            "Погибло от бедствий": "%d" % sum(
+                c.deaths for c in self.calamities.values()),
         }
 
     def race_summary(self) -> list:

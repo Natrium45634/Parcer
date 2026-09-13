@@ -20,7 +20,7 @@ from dataclasses import dataclass, asdict
 from .context import GenContext
 from .eras import build_eras
 from .rng import seed_to_int
-from .systems import (era_events, founding, geography, houses, lives,
+from .systems import (calamity, era_events, founding, geography, houses, lives,
                       peoples, succession)
 from .timeline import Date
 from .world import World
@@ -73,6 +73,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
                     title=title, text=text, importance=5)
 
     peoples.plan_awakenings(ctx)
+    calamity.prepare(ctx)
 
     total = settings.years
     step = max(1, total // 120)
@@ -92,13 +93,16 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         founding.tick_colonies(ctx, year)
         founding.tick_camps(ctx, year)
         succession.tick(ctx, year)
+        calamity.tick(ctx, year)
         lives.tick(ctx, year)
 
         if year % UPKEEP_PERIOD == 0:
+            ctx.refresh_darkness(year)
             peoples.upkeep(ctx, year, UPKEEP_PERIOD)
             founding.upkeep(ctx, year, UPKEEP_PERIOD)
             houses.upkeep(ctx, year, UPKEEP_PERIOD)
             succession.upkeep(ctx, year, UPKEEP_PERIOD)
+            calamity.upkeep(ctx, year, UPKEEP_PERIOD)
 
         era = era_ends.get(year)
         if era is not None:
@@ -119,4 +123,5 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
 
 def _finalize(world: World) -> None:
     """Приводит летопись в порядок: строгий хронологический порядок событий."""
+    world.refresh_populations()
     world.events.sort(key=lambda event: (event.date.ordinal, int(event.id[1:])))

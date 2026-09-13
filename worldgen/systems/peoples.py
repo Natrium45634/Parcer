@@ -183,7 +183,7 @@ def upkeep(ctx, year: int, period: int) -> None:
         if race.category == races_mod.BEASTFOLK:
             capacity *= 1.4          # зверолюдам города не нужны, племена крупнее
 
-        growth = ctx.growth(race.growth) * period
+        growth = ctx.growth(race.growth, tribe.region_id) * period
         population = tribe.population
         population += population * growth * (1.0 - population / capacity)
         population *= rng.uniform(0.985, 1.02)

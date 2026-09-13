@@ -39,6 +39,20 @@ KIND_LABELS = {
     "heir_birth": "Рождение наследника",
     "ruler_death": "Смерть правителя",
     "interregnum": "Междуцарствие",
+    "calamity_begins": "Начало бедствия",
+    "calamity_ongoing": "Бедствие продолжается",
+    "calamity_ends": "Конец бедствия",
+    "calamity_compound": "Беда на беду",
+    "battle": "Сражение",
+    "city_lost": "Гибель города",
+    "dark_age": "Тёмные века",
+    "dark_age_end": "Конец тёмных веков",
+    "relic_left": "След бедствия",
+    "relic_awakens": "Пробуждение следа",
+    "relic_echo": "Отголосок бедствия",
+    "polity_split": "Осколок державы",
+    "polity_fracture": "Раздробленность",
+    "conquest": "Завоевание",
 }
 
 
@@ -148,8 +162,10 @@ def render_stats(world) -> str:
     rows.append("")
     rows.append("  В колонках: основано всего / уцелело к концу истории.")
     rows.append("")
-    header = "  %-20s %-16s %10s %10s %9s %10s %10s" % (
-        "Раса", "Пробуждение", "племён", "городов", "стран", "лагерей", "лиц")
+    populations = world.population_by_race()
+    header = "  %-20s %-16s %9s %9s %8s %9s %9s %12s" % (
+        "Раса", "Пробуждение", "племён", "городов", "стран", "лагерей", "лиц",
+        "население")
     rows.append(header)
     rows.append("  " + "-" * (len(header) - 2))
     for row in world.race_summary():
@@ -160,9 +176,11 @@ def render_stats(world) -> str:
             total, alive = row[key]
             return "—" if not total else "%d/%d" % (total, alive)
 
-        rows.append("  %-20s %-16s %10s %10s %9s %10s %10s" % (
+        living = populations.get(race.id, 0)
+        rows.append("  %-20s %-16s %9s %9s %8s %9s %9s %12s" % (
             race.name, awakening, pair("tribes"), pair("settlements"),
-            pair("polities"), pair("camps"), pair("figures")))
+            pair("polities"), pair("camps"), pair("figures"),
+            "%d" % living if living else "—"))
     return "\n".join(rows)
 
 
@@ -173,6 +191,94 @@ def render_regions(world) -> str:
     for region in world.regions.values():
         neighbors = ", ".join(world.regions[n].name for n in region.neighbors)
         rows.append("  %-28s %-14s %s" % (region.name, region.terrain, neighbors))
+    return "\n".join(rows)
+
+
+def render_calamities(world) -> str:
+    """Справочник бедствий: что, когда, какой ценой и чем кончилось."""
+    from . import catastrophe as cat
+    from .narrative_calamity import number
+
+    rows = ["БЕДСТВИЯ МИРА", ""]
+    nature = world.notes.get("нрав мира")
+    if nature:
+        titles = []
+        for key in nature:
+            spec = cat.CATALOG_BY_KEY.get(key)
+            if spec is not None:
+                titles.append(spec.title.lower())
+        if titles:
+            rows.append("  Этот мир особенно склонен к таким бедам: %s."
+                        % ", ".join(titles))
+            rows.append("")
+
+    calamities = sorted(world.calamities.values(), key=lambda c: c.start.ordinal)
+    for calamity in calamities:
+        spec = cat.CATALOG_BY_KEY.get(calamity.key)
+        years = "%d—%s" % (calamity.start.year,
+                           calamity.end.year if calamity.end else "…")
+        rows.append("%s   [%s, %s]" % (
+            calamity.name, cat.KIND_NAMES.get(calamity.kind, calamity.kind),
+            cat.SEVERITY_NAMES.get(calamity.severity, "")))
+        rows.append("    годы: %-16s вид: %s" % (
+            years, spec.title if spec is not None else calamity.key))
+        if calamity.host_size:
+            rows.append("    врагов: %s" % number(calamity.host_size))
+        leader = world.figures.get(calamity.leader_id)
+        if leader is not None:
+            rows.append("    во главе: %s" % leader.name)
+        if calamity.general_ids:
+            names = ", ".join(world.figures[fid].name for fid in calamity.general_ids
+                              if fid in world.figures)
+            rows.append("    военачальники: %s" % names)
+        rows.append("    земли: %s" % ", ".join(
+            world.regions[rid].name for rid in calamity.region_ids
+            if rid in world.regions))
+        if calamity.deaths:
+            rows.append("    погибло: %s" % number(calamity.deaths))
+        if calamity.settlements_lost or calamity.polities_lost:
+            rows.append("    потеряно: поселений %d, стран %d" % (
+                calamity.settlements_lost, calamity.polities_lost))
+        if calamity.hero_ids:
+            names = ", ".join(world.figures[fid].name for fid in calamity.hero_ids
+                              if fid in world.figures)
+            rows.append("    одолели: %s" % names)
+        if calamity.commander_ids:
+            names = ", ".join(world.figures[fid].name
+                              for fid in calamity.commander_ids
+                              if fid in world.figures)
+            rows.append("    полководцы: %s" % names)
+        if calamity.resolution:
+            rows.append("    исход: %s" % calamity.resolution)
+        if calamity.compounded_with:
+            names = ", ".join(world.calamities[cid].name
+                              for cid in calamity.compounded_with
+                              if cid in world.calamities)
+            rows.append("    совпало с: %s" % names)
+        if calamity.parent_id and calamity.parent_id in world.calamities:
+            rows.append("    выросло из: %s (%d год)" % (
+                world.calamities[calamity.parent_id].name,
+                world.calamities[calamity.parent_id].start.year))
+        if calamity.dark_age_until:
+            rows.append("    тёмные века до %d года" % calamity.dark_age_until)
+        for relic_id in calamity.relic_ids:
+            relic = world.relics.get(relic_id)
+            if relic is None:
+                continue
+            region = world.regions.get(relic.region_id)
+            rows.append("    след: %s (%s, %s) — %s" % (
+                relic.name, relic.kind, region.name if region else "—",
+                relic.status))
+        for battle_id in calamity.battle_ids:
+            battle = world.battles.get(battle_id)
+            if battle is None:
+                continue
+            rows.append("    %s, %d год: победа — %s, полегло %s" % (
+                battle.name, battle.date.year, battle.winner,
+                number(battle.deaths)))
+        rows.append("")
+    if not calamities:
+        rows.append("  Миру повезло: больших бед не случилось.")
     return "\n".join(rows)
 
 
@@ -255,5 +361,6 @@ def full_text(world) -> str:
         render_regions(world),
         render_dynasties(world),
         render_houses(world),
+        render_calamities(world),
         render_stats(world),
     ))

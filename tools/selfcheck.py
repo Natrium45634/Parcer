@@ -10,7 +10,9 @@
 3. правила рас соблюдаются: зверолюды живут племенами, злые расы не
    строят государств и городов;
 4. устройство знати: фамилии только у знатных, роды только у тех рас,
-   у которых знать бывает, правления идут по порядку.
+   у которых знать бывает, правления идут по порядку;
+5. бедствия: у каждого есть исход, следы и битвы ссылаются на своё
+   бедствие, потери не превышают населения, тёмные века не вечны.
 """
 
 from __future__ import annotations
@@ -88,6 +90,67 @@ def check_nobility(world, seed: str) -> list:
     return problems
 
 
+def check_calamities(world, seed: str) -> list:
+    """Проверяет связность бедствий, их следов и сражений."""
+    problems = []
+
+    for calamity in world.calamities.values():
+        if calamity.end is None and calamity.status != "длится":
+            problems.append("сид «%s»: бедствие «%s» без даты конца"
+                            % (seed, calamity.name))
+            break
+        if calamity.end is not None and calamity.end.ordinal < calamity.start.ordinal:
+            problems.append("сид «%s»: бедствие «%s» кончилось раньше начала"
+                            % (seed, calamity.name))
+            break
+        for region_id in calamity.region_ids:
+            if region_id not in world.regions:
+                problems.append("сид «%s»: бедствие «%s» ссылается на пустую землю"
+                                % (seed, calamity.name))
+                break
+        if calamity.parent_id and calamity.parent_id not in world.calamities:
+            problems.append("сид «%s»: у бедствия «%s» потерян родитель"
+                            % (seed, calamity.name))
+            break
+
+    for relic in world.relics.values():
+        if relic.calamity_id not in world.calamities:
+            problems.append("сид «%s»: след «%s» без своего бедствия"
+                            % (seed, relic.name))
+            break
+
+    for battle in world.battles.values():
+        if battle.calamity_id not in world.calamities:
+            problems.append("сид «%s»: сражение «%s» без своего бедствия"
+                            % (seed, battle.name))
+            break
+
+    for settlement in world.settlements.values():
+        if settlement.population < 0:
+            problems.append("сид «%s»: у поселения %s отрицательное население"
+                            % (seed, settlement.name))
+            break
+
+    for record in world.dark_ages:
+        if record["end"] <= record["start"]:
+            problems.append("сид «%s»: тёмные века нулевой длины" % seed)
+            break
+
+    monsters = {race.id for race in __import__(
+        "worldgen.races", fromlist=["MONSTERS"]).MONSTERS}
+    for settlement in world.settlements.values():
+        if settlement.race_id in monsters:
+            problems.append("сид «%s»: чудовища построили город %s"
+                            % (seed, settlement.name))
+            break
+    for house in world.houses.values():
+        if house.race_id in monsters:
+            problems.append("сид «%s»: у чудовищ завёлся знатный род" % seed)
+            break
+
+    return problems
+
+
 def main() -> int:
     failures = []
 
@@ -134,11 +197,13 @@ def main() -> int:
             failures.append("сид «%s»: события идут не по порядку" % seed)
 
         failures.extend(check_nobility(first, seed))
+        failures.extend(check_calamities(first, seed))
 
         print("  сид «%-12s»  событий %5d  городов %4d  стран %3d  родов %4d  "
-              "правлений %4d  (%.1f c на два мира)"
+              "правлений %4d  бедствий %3d  население %8d  (%.1f c)"
               % (seed, len(events), len(first.settlements), len(first.polities),
-                 len(first.houses), len(first.reigns), spent))
+                 len(first.houses), len(first.reigns), len(first.calamities),
+                 first.world_population(), spent))
 
     if failures:
         print("\nОШИБКИ:")

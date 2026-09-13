@@ -15,6 +15,8 @@ from .timeline import Date
 # --- состояния ---------------------------------------------------------
 
 ACTIVE = "активно"
+ONGOING = "длится"
+ENDED = "завершено"
 SETTLED = "осело"
 GONE = "исчезло"
 RUINED = "разрушено"
@@ -208,6 +210,8 @@ class Polity:
     reign_ids: list = field(default_factory=list)
     house_ids: list = field(default_factory=list)   # знатные роды страны
     interregnum: bool = False      # престол пуст
+    population: int = 0            # полное население: города и сельская округа
+    peak_population: int = 0
 
     @property
     def full_name(self) -> str:
@@ -306,6 +310,103 @@ class Reign:
         data = asdict(self)
         data["start"] = _date_out(self.start)
         data["end"] = _date_out(self.end)
+        return data
+
+
+@dataclass
+class Calamity:
+    """Бедствие: от засухи до вторжения владыки демонов."""
+
+    id: str
+    key: str                   # ключ вида бедствия в каталоге
+    kind: str                  # natural / invasion / political / climate / magic
+    name: str                  # «Нашествие Пепельного Роя»
+    severity: int              # 1 — лёгкое, 5 — апокалиптическое
+    start: Date
+    end: Date = None
+    status: str = ONGOING
+    region_ids: list = field(default_factory=list)
+    polity_ids: list = field(default_factory=list)
+    race_id: str = ""          # раса захватчика, если есть
+    leader_id: str = ""        # вождь вторжения
+    general_ids: list = field(default_factory=list)
+    hero_ids: list = field(default_factory=list)      # кто одолел
+    commander_ids: list = field(default_factory=list)  # правители-союзники
+    resolution: str = ""       # «убит героем», «запечатан», «иссякло само»
+    deaths: int = 0
+    deaths_by_polity: dict = field(default_factory=dict)
+    deaths_by_race: dict = field(default_factory=dict)
+    settlements_lost: int = 0
+    polities_lost: int = 0
+    parent_id: str = ""        # из какого бедствия выросло
+    relic_ids: list = field(default_factory=list)
+    compounded_with: list = field(default_factory=list)
+    dark_age_until: int = 0
+    battle_ids: list = field(default_factory=list)
+    strength: float = 1.0      # запас сил захватчика, 1.0 — полон
+    host_size: int = 0         # сколько их было
+    notes: list = field(default_factory=list)
+
+    @property
+    def years(self) -> int:
+        if self.end is None:
+            return 0
+        return max(0, self.end.year - self.start.year)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["start"] = _date_out(self.start)
+        data["end"] = _date_out(self.end)
+        return data
+
+
+@dataclass
+class Relic:
+    """След бедствия: недобитый генерал, печать, проклятое место.
+
+    Через века такой след могут потревожить — и старая беда напомнит о себе.
+    """
+
+    id: str
+    name: str
+    kind: str                  # «логово», «печать», «проклятое место», …
+    calamity_id: str
+    region_id: str
+    created: Date
+    potency: int = 1           # насколько опасно пробуждение
+    status: str = "спит"       # спит / потревожен / исчерпан
+    awakened: Date = None
+    figure_id: str = ""        # уцелевший вождь, если он есть
+    race_id: str = ""
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["created"] = _date_out(self.created)
+        data["awakened"] = _date_out(self.awakened)
+        return data
+
+
+@dataclass
+class Battle:
+    """Сражение: кто, с кем, где и чем кончилось."""
+
+    id: str
+    name: str
+    date: Date
+    calamity_id: str
+    region_id: str = ""
+    attacker_id: str = ""              # вождь нападающих
+    defender_ids: list = field(default_factory=list)
+    polity_ids: list = field(default_factory=list)
+    winner: str = "враг"               # «враг» или «защитники»
+    fallen_ids: list = field(default_factory=list)
+    deaths: int = 0
+    decisive: bool = False
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["date"] = _date_out(self.date)
         return data
 
 

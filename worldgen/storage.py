@@ -11,15 +11,17 @@ import dataclasses
 import io
 import json
 
-from .models import (ACTIVE, Camp, EraSpan, Event, Figure, House, Polity,
-                     Region, Reign, Settlement, Tribe)
+from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, EraSpan, Event,
+                     Figure, House, Polity, Region, Reign, Relic, Settlement,
+                     Tribe)
 from .timeline import Date
 from .world import World
 
 FORMAT_NAME = "fantasy-chronicle-world"
 FORMAT_VERSION = 1
 
-_DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end"}
+_DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
+                "created", "awakened"}
 
 
 def _defaults(cls) -> dict:
@@ -83,6 +85,12 @@ def world_to_dict(world: World) -> dict:
         "camps": [_compact(Camp, item.to_dict()) for item in world.camps.values()],
         "houses": [_compact(House, item.to_dict()) for item in world.houses.values()],
         "reigns": [_compact(Reign, item.to_dict()) for item in world.reigns.values()],
+        "calamities": [_compact(Calamity, item.to_dict())
+                       for item in world.calamities.values()],
+        "relics": [_compact(Relic, item.to_dict()) for item in world.relics.values()],
+        "battles": [_compact(Battle, item.to_dict())
+                    for item in world.battles.values()],
+        "dark_ages": world.dark_ages,
         "events": [_compact(Event, item.to_dict()) for item in world.events],
         "race_awakening": world.race_awakening,
         "counters": world._counters,
@@ -136,6 +144,20 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("reigns", ()):
         reign = Reign(**_clean(Reign, item))
         world.reigns[reign.id] = reign
+    for item in data.get("calamities", ()):
+        calamity = Calamity(**_clean(Calamity, item))
+        world.calamities[calamity.id] = calamity
+        if calamity.status == ONGOING:
+            world.active_calamities.append(calamity.id)
+    for item in data.get("relics", ()):
+        relic = Relic(**_clean(Relic, item))
+        world.relics[relic.id] = relic
+        if relic.status == "спит":
+            world.sleeping_relics.append(relic.id)
+    for item in data.get("battles", ()):
+        battle = Battle(**_clean(Battle, item))
+        world.battles[battle.id] = battle
+    world.dark_ages = list(data.get("dark_ages") or ())
     for item in data.get("events", ()):
         world.events.append(Event(**_clean(Event, item)))
 

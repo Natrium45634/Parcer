@@ -13,7 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from worldgen import chronicle, storage
 from worldgen.engine import GenerationCancelled, Settings, generate
 from worldgen.models import ACTIVE
-from worldgen.races import RACES, get_race
+from worldgen.races import RACES, RACES_BY_ID, get_race
 from worldgen.rng import random_seed_text
 from worldgen.timeline import years_text
 
@@ -223,8 +223,8 @@ class ChronicleApp(tk.Tk):
         self.polity_tree = self._add_tree_tab(
             "Страны",
             ("Название", "Форма", "Раса", "Основана", "Основатель", "Столица",
-             "Городов", "Состояние"),
-            (210, 170, 120, 90, 210, 170, 80, 110), self._on_polity_open,
+             "Городов", "Население", "Состояние"),
+            (200, 160, 115, 85, 195, 160, 75, 95, 105), self._on_polity_open,
             filler=lambda: self._fill_polities())
         self.city_tree = self._add_tree_tab(
             "Города",
@@ -244,6 +244,12 @@ class ChronicleApp(tk.Tk):
              "Гнездо", "Живых", "Престолов", "Состояние"),
             (200, 120, 80, 190, 90, 180, 150, 60, 80, 120), self._on_house_open,
             filler=lambda: self._fill_houses())
+        self.calamity_tree = self._add_tree_tab(
+            "Бедствия",
+            ("Название", "Вид", "Уровень", "Годы", "Земель", "Врагов",
+             "Погибло", "Исход", "Следов"),
+            (230, 150, 130, 110, 70, 100, 100, 190, 70), self._on_calamity_open,
+            filler=lambda: self._fill_calamities())
         self.dynasty_text = self._add_text_tab(
             "Правители",
             filler=lambda: self._set_text(self.dynasty_text,
@@ -511,7 +517,7 @@ class ChronicleApp(tk.Tk):
                 polity.name, polity.form, get_race(polity.race_id).name,
                 polity.founded.year, founder.name if founder else "—",
                 capital.name if capital else "—",
-                len(polity.settlement_ids),
+                len(polity.settlement_ids), polity.population,
                 polity.status if polity.status == ACTIVE
                 else "%s (%d)" % (polity.status, polity.ended.year))))
         self._fill_tree(self.polity_tree, rows)
@@ -581,6 +587,22 @@ class ChronicleApp(tk.Tk):
                 house.thrones, state)))
         self._fill_tree(self.house_tree, rows)
 
+    def _fill_calamities(self) -> None:
+        from worldgen import catastrophe as cat
+        world = self.world
+        rows = []
+        for calamity in sorted(world.calamities.values(),
+                               key=lambda c: c.start.ordinal):
+            years = "%d—%s" % (calamity.start.year,
+                               calamity.end.year if calamity.end else "…")
+            rows.append((calamity.id, (
+                calamity.name, cat.KIND_NAMES.get(calamity.kind, calamity.kind),
+                cat.SEVERITY_NAMES.get(calamity.severity, ""), years,
+                len(calamity.region_ids),
+                calamity.host_size or "—", calamity.deaths,
+                calamity.resolution or "длится", len(calamity.relic_ids))))
+        self._fill_tree(self.calamity_tree, rows)
+
     def _fill_figures(self) -> None:
         world = self.world
         only_noble = getattr(self, "only_noble", None)
@@ -638,6 +660,9 @@ class ChronicleApp(tk.Tk):
 
     def _on_house_open(self, event) -> None:
         self._open_card(self._selected(self.house_tree))
+
+    def _on_calamity_open(self, event) -> None:
+        self._open_card(self._selected(self.calamity_tree))
 
     def _open_card(self, entity_id) -> None:
         if not entity_id or self.world is None:
@@ -759,6 +784,60 @@ class ChronicleApp(tk.Tk):
                 ("Состояние", entity.status),
                 ("Конец", entity.ended.long() if entity.ended else "—"),
             ]
+        elif kind == "Calamity":
+            from worldgen import catastrophe as cat
+            spec = cat.CATALOG_BY_KEY.get(entity.key)
+            fields = [
+                ("Вид", cat.KIND_NAMES.get(entity.kind, entity.kind)),
+                ("Разновидность", spec.title if spec is not None else entity.key),
+                ("Тяжесть", "%d — %s" % (entity.severity,
+                                         cat.SEVERITY_NAMES.get(entity.severity, ""))),
+                ("Начало", entity.start.long()),
+                ("Конец", entity.end.long() if entity.end else "длится"),
+                ("Длилось", "%d лет" % entity.years),
+                ("Земли", ", ".join(name_of(rid) for rid in entity.region_ids)),
+                ("Страны", ", ".join(name_of(pid) for pid in entity.polity_ids) or "—"),
+                ("Врагов", entity.host_size or "—"),
+                ("Во главе", name_of(entity.leader_id)),
+                ("Военачальники", ", ".join(name_of(fid)
+                                            for fid in entity.general_ids) or "—"),
+                ("Погибло", entity.deaths),
+                ("Потеряно поселений", entity.settlements_lost),
+                ("Потеряно стран", entity.polities_lost),
+                ("Исход", entity.resolution or "—"),
+                ("Победители", ", ".join(name_of(fid)
+                                         for fid in entity.hero_ids) or "—"),
+                ("Полководцы", ", ".join(name_of(fid)
+                                         for fid in entity.commander_ids) or "—"),
+                ("Совпало с", ", ".join(name_of(cid)
+                                        for cid in entity.compounded_with) or "—"),
+                ("Выросло из", name_of(entity.parent_id)),
+                ("Тёмные века до", entity.dark_age_until or "—"),
+            ]
+        elif kind == "Relic":
+            fields = [
+                ("Вид следа", entity.kind),
+                ("Оставлен бедствием", name_of(entity.calamity_id)),
+                ("Земля", name_of(entity.region_id)),
+                ("Появился", entity.created.long()),
+                ("Опасность", entity.potency),
+                ("Состояние", entity.status),
+                ("Потревожен", entity.awakened.long() if entity.awakened else "—"),
+                ("Связан с", name_of(entity.figure_id)),
+            ]
+        elif kind == "Battle":
+            fields = [
+                ("Дата", entity.date.long()),
+                ("Бедствие", name_of(entity.calamity_id)),
+                ("Земля", name_of(entity.region_id)),
+                ("Нападающих ведёт", name_of(entity.attacker_id)),
+                ("Защитников ведут", ", ".join(name_of(fid)
+                                               for fid in entity.defender_ids) or "—"),
+                ("Победа", entity.winner),
+                ("Полегло", entity.deaths),
+                ("Пали", ", ".join(name_of(fid) for fid in entity.fallen_ids) or "—"),
+                ("Решающая", "да" if entity.decisive else "нет"),
+            ]
         elif kind == "Camp":
             fields = [
                 ("Тип", entity.word),
@@ -825,6 +904,50 @@ class ChronicleApp(tk.Tk):
             if reigns:
                 lines.extend(["", "ПРАВЛЕНИЯ", "-" * 60])
                 lines.extend(reign_rows(reigns))
+
+        elif kind == "Calamity":
+            if entity.battle_ids:
+                lines.extend(["", "СРАЖЕНИЯ", "-" * 60])
+                for battle_id in entity.battle_ids:
+                    battle = world.battles.get(battle_id)
+                    if battle is None:
+                        continue
+                    lines.append("  %5d  %-44s победа: %-11s полегло %d" % (
+                        battle.date.year, battle.name[:44], battle.winner,
+                        battle.deaths))
+            if entity.relic_ids:
+                lines.extend(["", "СЛЕДЫ", "-" * 60])
+                for relic_id in entity.relic_ids:
+                    relic = world.relics.get(relic_id)
+                    if relic is None:
+                        continue
+                    region = world.regions.get(relic.region_id)
+                    lines.append("  %-34s %-22s %-14s %s" % (
+                        relic.name[:34], relic.kind[:22],
+                        region.name if region else "—", relic.status))
+            if entity.deaths_by_polity:
+                lines.extend(["", "ПОТЕРИ ПО СТРАНАМ", "-" * 60])
+                for polity_id, dead in sorted(entity.deaths_by_polity.items(),
+                                              key=lambda pair: -pair[1])[:12]:
+                    polity = world.polities.get(polity_id)
+                    lines.append("  %-40s %d" % (
+                        polity.full_name if polity else polity_id, dead))
+            if entity.deaths_by_race:
+                lines.extend(["", "ПОТЕРИ ПО НАРОДАМ", "-" * 60])
+                for race_id, dead in sorted(entity.deaths_by_race.items(),
+                                            key=lambda pair: -pair[1])[:12]:
+                    race = RACES_BY_ID.get(race_id)
+                    lines.append("  %-40s %d" % (
+                        race.name if race is not None else race_id, dead))
+
+        elif kind == "Relic":
+            children = [c for c in world.calamities.values()
+                        if c.parent_id == entity.calamity_id
+                        and entity.name in " ".join(c.notes)]
+            if children:
+                lines.extend(["", "ЧТО ИЗ ЭТОГО ВЫРОСЛО", "-" * 60])
+                for child in children:
+                    lines.append("  %5d  %s" % (child.start.year, child.name))
         return lines
 
     # ------------------------------------------------------------------

@@ -45,12 +45,17 @@ TERRAIN_CAPACITY = {
 CIVILIZED = "civilized"
 BEASTFOLK = "beastfolk"
 EVIL = "evil"
+MONSTER = "monster"          # не народы мира, а его бедствия
 
 CATEGORY_NAMES = {
     CIVILIZED: "Цивилизованные народы",
     BEASTFOLK: "Зверолюды",
     EVIL: "Злые расы",
+    MONSTER: "Бедствия мира",
 }
+
+# Расы, которые просыпаются в мире и живут в нём своей жизнью.
+MORTAL_CATEGORIES = (CIVILIZED, BEASTFOLK, EVIL)
 
 # --- законы наследования -----------------------------------------------
 #
@@ -503,7 +508,91 @@ RACES = (
     ),
 )
 
-RACES_BY_ID = {race.id: race for race in RACES}
+# ---------------------------------------------------------------------------
+# Бедствия мира: демоны, драконы, нежить и прочие незваные гости.
+#
+# Это не народы: они не просыпаются вместе со всеми, не заводят племён,
+# городов и стран. Они приходят извне, оставляют по себе выжженные земли
+# и уходят — а их вожди попадают в летопись наравне с королями.
+# ---------------------------------------------------------------------------
+
+MONSTERS = (
+    Race(
+        id="demon", name="Демоны", gen_plural="демонов", adj="Демонический",
+        noun_m="демон", noun_f="демоница",
+        category=MONSTER, group="Бедствия мира", style="demon",
+        terrains=_t(MOUNTAIN, DESERT, UNDERGROUND, STEPPE),
+        first_era=9, lifespan=(900, 4000), growth=0.0, expansion=0.0,
+        traits=("пожиратели душ", "владыки пламени", "искусители"),
+        tribe_words=_t("Легион", "Орда"),
+        chief_titles=_t("владыка демонов", "владычица демонов"),
+        settles=False, builds_states=False, has_nobility=False,
+        succession=STRENGTH, adulthood=100,
+    ),
+    Race(
+        id="dragon", name="Драконы", gen_plural="драконов", adj="Драконий",
+        noun_m="дракон", noun_f="драконица",
+        category=MONSTER, group="Бедствия мира", style="dragon",
+        terrains=_t(MOUNTAIN, HILLS, ISLANDS, DESERT),
+        first_era=9, lifespan=(1500, 7000), growth=0.0, expansion=0.0,
+        traits=("крылатые бедствия", "хранители золота", "древние ящеры"),
+        tribe_words=_t("Стая", "Выводок"),
+        chief_titles=_t("великий дракон", "великая драконица"),
+        settles=False, builds_states=False, has_nobility=False,
+        succession=STRENGTH, adulthood=200,
+    ),
+    Race(
+        id="undead", name="Нежить", gen_plural="нежити", adj="Мёртвый",
+        noun_m="мертвец", noun_f="мертвячка",
+        category=MONSTER, group="Бедствия мира", style="undead",
+        terrains=_t(SWAMP, UNDERGROUND, TUNDRA, PLAIN),
+        first_era=9, lifespan=(500, 9000), growth=0.0, expansion=0.0,
+        traits=("ходячие кости", "слуги праха", "не знающие усталости"),
+        tribe_words=_t("Легион", "Воинство"),
+        chief_titles=_t("великий лич", "великая личесса"),
+        settles=False, builds_states=False, has_nobility=False,
+        succession=STRENGTH, adulthood=50,
+    ),
+    Race(
+        id="deep_one", name="Глубоководные", gen_plural="глубоководных",
+        adj="Глубинный", noun_m="глубоководный", noun_f="глубоководная",
+        category=MONSTER, group="Бедствия мира", style="deep_one",
+        terrains=_t(COAST, ISLANDS, SWAMP),
+        first_era=9, lifespan=(800, 5000), growth=0.0, expansion=0.0,
+        traits=("дети бездны", "поющие в воде", "безглазые"),
+        tribe_words=_t("Косяк", "Воинство"),
+        chief_titles=_t("владыка глубин", "владычица глубин"),
+        settles=False, builds_states=False, has_nobility=False,
+        succession=STRENGTH, adulthood=60,
+    ),
+    Race(
+        id="swarm", name="Роевые твари", gen_plural="роевых тварей",
+        adj="Роевой", noun_m="трутень", noun_f="матка",
+        category=MONSTER, group="Бедствия мира", style="swarm",
+        terrains=_t(JUNGLE, DESERT, STEPPE, PLAIN),
+        first_era=9, lifespan=(20, 300), growth=0.0, expansion=0.0,
+        traits=("пожиратели полей", "бесчисленные", "жвалы и хитин"),
+        tribe_words=_t("Рой", "Гнездо"),
+        chief_titles=_t("роевой владыка", "роевая матка"),
+        settles=False, builds_states=False, has_nobility=False,
+        succession=STRENGTH, adulthood=5,
+    ),
+    Race(
+        id="void", name="Порождения Пустоты", gen_plural="порождений пустоты",
+        adj="Пустотный", noun_m="пустотник", noun_f="пустотница",
+        category=MONSTER, group="Бедствия мира", style="void",
+        terrains=_t(TUNDRA, UNDERGROUND, DESERT, MOUNTAIN),
+        first_era=9, lifespan=(100, 9000), growth=0.0, expansion=0.0,
+        traits=("то, чему нет имени", "пришедшие из ниоткуда", "неправильные"),
+        tribe_words=_t("Стая", "Скопище"),
+        chief_titles=_t("владыка пустоты", "владычица пустоты"),
+        settles=False, builds_states=False, has_nobility=False,
+        succession=STRENGTH, adulthood=10,
+    ),
+)
+
+ALL_RACES = RACES + MONSTERS
+RACES_BY_ID = {race.id: race for race in ALL_RACES}
 
 
 def get_race(race_id: str) -> Race:
@@ -511,7 +600,16 @@ def get_race(race_id: str) -> Race:
 
 
 def races_of(category: str) -> tuple:
-    return tuple(race for race in RACES if race.category == category)
+    return tuple(race for race in ALL_RACES if race.category == category)
+
+
+def mortal_races() -> tuple:
+    """Народы, которые просыпаются в мире и живут в нём."""
+    return tuple(race for race in RACES if race.category in MORTAL_CATEGORIES)
+
+
+def monster(monster_id: str) -> Race:
+    return RACES_BY_ID[monster_id]
 
 
 def playable_groups() -> tuple:

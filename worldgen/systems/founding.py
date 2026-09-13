@@ -354,7 +354,7 @@ def upkeep(ctx, year: int, period: int) -> None:
         settlement = world.settlements[settlement_id]
         race = races_mod.get_race(settlement.race_id)
         region = world.regions.get(settlement.region_id)
-        capacity = 5200.0 * (region.capacity if region else 1.0)
+        capacity = 7000.0 * (region.capacity if region else 1.0)
         if settlement.is_capital:
             capacity *= 2.1
         elif settlement.polity_id:
@@ -362,8 +362,8 @@ def upkeep(ctx, year: int, period: int) -> None:
         capacity *= 0.75 + 0.14 * era_index
 
         population = settlement.population
-        population += (population * ctx.growth(race.growth) * period
-                       * (1.0 - population / capacity))
+        population += (population * ctx.growth(race.growth, settlement.region_id)
+                       * period * (1.0 - population / capacity))
         population *= rng.uniform(0.99, 1.015)
         settlement.population = max(0, int(population))
 
@@ -382,7 +382,8 @@ def upkeep(ctx, year: int, period: int) -> None:
         camp = world.camps[camp_id]
         race = races_mod.get_race(camp.race_id)
         population = camp.population * (
-            1.0 + ctx.growth(race.growth) * period * rng.uniform(-0.6, 1.0))
+            1.0 + ctx.growth(race.growth, camp.region_id) * period
+            * rng.uniform(-0.6, 1.0))
         camp.population = max(0, int(population))
         if camp.population < 20 or rng.chance(0.0022 * spec.turmoil * period * ctx.growth_scale):
             date = ctx.date_in(rng, year)

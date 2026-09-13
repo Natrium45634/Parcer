@@ -216,6 +216,46 @@ def dative_noun(word: str) -> str:
     return word + "у"
 
 
+_HUSHING_SET = "жшчщ"
+_VELAR_SET = "кгх"
+
+
+def genitive_adjective(form: str) -> str:
+    """Родительный падеж прилагательного: «Пепельный» -> «Пепельного»."""
+    if not form:
+        return form
+    low = form.lower()
+    if low.endswith("ая"):
+        return form[:-2] + "ой"
+    if low.endswith("яя"):
+        return form[:-2] + "ей"
+    if low.endswith("ые"):
+        return form[:-2] + "ых"
+    if low.endswith("ие"):
+        return form[:-2] + "их"
+    if low.endswith("ое"):
+        return form[:-2] + "ого"
+    if low.endswith("ее"):
+        return form[:-2] + "его"
+    if low.endswith("ний"):
+        return form[:-3] + "него"
+    if low.endswith("ий"):
+        stem = form[:-2]
+        last = stem[-1:].lower()
+        if last in _HUSHING_SET:
+            return stem + "его"
+        return stem + "ого"
+    if low.endswith("ый") or low.endswith("ой"):
+        return form[:-2] + "ого"
+    return form
+
+
+def genitive_phrase(adj: str, noun: str, gender: str) -> str:
+    """«Пепельный» + «Легион» -> «Пепельного Легиона»."""
+    return "%s %s" % (genitive_adjective(adjective_for(adj, gender)),
+                      genitive_noun(noun))
+
+
 def gendered(word_pair, sex: str) -> str:
     """Выбирает форму из пары (мужская, женская) по полу персонажа."""
     if isinstance(word_pair, (tuple, list)):

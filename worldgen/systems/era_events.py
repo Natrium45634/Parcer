@@ -11,6 +11,7 @@ from __future__ import annotations
 from .. import narrative
 from ..eras import spec_for
 from ..models import FALLEN, GONE, RUINED
+from ..narrative_calamity import souls as _souls
 from ..timeline import DAYS_IN_MONTH, MONTHS_IN_YEAR, Date
 
 
@@ -36,6 +37,12 @@ def finish(ctx, era, is_last: bool) -> None:
         losses = _cataclysm(ctx, era, rng, date)
 
     title, text = narrative.era_end(rng, era, spec, losses, is_last=is_last)
+    # Численность живых на конец эпохи — чтобы было видно, растёт мир или
+    # только хоронит.
+    world.refresh_populations()
+    population = world.world_population()
+    if population:
+        text += " К концу эпохи в мире живёт %s." % _souls(population)
     event = world.add_event(
         date=date, era_index=era.index, kind="era_end", title=title, text=text,
         importance=5,
