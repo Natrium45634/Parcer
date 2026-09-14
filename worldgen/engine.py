@@ -21,7 +21,7 @@ from .context import GenContext
 from .eras import build_eras
 from .rng import seed_to_int
 from .systems import (calamity, era_events, founding, geography, houses, lives,
-                      peoples, succession)
+                      peoples, religion, succession)
 from .timeline import Date
 from .world import World
 from . import narrative
@@ -74,6 +74,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
 
     peoples.plan_awakenings(ctx)
     calamity.prepare(ctx)
+    religion.prepare(ctx)
 
     total = settings.years
     step = max(1, total // 120)
@@ -94,6 +95,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         founding.tick_camps(ctx, year)
         succession.tick(ctx, year)
         calamity.tick(ctx, year)
+        religion.tick(ctx, year)
         lives.tick(ctx, year)
 
         if year % UPKEEP_PERIOD == 0:
@@ -103,6 +105,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             houses.upkeep(ctx, year, UPKEEP_PERIOD)
             succession.upkeep(ctx, year, UPKEEP_PERIOD)
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)
+            religion.upkeep(ctx, year, UPKEEP_PERIOD)
 
         era = era_ends.get(year)
         if era is not None:
@@ -124,4 +127,5 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
 def _finalize(world: World) -> None:
     """Приводит летопись в порядок: строгий хронологический порядок событий."""
     world.refresh_populations()
+    world.refresh_faiths()
     world.events.sort(key=lambda event: (event.date.ordinal, int(event.id[1:])))

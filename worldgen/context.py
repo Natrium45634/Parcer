@@ -40,6 +40,10 @@ class GenContext:
         self.calamity_bias = {}      # нрав мира: к каким бедам он склонен
         self.calamity_last = {}
         self.calamity_plans = {}
+        self.piety = 1.0             # набожность мира
+        self.dark_tilt = 0.0         # склонность богов к тьме
+        self.faith_style = "многобожие"
+        self.faith_dawn = 10 ** 9    # год, когда родится первая вера
 
     # ------------------------------------------------------------------
     # Случайность

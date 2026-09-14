@@ -745,7 +745,14 @@ class NameForge:
             if name not in taken:
                 taken.add(name)
                 return name
-        # Всё занято — добавляем отличающий признак.
+        # Всё занято — добавляем отличающий признак. Людям он идёт вслед
+        # («Скирек Младший»), местам — впереди («Новый Вестгард»).
+        if bucket.startswith("person") or bucket == "deity":
+            for suffix in ("Младший", "Старший", "Второй", "Третий", "Иной"):
+                candidate = "%s %s" % (name, suffix)
+                if candidate not in taken:
+                    taken.add(candidate)
+                    return candidate
         for prefix in ("Новый", "Верхний", "Нижний", "Дальний", "Старый", "Второй"):
             candidate = "%s %s" % (prefix, name)
             if candidate not in taken:
@@ -757,6 +764,10 @@ class NameForge:
         candidate = "%s %d" % (name, index)
         taken.add(candidate)
         return candidate
+
+    def unique(self, bucket: str, maker, rng, attempts: int = 12) -> str:
+        """Обёртка для имён, которые собираются вне кузницы (например, вер)."""
+        return self._unique(bucket, maker, rng, attempts)
 
     @staticmethod
     def style_of(race) -> NameStyle:
@@ -822,6 +833,29 @@ class NameForge:
             return self._proper_place(rng, st)
 
         return self._unique("place", make, rng)
+
+    def deity(self, rng, race, sex: str = "m") -> str:
+        """Имя божества: длиннее и звучнее смертного.
+
+        Берётся стиль того народа, которому бог явился первым: эльфийский
+        бог звучит по-эльфийски, дворфийский — по-дворфийски.
+        """
+        st = self.style_of(race)
+        ends = st.female_ends if sex == "f" else st.male_ends
+
+        def make():
+            parts = [rng.choice(st.starts)]
+            for _ in range(rng.randint(1, 2)):
+                if st.middles:
+                    parts.append(rng.choice(st.middles))
+            parts.append(rng.choice(ends or st.place_ends or ("ар",)))
+            word = _polish("".join(parts).lower())
+            if st.apostrophe and rng.chance(st.apostrophe * 0.6) and len(word) > 5:
+                cut = rng.randint(2, len(word) - 2)
+                word = word[:cut] + "'" + word[cut:]
+            return _capitalize(word)
+
+        return self._unique("deity", make, rng)
 
     def house(self, rng, race) -> str:
         """Родовое имя: «Альдеринг», «Камнерез», «Аэлиндор», «Рыжехвост»."""

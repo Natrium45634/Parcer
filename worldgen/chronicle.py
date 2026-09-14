@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import textwrap
 
+from . import races as races_mod
 from .timeline import years_text
 
 IMPORTANCE_MARKS = {5: "***", 4: " **", 3: "  *", 2: "   ", 1: "   "}
@@ -53,6 +54,24 @@ KIND_LABELS = {
     "polity_split": "Осколок державы",
     "polity_fracture": "Раздробленность",
     "conquest": "Завоевание",
+    "faith_born": "Рождение веры",
+    "faith_spread": "Обращение в веру",
+    "state_faith": "Государственная вера",
+    "dark_state": "Тёмная вера у власти",
+    "temple_built": "Построен храм",
+    "temple_ruined": "Заброшенный храм",
+    "schism": "Раскол веры",
+    "persecution": "Гонения на веру",
+    "crusade": "Священный поход",
+    "blessing": "Благословение",
+    "curse": "Проклятие",
+    "faith_fading": "Угасание веры",
+    "faith_forgotten": "Забытая вера",
+    "faith_revived": "Возвращение веры",
+    "divine_blame": "Гнев богов",
+    "festival": "Праздник",
+    "high_priest": "Глава веры",
+    "champion": "Избранник богов",
 }
 
 
@@ -191,6 +210,69 @@ def render_regions(world) -> str:
     for region in world.regions.values():
         neighbors = ", ".join(world.regions[n].name for n in region.neighbors)
         rows.append("  %-28s %-14s %s" % (region.name, region.terrain, neighbors))
+    return "\n".join(rows)
+
+
+def render_pantheon(world) -> str:
+    """Боги мира: имена, сферы, мировоззрение, праздники."""
+    from . import pantheon as pan
+    from .narrative_faith import domains_list, festival_line
+
+    rows = ["БОГИ МИРА", ""]
+    nature = world.notes.get("вера мира")
+    if nature:
+        rows.append("  Устройство веры: %s. Набожность: %s. Первая вера явилась "
+                    "в %s году." % (nature.get("устройство"),
+                                    nature.get("набожность"),
+                                    nature.get("первая вера")))
+        rows.append("")
+    if not world.deities:
+        rows.append("  Богов в этом мире так и не назвали по именам.")
+        return "\n".join(rows)
+
+    by_faith = {}
+    for deity in world.deities.values():
+        by_faith.setdefault(deity.faith_id, []).append(deity)
+
+    for faith_id, deities in sorted(by_faith.items()):
+        faith = world.faiths.get(faith_id)
+        head = faith.name if faith is not None else "Без веры"
+        state = faith.status if faith is not None else ""
+        rows.append("%s   [%s]" % (head, state))
+        for deity in sorted(deities, key=lambda d: d.id):
+            rows.append("    %-42s %-32s %s" % (
+                deity.full_name[:42],
+                domains_list(deity.domains)[:32],
+                pan.ALIGNMENT_SHORT.get(deity.alignment, "")))
+            rows.append("        знак: %-26s праздник: %s%s" % (
+                deity.symbol[:26], festival_line(deity),
+                "" if deity.status == "почитается" else "  (%s)" % deity.status))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def render_faiths(world) -> str:
+    """Веры мира: кто, когда, сколько верующих и чем кончилось."""
+    from . import pantheon as pan
+    from .narrative_calamity import number
+
+    rows = ["ВЕРЫ МИРА", ""]
+    header = "  %-26s %-15s %8s %-13s %10s %s" % (
+        "Вера", "Вид", "Основана", "Состояние", "Верующих", "Народы")
+    rows.append(header)
+    rows.append("  " + "-" * (len(header) - 2))
+    for faith in sorted(world.faiths.values(), key=lambda f: f.founded.ordinal):
+        races = ", ".join(races_mod.RACES_BY_ID[rid].name
+                          for rid in faith.race_ids
+                          if rid in races_mod.RACES_BY_ID)
+        rows.append("  %-26s %-15s %8d %-13s %10s %s" % (
+            faith.name[:26], pan.FAITH_KIND_NAMES.get(faith.kind, faith.kind)[:15],
+            faith.founded.year, faith.status[:13],
+            number(faith.followers), races[:40]))
+    rows.append("")
+    rows.append("  Храмов построено: %d, из них стоит: %d" % (
+        len(world.temples),
+        sum(1 for t in world.temples.values() if t.status == "действует")))
     return "\n".join(rows)
 
 
@@ -361,6 +443,8 @@ def full_text(world) -> str:
         render_regions(world),
         render_dynasties(world),
         render_houses(world),
+        render_pantheon(world),
+        render_faiths(world),
         render_calamities(world),
         render_stats(world),
     ))

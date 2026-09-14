@@ -94,6 +94,12 @@ RELIC_FORMS = {
     "оспоренный престол": ("Оспоренный престол", "m", False),
     "память о бунте": ("Память о бунте", "f", False),
     "проклятый род": ("Проклятый род", "m", False),
+    "выжженное капище": ("Выжженное капище", "n", False),
+    "память о мучениках": ("Память о мучениках", "f", False),
+    "спорная земля": ("Спорная земля", "f", False),
+    "разорённый храм": ("Разорённый храм", "m", False),
+    "храм забытой веры": ("Храм забытой веры", "m", False),
+    "идол забытого бога": ("Идол забытого бога", "m", False),
 }
 
 # Следы, которые способны сами породить новую беду.
@@ -103,6 +109,10 @@ LIVING_RELICS = (
     "драконье логово", "гробница", "печать", "прореха", "разлом",
     "затонувший храм", "проклятое место",
 )
+
+# Следы веры не порождают новых бедствий: их пробуждение возвращает
+# к жизни забытую религию (этим занимается systems/religion.py).
+FAITH_RELICS = ("храм забытой веры", "идол забытого бога")
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +256,7 @@ def _maybe_start(ctx, year: int) -> None:
 
 
 def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
-                    parent=None, relic=None):
+                    parent=None, relic=None, region_ids=None):
     world = ctx.world
     severity = severity or spec.severity(rng)
     duration = spec.years(rng, severity)
@@ -257,7 +267,9 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
         victim = _pick_victim_polity(ctx, rng, spec, severity)
         if victim is None:
             return None
-    region_ids = _pick_regions(ctx, rng, spec, count, victim)
+    if not region_ids:
+        region_ids = _pick_regions(ctx, rng, spec, count, victim)
+    region_ids = [rid for rid in region_ids if rid in world.regions]
     if not region_ids:
         return None
 
@@ -306,6 +318,17 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     )
     if relic is not None:
         calamity.notes.append("пробуждение следа: %s" % relic.name)
+    return calamity
+
+
+def start_named(ctx, year: int, spec_key: str, rng, severity: int = 0,
+                region_ids=None, note: str = ""):
+    """Запускает бедствие заданного вида — для войн за веру и походов."""
+    spec = cat.get_spec(spec_key)
+    calamity = _start_calamity(ctx, year, spec, rng, severity=severity,
+                               region_ids=region_ids)
+    if calamity is not None and note:
+        calamity.notes.append(note)
     return calamity
 
 
@@ -1113,6 +1136,8 @@ def _maybe_wake_relic(ctx, year: int) -> None:
         region_id=relic.region_id, race_id=relic.race_id)
 
     # Опасный след даёт начало новой, уже меньшей беде.
+    if relic.kind in FAITH_RELICS:
+        return            # забытую веру поднимает система религии
     if relic.kind in LIVING_RELICS and relic.potency >= 2 and rng.chance(0.45):
         spec = cat.get_spec(origin.key) if origin is not None else None
         if spec is not None:

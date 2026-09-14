@@ -12,8 +12,9 @@ import heapq
 
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
-                     Battle, Calamity, Camp, Event, Figure, House, Polity,
-                     Region, Reign, Relic, Settlement, Tribe)
+                     Battle, Calamity, Camp, Deity, Event, Faith, Figure,
+                     House, Polity, Region, Reign, Relic, Settlement, Temple,
+                     Tribe)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
@@ -44,6 +45,9 @@ class World:
         self.relics = {}               # id -> Relic (следы бедствий)
         self.battles = {}              # id -> Battle (сражения)
         self.dark_ages = []            # тёмные века: последствия бедствий
+        self.deities = {}              # id -> Deity (боги)
+        self.faiths = {}               # id -> Faith (веры)
+        self.temples = {}              # id -> Temple (храмы и святилища)
         self.events = []               # список Event в хронологическом порядке
 
         # Быстрые списки активных сущностей (поддерживаются в актуальном виде).
@@ -54,6 +58,7 @@ class World:
         self.active_houses = []
         self.active_calamities = []
         self.sleeping_relics = []
+        self.living_faiths = []
 
         # Служебное
         self._counters = {}
@@ -111,6 +116,45 @@ class World:
         self.houses[house.id] = house
         self.active_houses.append(house.id)
         return house
+
+    def add_deity(self, **kwargs) -> Deity:
+        deity = Deity(id=self.next_id("Y"), **kwargs)
+        self.deities[deity.id] = deity
+        return deity
+
+    def add_faith(self, **kwargs) -> Faith:
+        faith = Faith(id=self.next_id("W"), **kwargs)
+        self.faiths[faith.id] = faith
+        self.living_faiths.append(faith.id)
+        return faith
+
+    def add_temple(self, **kwargs) -> Temple:
+        temple = Temple(id=self.next_id("M"), **kwargs)
+        self.temples[temple.id] = temple
+        faith = self.faiths.get(temple.faith_id)
+        if faith is not None:
+            faith.temple_ids.append(temple.id)
+        return temple
+
+    def end_faith(self, faith, date: Date, reason: str, status: str) -> None:
+        if faith.id not in self.living_faiths:
+            return
+        faith.status = status
+        faith.ended = date
+        faith.end_reason = reason
+        self.living_faiths.remove(faith.id)
+        for deity_id in faith.deity_ids:
+            deity = self.deities.get(deity_id)
+            if deity is not None:
+                deity.status = "забыт"
+
+    def end_temple(self, temple, date: Date, reason: str,
+                   status: str = "в руинах") -> None:
+        if temple.status != "действует":
+            return
+        temple.status = status
+        temple.ended = date
+        temple.end_reason = reason
 
     def add_calamity(self, **kwargs) -> Calamity:
         calamity = Calamity(id=self.next_id("D"), **kwargs)
@@ -351,7 +395,8 @@ class World:
             "R": self.regions, "F": self.figures, "T": self.tribes,
             "C": self.settlements, "P": self.polities, "K": self.camps,
             "H": self.houses, "G": self.reigns, "D": self.calamities,
-            "L": self.relics, "B": self.battles,
+            "L": self.relics, "B": self.battles, "Y": self.deities,
+            "W": self.faiths, "M": self.temples,
         }.get(prefix)
         return table.get(entity_id) if table else None
 
@@ -406,6 +451,56 @@ class World:
             camp = self.camps[camp_id]
             totals[camp.race_id] = totals.get(camp.race_id, 0) + camp.population
         return totals
+
+    # ------------------------------------------------------------------
+    # Вера
+    # ------------------------------------------------------------------
+
+    def refresh_faiths(self) -> None:
+        """Пересчитывает верующих и народы-носители каждой веры."""
+        totals = {}
+        races = {}
+        for settlement_id in self.active_settlements:
+            settlement = self.settlements[settlement_id]
+            if not settlement.faith_id:
+                continue
+            totals[settlement.faith_id] = totals.get(settlement.faith_id, 0) + \
+                self.settlement_realm(settlement)
+            races.setdefault(settlement.faith_id, set()).add(settlement.race_id)
+        for tribe_id in self.active_tribes:
+            tribe = self.tribes[tribe_id]
+            if tribe.faith_id:
+                totals[tribe.faith_id] = totals.get(tribe.faith_id, 0) + tribe.population
+                races.setdefault(tribe.faith_id, set()).add(tribe.race_id)
+        for camp_id in self.active_camps:
+            camp = self.camps[camp_id]
+            if camp.faith_id:
+                totals[camp.faith_id] = totals.get(camp.faith_id, 0) + camp.population
+                races.setdefault(camp.faith_id, set()).add(camp.race_id)
+        for faith in self.faiths.values():
+            faith.followers = totals.get(faith.id, 0)
+            faith.peak_followers = max(faith.peak_followers, faith.followers)
+            # Государственной вера считается только в живых странах.
+            faith.polity_ids = [pid for pid in faith.polity_ids
+                                if pid in self.polities
+                                and self.polities[pid].status == ACTIVE
+                                and self.polities[pid].faith_id == faith.id]
+            present = races.get(faith.id)
+            if present:
+                # Народы-носители — те, кто верит сейчас, плюс родина веры.
+                home = faith.race_ids[0] if faith.race_ids else ""
+                ordered = sorted(present)
+                if home and home in ordered:
+                    ordered.remove(home)
+                    ordered.insert(0, home)
+                faith.race_ids = ordered
+
+    def faiths_of_race(self, race_id: str) -> list:
+        return [self.faiths[fid] for fid in self.living_faiths
+                if race_id in self.faiths[fid].race_ids]
+
+    def deity_of(self, faith) -> "Deity":
+        return self.deities.get(faith.chief_deity_id)
 
     # ------------------------------------------------------------------
     # Тёмные века
@@ -471,6 +566,10 @@ class World:
             "Сражений": len(self.battles),
             "Следов бедствий": len(self.relics),
             "Тёмных веков": len(self.dark_ages),
+            "Богов": len(self.deities),
+            "Вер (всего)": len(self.faiths),
+            "Вер (живых)": len(self.living_faiths),
+            "Храмов": len(self.temples),
             "Население мира": "%d" % self.world_population(),
             "Погибло от бедствий": "%d" % sum(
                 c.deaths for c in self.calamities.values()),

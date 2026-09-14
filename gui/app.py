@@ -110,7 +110,8 @@ class ChronicleApp(tk.Tk):
                         font=pick_font(("Segoe UI", "DejaVu Sans"), 10, "bold"))
         style.map("Go.TButton", background=[("active", "#e0bc63")])
         style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", background=PANEL, foreground=INK, padding=(14, 6))
+        style.configure("TNotebook.Tab", background=PANEL, foreground=INK,
+                        padding=(8, 5))
         style.map("TNotebook.Tab", background=[("selected", "#3a3550")],
                   foreground=[("selected", ACCENT)])
         style.configure("Treeview", background="#211f2c", fieldbackground="#211f2c",
@@ -223,8 +224,8 @@ class ChronicleApp(tk.Tk):
         self.polity_tree = self._add_tree_tab(
             "Страны",
             ("Название", "Форма", "Раса", "Основана", "Основатель", "Столица",
-             "Городов", "Население", "Состояние"),
-            (200, 160, 115, 85, 195, 160, 75, 95, 105), self._on_polity_open,
+             "Городов", "Население", "Вера", "Состояние"),
+            (185, 150, 110, 80, 180, 150, 70, 90, 150, 100), self._on_polity_open,
             filler=lambda: self._fill_polities())
         self.city_tree = self._add_tree_tab(
             "Города",
@@ -244,6 +245,16 @@ class ChronicleApp(tk.Tk):
              "Гнездо", "Живых", "Престолов", "Состояние"),
             (200, 120, 80, 190, 90, 180, 150, 60, 80, 120), self._on_house_open,
             filler=lambda: self._fill_houses())
+        self.faith_tree = self._add_tree_tab(
+            "Веры",
+            ("Вера", "Вид", "Основана", "Состояние", "Мировоззрение",
+             "Верующих", "Богов", "Храмов", "Народы"),
+            (200, 120, 80, 110, 130, 100, 60, 60, 230), self._on_faith_open,
+            filler=lambda: self._fill_faiths())
+        self.pantheon_text = self._add_text_tab(
+            "Пантеон",
+            filler=lambda: self._set_text(self.pantheon_text,
+                                          chronicle.render_pantheon(self.world)))
         self.calamity_tree = self._add_tree_tab(
             "Бедствия",
             ("Название", "Вид", "Уровень", "Годы", "Земель", "Врагов",
@@ -518,6 +529,8 @@ class ChronicleApp(tk.Tk):
                 polity.founded.year, founder.name if founder else "—",
                 capital.name if capital else "—",
                 len(polity.settlement_ids), polity.population,
+                (world.faiths[polity.faith_id].name
+                 if polity.faith_id in world.faiths else "—"),
                 polity.status if polity.status == ACTIVE
                 else "%s (%d)" % (polity.status, polity.ended.year))))
         self._fill_tree(self.polity_tree, rows)
@@ -586,6 +599,21 @@ class ChronicleApp(tk.Tk):
                 seat.name if seat else "—", house.alive_count,
                 house.thrones, state)))
         self._fill_tree(self.house_tree, rows)
+
+    def _fill_faiths(self) -> None:
+        from worldgen import pantheon as pan
+        world = self.world
+        rows = []
+        for faith in sorted(world.faiths.values(), key=lambda f: f.founded.ordinal):
+            races = ", ".join(RACES_BY_ID[rid].name for rid in faith.race_ids
+                              if rid in RACES_BY_ID)
+            rows.append((faith.id, (
+                faith.name, pan.FAITH_KIND_NAMES.get(faith.kind, faith.kind),
+                faith.founded.year, faith.status,
+                pan.ALIGNMENT_NAMES.get(faith.alignment, ""),
+                faith.followers, len(faith.deity_ids), len(faith.temple_ids),
+                races)))
+        self._fill_tree(self.faith_tree, rows)
 
     def _fill_calamities(self) -> None:
         from worldgen import catastrophe as cat
@@ -663,6 +691,9 @@ class ChronicleApp(tk.Tk):
 
     def _on_calamity_open(self, event) -> None:
         self._open_card(self._selected(self.calamity_tree))
+
+    def _on_faith_open(self, event) -> None:
+        self._open_card(self._selected(self.faith_tree))
 
     def _open_card(self, entity_id) -> None:
         if not entity_id or self.world is None:
@@ -781,6 +812,61 @@ class ChronicleApp(tk.Tk):
                 ("Членов рода", len(entity.members)),
                 ("Живых", entity.alive_count),
                 ("Отделился от", name_of(entity.parent_id)),
+                ("Состояние", entity.status),
+                ("Конец", entity.ended.long() if entity.ended else "—"),
+            ]
+        elif kind == "Faith":
+            from worldgen import pantheon as pan
+            fields = [
+                ("Вид", pan.FAITH_KIND_NAMES.get(entity.kind, entity.kind)),
+                ("Основана", entity.founded.long()),
+                ("Основатель", name_of(entity.founder_id)),
+                ("Мировоззрение", "%d — %s" % (
+                    entity.alignment,
+                    pan.ALIGNMENT_NAMES.get(entity.alignment, ""))),
+                ("Под запретом", "да" if entity.forbidden else "нет"),
+                ("Состояние", entity.status),
+                ("Верующих", entity.followers),
+                ("Наибольшее число", entity.peak_followers),
+                ("Народы", ", ".join(RACES_BY_ID[rid].name
+                                     for rid in entity.race_ids
+                                     if rid in RACES_BY_ID) or "—"),
+                ("Государственная в", ", ".join(name_of(pid)
+                                                for pid in entity.polity_ids) or "—"),
+                ("Глава веры", name_of(entity.high_priest_id)),
+                ("Богов", len(entity.deity_ids)),
+                ("Храмов", len(entity.temple_ids)),
+                ("Отделилась от", name_of(entity.parent_id)),
+                ("Конец", entity.ended.long() if entity.ended else "—"),
+            ]
+        elif kind == "Deity":
+            from worldgen import pantheon as pan
+            from worldgen.narrative_faith import domains_list, festival_line
+            fields = [
+                ("Титул", entity.title),
+                ("Пол", {"m": "мужской", "f": "женский"}.get(entity.sex, "без пола")),
+                ("Сферы", domains_list(entity.domains)),
+                ("Мировоззрение", "%d — %s" % (
+                    entity.alignment,
+                    pan.ALIGNMENT_NAMES.get(entity.alignment, ""))),
+                ("Знак", entity.symbol),
+                ("Праздник", festival_line(entity)),
+                ("Явился", entity.revealed.long() if entity.revealed else "—"),
+                ("Народ", RACES_BY_ID[entity.race_id].name
+                 if entity.race_id in RACES_BY_ID else "—"),
+                ("Вера", name_of(entity.faith_id)),
+                ("Состояние", entity.status),
+            ]
+        elif kind == "Temple":
+            fields = [
+                ("Вера", name_of(entity.faith_id)),
+                ("Божество", name_of(entity.deity_id)),
+                ("Город", name_of(entity.settlement_id)),
+                ("Земля", name_of(entity.region_id)),
+                ("Основан", entity.founded.long() if entity.founded else "—"),
+                ("Строитель", name_of(entity.founder_id)),
+                ("Величина", {1: "святилище", 2: "храм", 3: "великий храм"}.get(
+                    entity.grandeur, "храм")),
                 ("Состояние", entity.status),
                 ("Конец", entity.ended.long() if entity.ended else "—"),
             ]
@@ -939,6 +1025,28 @@ class ChronicleApp(tk.Tk):
                     race = RACES_BY_ID.get(race_id)
                     lines.append("  %-40s %d" % (
                         race.name if race is not None else race_id, dead))
+
+        elif kind == "Faith":
+            if entity.deity_ids:
+                from worldgen.narrative_faith import domains_list, festival_line
+                lines.extend(["", "БОГИ ЭТОЙ ВЕРЫ", "-" * 60])
+                for deity_id in entity.deity_ids:
+                    deity = world.deities.get(deity_id)
+                    if deity is None:
+                        continue
+                    lines.append("  %-40s %s" % (
+                        deity.full_name[:40], domains_list(deity.domains)))
+                    lines.append("      %s  праздник: %s" % (
+                        deity.symbol, festival_line(deity)))
+            temples = [world.temples[tid] for tid in entity.temple_ids
+                       if tid in world.temples]
+            if temples:
+                lines.extend(["", "ХРАМЫ", "-" * 60])
+                for temple in temples[:40]:
+                    settlement = world.settlements.get(temple.settlement_id)
+                    lines.append("  %-34s %-22s %s" % (
+                        temple.name[:34],
+                        settlement.name if settlement else "—", temple.status))
 
         elif kind == "Relic":
             children = [c for c in world.calamities.values()

@@ -11,9 +11,9 @@ import dataclasses
 import io
 import json
 
-from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, EraSpan, Event,
-                     Figure, House, Polity, Region, Reign, Relic, Settlement,
-                     Tribe)
+from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, EraSpan,
+                     Event, Faith, Figure, House, Polity, Region, Reign, Relic,
+                     Settlement, Temple, Tribe)
 from .timeline import Date
 from .world import World
 
@@ -21,7 +21,7 @@ FORMAT_NAME = "fantasy-chronicle-world"
 FORMAT_VERSION = 1
 
 _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
-                "created", "awakened"}
+                "created", "awakened", "revealed"}
 
 
 def _defaults(cls) -> dict:
@@ -91,6 +91,10 @@ def world_to_dict(world: World) -> dict:
         "battles": [_compact(Battle, item.to_dict())
                     for item in world.battles.values()],
         "dark_ages": world.dark_ages,
+        "deities": [_compact(Deity, item.to_dict()) for item in world.deities.values()],
+        "faiths": [_compact(Faith, item.to_dict()) for item in world.faiths.values()],
+        "temples": [_compact(Temple, item.to_dict())
+                    for item in world.temples.values()],
         "events": [_compact(Event, item.to_dict()) for item in world.events],
         "race_awakening": world.race_awakening,
         "counters": world._counters,
@@ -158,6 +162,17 @@ def dict_to_world(data: dict) -> World:
         battle = Battle(**_clean(Battle, item))
         world.battles[battle.id] = battle
     world.dark_ages = list(data.get("dark_ages") or ())
+    for item in data.get("deities", ()):
+        deity = Deity(**_clean(Deity, item))
+        world.deities[deity.id] = deity
+    for item in data.get("faiths", ()):
+        faith = Faith(**_clean(Faith, item))
+        world.faiths[faith.id] = faith
+        if faith.status not in ("забыта",):
+            world.living_faiths.append(faith.id)
+    for item in data.get("temples", ()):
+        temple = Temple(**_clean(Temple, item))
+        world.temples[temple.id] = temple
     for item in data.get("events", ()):
         world.events.append(Event(**_clean(Event, item)))
 

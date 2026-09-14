@@ -62,6 +62,9 @@ class Figure:
     regnal_number: int = 0       # «Ронвальд II»
     noble: bool = False
     death_cause: str = ""
+    faith_id: str = ""           # во что верил(а)
+    patron_deity_id: str = ""    # кто покровительствовал или проклял
+    divine_mark: str = ""        # «благословение», «проклятие»
 
     @property
     def name(self) -> str:
@@ -143,6 +146,7 @@ class Tribe:
     settlement_id: str = ""   # если племя осело и построило поселение
     parent_id: str = ""       # от какого племени откололось
     end_reason: str = ""
+    faith_id: str = ""
 
     @property
     def full_name(self) -> str:
@@ -174,6 +178,7 @@ class Settlement:
     ended: Date = None
     origin_tribe_id: str = ""
     end_reason: str = ""
+    faith_id: str = ""             # во что верят жители
 
     @property
     def full_name(self) -> str:
@@ -212,6 +217,7 @@ class Polity:
     interregnum: bool = False      # престол пуст
     population: int = 0            # полное население: города и сельская округа
     peak_population: int = 0
+    faith_id: str = ""             # государственная вера
 
     @property
     def full_name(self) -> str:
@@ -240,6 +246,7 @@ class Camp:
     status: str = ACTIVE
     ended: Date = None
     end_reason: str = ""
+    faith_id: str = ""
 
     @property
     def full_name(self) -> str:
@@ -310,6 +317,100 @@ class Reign:
         data = asdict(self)
         data["start"] = _date_out(self.start)
         data["end"] = _date_out(self.end)
+        return data
+
+
+@dataclass
+class Deity:
+    """Божество: имя, титул, сферы покровительства и мировоззрение."""
+
+    id: str
+    given_name: str
+    title: str                 # «Владыка», «Мать», «Око»
+    sex: str = "m"             # m / f / n — есть и безликие
+    race_id: str = ""          # народ, которому бог явился первым
+    faith_id: str = ""
+    domains: list = field(default_factory=list)     # ключи сфер
+    alignment: int = 0         # от 3 (всеблагой) до -3 (злой)
+    symbol: str = ""
+    festival_name: str = ""
+    festival_month: int = 1
+    festival_day: int = 1
+    revealed: Date = None
+    status: str = "почитается"  # почитается / забыт / низвергнут
+    epithet: str = ""          # «Владыка Леса»
+    notes: list = field(default_factory=list)
+
+    @property
+    def full_name(self) -> str:
+        if self.epithet:
+            return "%s, %s" % (self.given_name, self.epithet)
+        return self.given_name
+
+    @property
+    def name(self) -> str:
+        return self.given_name
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["revealed"] = _date_out(self.revealed)
+        data["full_name"] = self.full_name
+        return data
+
+
+@dataclass
+class Faith:
+    """Вера: пантеон, культ одного бога, ересь или вера предков."""
+
+    id: str
+    name: str
+    kind: str                  # пантеон / культ / ересь / вера предков
+    founded: Date
+    founder_id: str = ""       # пророк или основатель
+    deity_ids: list = field(default_factory=list)
+    chief_deity_id: str = ""
+    race_ids: list = field(default_factory=list)    # народы-носители
+    polity_ids: list = field(default_factory=list)  # где она государственная
+    temple_ids: list = field(default_factory=list)
+    high_priest_id: str = ""
+    alignment: int = 0
+    status: str = "зарождается"
+    forbidden: bool = False
+    followers: int = 0
+    peak_followers: int = 0
+    parent_id: str = ""        # от какой веры откололась
+    ended: Date = None
+    end_reason: str = ""
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["founded"] = _date_out(self.founded)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
+class Temple:
+    """Храм или святилище. Разрушенный храм остаётся в летописи руинами."""
+
+    id: str
+    name: str
+    faith_id: str
+    deity_id: str = ""
+    settlement_id: str = ""
+    region_id: str = ""
+    founded: Date = None
+    founder_id: str = ""
+    grandeur: int = 1          # 1 — святилище, 3 — великий храм
+    status: str = "действует"  # действует / заброшен / в руинах
+    ended: Date = None
+    end_reason: str = ""
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["founded"] = _date_out(self.founded)
+        data["ended"] = _date_out(self.ended)
         return data
 
 

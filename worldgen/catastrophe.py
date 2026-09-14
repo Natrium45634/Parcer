@@ -28,6 +28,7 @@ CLIMATE = "climate"
 INVASION = "invasion"
 POLITICAL = "political"
 MAGIC = "magic"
+RELIGIOUS = "religious"
 
 KIND_NAMES = {
     NATURAL: "Природное бедствие",
@@ -35,6 +36,7 @@ KIND_NAMES = {
     INVASION: "Вторжение",
     POLITICAL: "Политическая катастрофа",
     MAGIC: "Магический катаклизм",
+    RELIGIOUS: "Война за веру",
 }
 
 SEVERITY_NAMES = {
@@ -625,6 +627,47 @@ CATALOG = (
         weight=1.0, era_range=(1, 4),
     ),
 )
+
+# Эти две беды не выпадают сами: их начинает система веры.
+RELIGIOUS_SPECS = (
+    CalamitySpec(
+        key="crusade", kind=RELIGIOUS, title="Священный поход",
+        noun=("Поход", "m"),
+        severities=_s((2, 3.0), (3, 2.5), (4, 1.0)),
+        duration=(3, 9), duration_scale=1.9, toll=1.0,
+        scope=(2, 3), scope_scale=1.5,
+        resolutions=_s(("suppressed", 3.0), ("endured", 1.5), ("shattered", 1.2),
+                       ("heroes", 1.5), ("absorbed", 1.0)),
+        relics=_s(("выжженное капище", 1.4), ("память о мучениках", 1.2),
+                  ("спорная земля", 1.0)),
+        adjectives=("Священный", "Великий", "Багровый", "Праведный"),
+        flavor=("Знамёна с чужим знаком идут на земли, где молятся иначе.",
+                "Тех, кто отрёкся вовремя, щадят. Остальных — нет.",
+                "Капища жгут вместе с теми, кто в них укрылся.",
+                "Поход объявляют угодным богам, и спорить с этим опасно."),
+        weight=0.0, era_range=(2, 4),
+    ),
+    CalamitySpec(
+        key="holy_war", kind=RELIGIOUS, title="Война за веру",
+        noun=("Война", "f"),
+        severities=_s((2, 3.0), (3, 2.5), (4, 1.2)),
+        duration=(5, 14), duration_scale=1.9, toll=1.0,
+        scope=(2, 4), scope_scale=1.5,
+        resolutions=_s(("suppressed", 2.0), ("shattered", 2.0), ("endured", 2.0),
+                       ("coalition", 1.5), ("absorbed", 1.2)),
+        relics=_s(("спорная земля", 1.4), ("память о мучениках", 1.2),
+                  ("разорённый храм", 1.2)),
+        adjectives=("Долгая", "Багровая", "Великая", "Братская"),
+        flavor=("Две веры перестают спорить словами.",
+                "Города переходят из рук в руки вместе с обрядами.",
+                "Соседи, ходившие в один храм, режут друг друга за то, "
+                "как именно в нём молиться.",
+                "Мира не заключают: заключают перемирие до следующего повода."),
+        weight=0.0, era_range=(2, 4),
+    ),
+)
+
+CATALOG = CATALOG + RELIGIOUS_SPECS
 
 CATALOG_BY_KEY = {spec.key: spec for spec in CATALOG}
 

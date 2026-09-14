@@ -12,7 +12,9 @@
 4. устройство знати: фамилии только у знатных, роды только у тех рас,
    у которых знать бывает, правления идут по порядку;
 5. бедствия: у каждого есть исход, следы и битвы ссылаются на своё
-   бедствие, потери не превышают населения, тёмные века не вечны.
+   бедствие, потери не превышают населения, тёмные века не вечны;
+6. вера: у каждого бога есть вера и праздник, имена вер не повторяются,
+   верующие ссылаются на существующие веры.
 """
 
 from __future__ import annotations
@@ -113,7 +115,10 @@ def check_calamities(world, seed: str) -> list:
                             % (seed, calamity.name))
             break
 
+    faith_relics = ("храм забытой веры", "идол забытого бога")
     for relic in world.relics.values():
+        if relic.kind in faith_relics:
+            continue          # следы забытых вер остаются не от бедствий
         if relic.calamity_id not in world.calamities:
             problems.append("сид «%s»: след «%s» без своего бедствия"
                             % (seed, relic.name))
@@ -146,6 +151,53 @@ def check_calamities(world, seed: str) -> list:
     for house in world.houses.values():
         if house.race_id in monsters:
             problems.append("сид «%s»: у чудовищ завёлся знатный род" % seed)
+            break
+
+    return problems
+
+
+def check_faiths(world, seed: str) -> list:
+    """Проверяет устройство веры."""
+    problems = []
+
+    names = [faith.name for faith in world.faiths.values()]
+    if len(names) != len(set(names)):
+        problems.append("сид «%s»: имена вер повторяются" % seed)
+
+    for deity in world.deities.values():
+        if deity.faith_id and deity.faith_id not in world.faiths:
+            problems.append("сид «%s»: бог %s принадлежит несуществующей вере"
+                            % (seed, deity.given_name))
+            break
+        if not (1 <= deity.festival_month <= 12 and 1 <= deity.festival_day <= 30):
+            problems.append("сид «%s»: у бога %s праздник вне календаря"
+                            % (seed, deity.given_name))
+            break
+        if not (-3 <= deity.alignment <= 3):
+            problems.append("сид «%s»: у бога %s немыслимое мировоззрение"
+                            % (seed, deity.given_name))
+            break
+
+    for faith in world.faiths.values():
+        for deity_id in faith.deity_ids:
+            if deity_id not in world.deities:
+                problems.append("сид «%s»: у веры «%s» потерян бог"
+                                % (seed, faith.name))
+                break
+        if faith.parent_id and faith.parent_id not in world.faiths:
+            problems.append("сид «%s»: у ереси «%s» нет родительской веры"
+                            % (seed, faith.name))
+            break
+
+    for settlement in world.settlements.values():
+        if settlement.faith_id and settlement.faith_id not in world.faiths:
+            problems.append("сид «%s»: город %s верит в несуществующее"
+                            % (seed, settlement.name))
+            break
+
+    for temple in world.temples.values():
+        if temple.faith_id not in world.faiths:
+            problems.append("сид «%s»: храм «%s» без веры" % (seed, temple.name))
             break
 
     return problems
@@ -198,12 +250,13 @@ def main() -> int:
 
         failures.extend(check_nobility(first, seed))
         failures.extend(check_calamities(first, seed))
+        failures.extend(check_faiths(first, seed))
 
-        print("  сид «%-12s»  событий %5d  городов %4d  стран %3d  родов %4d  "
-              "правлений %4d  бедствий %3d  население %8d  (%.1f c)"
+        print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
+              "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
               % (seed, len(events), len(first.settlements), len(first.polities),
-                 len(first.houses), len(first.reigns), len(first.calamities),
-                 first.world_population(), spent))
+                 len(first.houses), len(first.calamities), len(first.deities),
+                 len(first.faiths), first.world_population(), spent))
 
     if failures:
         print("\nОШИБКИ:")
