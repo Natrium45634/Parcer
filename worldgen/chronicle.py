@@ -205,11 +205,58 @@ def render_stats(world) -> str:
 
 def render_regions(world) -> str:
     rows = ["ЗЕМЛИ МИРА", ""]
-    rows.append("  %-28s %-14s %s" % ("Название", "Местность", "Соседи"))
-    rows.append("  " + "-" * 72)
+
+    card = world.notes.get("карта")
+    if card:
+        rows.append("  Мир построен по карте «%s» (сид карты «%s», %s, земель %s)."
+                    % (card.get("файл"), card.get("сид карты"),
+                       card.get("размер"), card.get("земель")))
+        homeless = world.notes.get("не пробудились")
+        if homeless:
+            rows.append("  Подходящей земли не нашлось, и в мир так и не пришли: %s."
+                        % ", ".join(homeless))
+        rows.append("")
+
+    from_map = any(region.from_map for region in world.regions.values())
+    if not from_map:
+        rows.append("  %-28s %-14s %s" % ("Название", "Местность", "Соседи"))
+        rows.append("  " + "-" * 72)
+        for region in world.regions.values():
+            neighbors = ", ".join(world.regions[n].name for n in region.neighbors)
+            rows.append("  %-28s %-14s %s" % (region.name, region.terrain, neighbors))
+        return "\n".join(rows)
+
     for region in world.regions.values():
-        neighbors = ", ".join(world.regions[n].name for n in region.neighbors)
-        rows.append("  %-28s %-14s %s" % (region.name, region.terrain, neighbors))
+        marks = []
+        if region.coastal:
+            marks.append("побережье")
+        if region.river:
+            marks.append("реки")
+        if region.island:
+            marks.append("остров")
+        rows.append("  %s — %s%s" % (region.name, region.terrain,
+                                     (", " + ", ".join(marks)) if marks else ""))
+        rows.append("      гексов: %-6d высота: %d м   температура: %+.1f °C"
+                    "   влажность: %.2f"
+                    % (len(region.hexes), region.elev_m, region.temp,
+                       region.moist))
+        rows.append("      пригодность для жизни: %.2f   плодородие: %.2f   "
+                    "руды: %.2f   дикость: %.2f"
+                    % (region.habitat, region.fertility, region.richness,
+                       region.savagery))
+        if abs(region.magic) >= 0.005:
+            rows.append("      магия: %+.3f — земля %s" % (
+                region.magic, "с дурной славой" if region.magic < 0
+                else "светлая"))
+        if region.risk_kinds:
+            rows.append("      грозит: %s" % ", ".join(region.risk_kinds))
+        if region.boons:
+            rows.append("      дарит: %s" % ", ".join(region.boons))
+        neighbors = ", ".join(world.regions[n].name for n in region.neighbors
+                              if n in world.regions)
+        if neighbors:
+            rows.append("      граничит с: %s" % neighbors)
+        rows.append("")
     return "\n".join(rows)
 
 

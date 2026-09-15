@@ -14,7 +14,10 @@
 5. бедствия: у каждого есть исход, следы и битвы ссылаются на своё
    бедствие, потери не превышают населения, тёмные века не вечны;
 6. вера: у каждого бога есть вера и праздник, имена вер не повторяются,
-   верующие ссылаются на существующие веры.
+   верующие ссылаются на существующие веры;
+7. карта: мир, построенный по файлу .world, детерминирован так же, земли
+   покрывают всю сушу без пересечений, поселения стоят в своих землях,
+   а политическая карта для картогенератора собирается без изъянов.
 """
 
 from __future__ import annotations
@@ -32,6 +35,81 @@ from worldgen.engine import Settings, generate                # noqa: E402
 from worldgen.races import BEASTFOLK, EVIL, get_race          # noqa: E402
 
 SEEDS = ("Ясень-7", "Первый мир", "проверка", "1234")
+MAP_SEEDS = ("карта-1", "карта-2")
+SAMPLE_MAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "maps", "aurora-7.world")
+
+
+def check_map_world(world, link_regions, seed: str) -> list:
+    """Проверяет мир, построенный по карте."""
+    from worldgen import worldmap as wm
+
+    problems = []
+    wmap = wm.load(SAMPLE_MAP)
+
+    seen = {}
+    for region in world.regions.values():
+        if not region.hexes:
+            problems.append("сид «%s»: земля %s без гексов" % (seed, region.name))
+            continue
+        for index in region.hexes:
+            if index in seen:
+                problems.append("сид «%s»: гекс %d поделили %s и %s"
+                                % (seed, index, seen[index], region.name))
+                break
+            seen[index] = region.name
+    land = sum(1 for i in range(wmap.size) if wmap.is_land(i))
+    if len(seen) != land:
+        problems.append("сид «%s»: земли покрывают %d гексов суши из %d"
+                        % (seed, len(seen), land))
+
+    for settlement in world.settlements.values():
+        index = settlement.hex_index
+        if index < 0:
+            continue
+        if not wmap.is_land(index):
+            problems.append("сид «%s»: город %s стоит в воде"
+                            % (seed, settlement.name))
+            break
+        region = world.regions.get(settlement.region_id)
+        if region is not None and region.hexes and index not in region.hexes:
+            problems.append("сид «%s»: город %s стоит вне своей земли %s"
+                            % (seed, settlement.name, region.name))
+            break
+
+    for camp in world.camps.values():
+        if camp.hex_index >= 0 and not wmap.is_land(camp.hex_index):
+            problems.append("сид «%s»: лагерь %s стоит в воде" % (seed, camp.name))
+            break
+
+    recorder = world.map_recorder
+    if recorder is None:
+        problems.append("сид «%s»: политическая карта не записана" % seed)
+        return problems
+
+    section = recorder.build()
+    if section["w"] != wmap.width or section["h"] != wmap.height:
+        problems.append("сид «%s»: размер политической карты не совпал с картой" % seed)
+    if not section["frames"]:
+        problems.append("сид «%s»: в политической карте нет ни одного кадра" % seed)
+    for frame in section["frames"]:
+        total = sum(frame["rle"][i] for i in range(1, len(frame["rle"]), 2))
+        if total != wmap.size:
+            problems.append("сид «%s»: кадр %d развернулся в %d гексов вместо %d"
+                            % (seed, frame["y"], total, wmap.size))
+            break
+    years = [frame["y"] for frame in section["frames"]]
+    if years != sorted(years):
+        problems.append("сид «%s»: кадры политической карты идут не по годам" % seed)
+    slots = len(section["realmColors"])
+    for frame in section["frames"]:
+        worst = max((frame["rle"][i] for i in range(0, len(frame["rle"]), 2)),
+                    default=-1)
+        if worst >= slots:
+            problems.append("сид «%s»: в кадре %d держава %d без цвета"
+                            % (seed, frame["y"], worst))
+            break
+    return problems
 
 
 def digest(world) -> str:
@@ -119,6 +197,8 @@ def check_calamities(world, seed: str) -> list:
     for relic in world.relics.values():
         if relic.kind in faith_relics:
             continue          # следы забытых вер остаются не от бедствий
+        if any("логово с карты" in note for note in relic.notes):
+            continue          # логова лежали в мире ещё до первых бедствий
         if relic.calamity_id not in world.calamities:
             problems.append("сид «%s»: след «%s» без своего бедствия"
                             % (seed, relic.name))
@@ -257,6 +337,42 @@ def main() -> int:
               % (seed, len(events), len(first.settlements), len(first.polities),
                  len(first.houses), len(first.calamities), len(first.deities),
                  len(first.faiths), first.world_population(), spent))
+
+    if not os.path.exists(SAMPLE_MAP):
+        print("\n  карта для примера не найдена — проверка по карте пропущена")
+    else:
+        print()
+        for seed in MAP_SEEDS:
+            started = time.time()
+            settings = Settings(seed=seed, years=10000, map_path=SAMPLE_MAP)
+            first = generate(settings)
+            second = generate(settings)
+            spent = time.time() - started
+
+            if digest(first) != digest(second):
+                failures.append("карта, сид «%s»: две генерации разошлись" % seed)
+
+            handle, path = tempfile.mkstemp(suffix=".json")
+            os.close(handle)
+            try:
+                storage.save_world(first, path)
+                restored = storage.load_world(path)
+            finally:
+                os.remove(path)
+            if digest(restored) != digest(first):
+                failures.append("карта, сид «%s»: мир изменился после сохранения" % seed)
+
+            failures.extend(check_nobility(first, "карта/" + seed))
+            failures.extend(check_calamities(first, "карта/" + seed))
+            failures.extend(check_faiths(first, "карта/" + seed))
+            failures.extend(check_map_world(first, None, "карта/" + seed))
+
+            print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "
+                  "кадров %3d | население %8d (%.1f c)"
+                  % (seed, len(first.regions), len(first.settlements),
+                     len(first.polities),
+                     len(first.map_recorder.frames) if first.map_recorder else 0,
+                     first.world_population(), spent))
 
     if failures:
         print("\nОШИБКИ:")

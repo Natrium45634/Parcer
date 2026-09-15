@@ -147,6 +147,47 @@ def prepare(ctx) -> None:
     ctx.world.notes["нрав мира"] = sorted(
         bias, key=lambda key: -bias[key])[:4]
 
+    if ctx.map is not None:
+        _prepare_from_map(ctx)
+
+
+def _prepare_from_map(ctx) -> None:
+    """Берёт у карты то, что она уже решила за мир.
+
+    Долгие перемены климата вшиты в сид карты: ледниковый период случится
+    ровно в тот год, который она назначила. Логова существ ложатся спящими
+    следами — их разбудят через века, и тогда старая беда вернётся.
+    """
+    world = ctx.world
+    link = ctx.map
+
+    ctx.climate_plan = link.climate_schedule(world.total_years)
+    # Карта уже решила, когда в этом мире ледники и засухи. Свой случайный
+    # климат движок больше не бросает, иначе оледенения наложатся друг на
+    # друга и мир не вылезет из темноты.
+    for spec in cat.CATALOG:
+        if spec.kind == cat.CLIMATE:
+            ctx.calamity_bias[spec.key] = 0.0
+    world.notes["климат карты"] = [
+        "%s: %d–%d" % (item["name"], item["start"], item["start"] + item["years"])
+        for item in ctx.climate_plan
+    ]
+
+    for seed in link.lair_seeds(world.total_years):
+        # Логово старше истории — значит, оно лежало тут ещё до первых племён.
+        created = Date(1, 1, 1)
+        relic = world.add_relic(
+            name="%s %s" % (seed["kind_name"], seed["name"]),
+            kind=seed["relic_kind"], calamity_id="",
+            region_id=seed["region_id"], created=created,
+            potency=seed["potency"],
+        )
+        relic.notes.append("логово с карты мира")
+        relic.notes.append("пробуждение обернётся бедой: %s" % seed["calamity_key"])
+        ctx.lair_of_relic[relic.id] = seed
+    if ctx.lair_of_relic:
+        world.notes["логова карты"] = len(ctx.lair_of_relic)
+
 
 # ---------------------------------------------------------------------------
 # Годовой такт
@@ -154,8 +195,37 @@ def prepare(ctx) -> None:
 
 def tick(ctx, year: int) -> None:
     _advance(ctx, year)
+    _tick_climate(ctx, year)
     _maybe_start(ctx, year)
     _maybe_wake_relic(ctx, year)
+
+
+def _tick_climate(ctx, year: int) -> None:
+    """Запускает перемены климата в те годы, что назначила карта."""
+    plan = getattr(ctx, "climate_plan", None)
+    if not plan:
+        return
+    world = ctx.world
+    for item in plan:
+        if item.get("done") or item["start"] != year:
+            continue
+        item["done"] = True
+        spec = cat.CATALOG_BY_KEY.get(item["key"])
+        if spec is None:
+            continue
+        # Пока мир пуст, климат менять некому и незачем.
+        if not world.active_settlements and not world.active_tribes:
+            continue
+        rng = ctx.rng("calamity", "climate", year, item["key"])
+        count = max(2, min(len(world.regions), int(len(world.regions) * 0.45)))
+        region_ids = ctx.map.regions_for_climate(item["type"], count)
+        calamity = _start_calamity(ctx, year, spec, rng,
+                                   severity=item["severity"],
+                                   region_ids=region_ids,
+                                   duration=item["years"])
+        if calamity is not None:
+            calamity.notes.append("перемена климата, вписанная в карту мира")
+            ctx.calamity_plans.setdefault(calamity.id, {})
 
 
 def upkeep(ctx, year: int, period: int) -> None:
@@ -180,6 +250,10 @@ def _pick_spec(ctx, year: int, rng):
         if spec.kind == cat.INVASION and not world.active_settlements:
             continue
         weight = spec.weight * ctx.calamity_bias.get(spec.key, 1.0)
+        if ctx.map is not None and spec.kind == cat.NATURAL:
+            # Карта знает, чем грозит этот мир: где вулканы — извержениями,
+            # где сушь — засухой. Чего на карте нет, того почти не случается.
+            weight *= 0.25 + 2.2 * ctx.map.world_risk(spec.key)
         # Одно и то же подряд не случается: беде нужно время, чтобы забыться.
         last = ctx.calamity_last.get(spec.key)
         if last is not None:
@@ -208,6 +282,14 @@ def _pick_regions(ctx, rng, spec, count: int, victim=None):
             pool = fitting
     if not pool:
         return []
+
+    if ctx.map is not None and spec.kind == cat.NATURAL:
+        # Землетрясение приходит туда, где дрожит земля, а не куда попало.
+        pairs = [(region.id, 0.15 + 3.0 * ctx.map.risk_of(spec.key, region.id))
+                 for region in pool]
+        if any(weight > 0.2 for _, weight in pairs):
+            return _grow_regions(world, rng, [rng.weighted(pairs)], count)
+
     seed_region = rng.choice(sorted(pool, key=lambda region: region.id))
     return _grow_regions(world, rng, [seed_region.id], count)
 
@@ -256,10 +338,11 @@ def _maybe_start(ctx, year: int) -> None:
 
 
 def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
-                    parent=None, relic=None, region_ids=None):
+                    parent=None, relic=None, region_ids=None, duration=0):
     world = ctx.world
     severity = severity or spec.severity(rng)
-    duration = spec.years(rng, severity)
+    # Долгие перемены климата длятся ровно столько, сколько вписано в карту.
+    duration = duration or spec.years(rng, severity)
     count = min(len(world.regions), spec.regions_count(rng, severity))
 
     victim = None
@@ -303,8 +386,12 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     _plan(ctx, calamity, spec, rng, duration, severity)
     if spec.kind == cat.CLIMATE:
         # Пока лёд идёт, мир не растёт: это чувствуется сразу, а не потом.
+        # Но ледник ползёт от полюсов, а не накрывает всё разом: тяжесть
+        # ложится на те земли, которые выбрала карта, и только по-настоящему
+        # всемирная беда достаёт до каждого.
+        everywhere = severity >= 5 and len(region_ids) >= len(world.regions) * 0.7
         world.add_dark_age(calamity.id, year, year + duration, region_ids,
-                           min(0.85, 0.16 * severity), worldwide=(severity >= 4))
+                           min(0.85, 0.16 * severity), worldwide=everywhere)
     _check_compound(ctx, calamity, rng, year)
 
     title, text = texts.begins(rng, world, calamity, spec, leader, generals, victim)
@@ -1063,6 +1150,11 @@ def _start_dark_age(ctx, calamity, spec, rng, year: int, date) -> None:
     if calamity.deaths < 20000 and calamity.severity < 4:
         return
 
+    if calamity.kind == cat.CLIMATE:
+        # Пока шёл ледник, мир уже жил в темноте — она отмечена при начале
+        # бедствия. Добавлять сверху ещё одну значило бы посчитать дважды.
+        return
+
     plan = ctx.calamity_plans.get(calamity.id, {})
     base = {3: (40, 160), 4: (120, 450), 5: (300, 1200)}[min(5, calamity.severity)]
     length = int(rng.uniform(*base) * (0.6 + 0.4 * min(2.0, plan.get("duration", 10) / 60.0)))
@@ -1124,16 +1216,34 @@ def _maybe_wake_relic(ctx, year: int) -> None:
         return
     relic = rng.weighted(pairs)
     origin = world.calamities.get(relic.calamity_id)
+    lair = ctx.lair_of_relic.get(relic.id)
     date = ctx.date_in(rng, year)
     world.wake_relic(relic, date)
 
-    title, text = texts.relic_awakens(rng, relic, origin, world, year)
+    if lair is not None:
+        title, text = texts.lair_awakens(rng, relic, world, year)
+    else:
+        title, text = texts.relic_awakens(rng, relic, origin, world, year)
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="relic_awakens",
         title=title, text=text, importance=3,
         actors=[relic.figure_id] if relic.figure_id else [],
         subjects=[relic.id] + ([origin.id] if origin is not None else []),
         region_id=relic.region_id, race_id=relic.race_id)
+
+    # Логово с карты будит ту беду, которую карта ему и назначила.
+    if lair is not None:
+        spec = cat.CATALOG_BY_KEY.get(lair["calamity_key"])
+        if spec is not None:
+            severity = max(2, min(5, lair["tier"] + 1))
+            child = _start_calamity(ctx, year, spec, rng, severity=severity,
+                                    relic=relic, region_ids=[relic.region_id])
+            if child is not None:
+                child.notes.append("поднялось из логова: %s" % relic.name)
+                relic.status = "исчерпан"
+                return
+        relic.status = "исчерпан"
+        return
 
     # Опасный след даёт начало новой, уже меньшей беде.
     if relic.kind in FAITH_RELICS:

@@ -75,6 +75,7 @@ def world_to_dict(world: World) -> dict:
         "seed_value": world.seed_value,
         "total_years": world.total_years,
         "settings": world.settings,
+        "map_source": world.map_source,
         "eras": [era.to_dict() for era in world.eras],
         "regions": [_compact(Region, item.to_dict()) for item in world.regions.values()],
         "figures": [_compact(Figure, item.to_dict()) for item in world.figures.values()],
@@ -179,6 +180,7 @@ def dict_to_world(data: dict) -> World:
     world.race_awakening = dict(data.get("race_awakening") or {})
     world._counters = dict(data.get("counters") or {})
     world.notes = dict(data.get("notes") or {})
+    world.map_source = data.get("map_source", "") or ""
     return world
 
 

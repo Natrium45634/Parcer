@@ -31,6 +31,10 @@ class GenContext:
         self.rate_scale = min(tempo ** 0.5, 6.0)
         self.hub = RngHub(world.seed_value)
         self.forge = NameForge()
+        self.map = None              # связь с картой .world, если она задана
+        # Движок настроен на восемнадцать земель. На большой карте их
+        # втрое больше, и без поправки мир заселялся бы втрое медленнее.
+        self.world_scale = 1.0
         self.region_weights = {}     # race_id -> список (region_id, вес)
         self.awakened = []           # расы в порядке пробуждения
         self.awakened_ids = set()
@@ -40,6 +44,8 @@ class GenContext:
         self.calamity_bias = {}      # нрав мира: к каким бедам он склонен
         self.calamity_last = {}
         self.calamity_plans = {}
+        self.climate_plan = []       # перемены климата, вписанные в карту
+        self.lair_of_relic = {}      # след -> логово карты, из которого он взялся
         self.piety = 1.0             # набожность мира
         self.dark_tilt = 0.0         # склонность богов к тьме
         self.faith_style = "многобожие"
@@ -66,6 +72,14 @@ class GenContext:
         """Годовая вероятность события с учётом плотности, темпа и тьмы."""
         return base * self.density() * self.rate_scale * \
             max(0.25, 1.0 - 0.5 * self.world_darkness)
+
+    def spread_rate(self, base: float) -> float:
+        """То же, но для расселения: чем мир шире, тем больше в нём места."""
+        return min(0.95, self.rate(base) * self.world_scale)
+
+    def set_world_scale(self, region_count: int) -> None:
+        reference = 18.0
+        self.world_scale = max(1.0, min(4.0, (region_count / reference) ** 0.65))
 
     def growth(self, base: float, region_id: str = "") -> float:
         """Годовой прирост населения. В тёмные века он уходит в минус."""
@@ -98,6 +112,15 @@ class GenContext:
                     weight = 10.0 / (1.0 + rank)
                 else:
                     weight = 0.35
+                if region.from_map:
+                    # Карта знает, каково там на самом деле: голые скалы
+                    # и ледник — тоже «горы», но жить в них почти нельзя.
+                    weight *= 0.35 + 1.3 * region.habitat
+                    if race.category == races_mod.EVIL:
+                        # Злым народам глушь и дурная слава только на руку.
+                        weight *= 0.75 + 0.9 * region.savagery
+                        if region.magic < 0:
+                            weight *= 1.25
                 pairs.append((region.id, weight))
             self.region_weights[race.id] = pairs
 

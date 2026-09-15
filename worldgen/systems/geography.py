@@ -1,17 +1,24 @@
 # -*- coding: utf-8 -*-
 """Земли мира.
 
-Карта — простая сетка областей. Каждая область имеет тип местности,
-соседей и имя. Этого достаточно, чтобы народы селились осмысленно
-(дворфы — в горах, ящеролюды — в болотах), и хватит как основа для
-будущих блоков: границ, войн, торговых путей.
+Землю можно получить двумя путями.
+
+* **Процедурно.** Простая сетка областей: тип местности, соседи, имя.
+  Этого хватает, чтобы народы селились осмысленно — дворфы в горах,
+  ящеролюды в болотах.
+* **По карте.** Если перед генерацией указан файл ``.world`` из
+  TECTONIC WORLDFORGE, земли режутся из настоящей гексовой карты со всей
+  её географией: хребтами, реками, климатом, рудами и магией. Тогда
+  история опирается не на выдумку движка, а на данные карты.
 """
 
 from __future__ import annotations
 
 import math
 
+from .. import mapworld
 from .. import races as races_mod
+from .. import worldmap as wmod
 
 TERRAIN_WEIGHTS = (
     (races_mod.PLAIN, 1.40),
@@ -38,7 +45,42 @@ NEIGHBOR_BONUS = 1.8       # тяготение одинаковых земел�
 
 
 def build(ctx) -> None:
-    """Создаёт области мира и раскладывает их по сетке."""
+    """Создаёт земли мира — из файла карты либо процедурно."""
+    path = str(getattr(ctx.settings, "map_path", "") or "")
+    if path:
+        _build_from_map(ctx, path)
+        return
+    _build_grid(ctx)
+
+
+def _build_from_map(ctx, path: str) -> None:
+    """Земли берутся из гексовой карты .world."""
+    world = ctx.world
+    rng = ctx.rng("geography")
+    wmap = wmod.load(path)
+    link = mapworld.MapLink(wmap, path)
+
+    # На настоящей карте земель нужно больше, иначе степь и пустыня
+    # растворятся в лесу, который их окружает.
+    land = sum(1 for i in range(wmap.size) if wmap.is_land(i))
+    asked = max(6, int(getattr(ctx.settings, "regions", 18)))
+    count = max(asked, min(60, int(land / 200.0)))
+
+    link.build(ctx, rng, count)
+    ctx.map = link
+    world.map_source = path
+    world.notes["карта"] = {
+        "файл": path.rsplit("/", 1)[-1],
+        "сид карты": wmap.seed_text,
+        "размер": "%d×%d" % (wmap.width, wmap.height),
+        "земель": len(world.regions),
+    }
+    ctx.set_world_scale(len(world.regions))
+    ctx.build_region_weights()
+
+
+def _build_grid(ctx) -> None:
+    """Процедурная сетка областей — когда карта не задана."""
     world = ctx.world
     rng = ctx.rng("geography")
     count = max(6, int(getattr(ctx.settings, "regions", 18)))
@@ -81,6 +123,7 @@ def build(ctx) -> None:
                 region.neighbors.append(other.id)
 
     _guarantee_homelands(ctx, rng)
+    ctx.set_world_scale(len(world.regions))
     ctx.build_region_weights()
 
 

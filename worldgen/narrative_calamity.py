@@ -524,6 +524,33 @@ def relic_awakens(rng, relic, origin, world, year: int):
             cap(rng.choice(AWAKEN_TEMPLATES) % data))
 
 
+# Логова с карты мира лежали здесь ещё до первых племён.
+LAIR_WAKE_TEMPLATES = (
+    "То, что спало в землях под именем %(where)s дольше, чем стоит любая "
+    "страна, открывает глаза. Имя этому — %(relic)s.",
+    "%(relic_cap)s пробуждается. Местные знали о нём из песен и обходили "
+    "%(where)s стороной — теперь ясно, почему.",
+    "В %(where)s рушится тишина, которой было больше веков, чем помнит "
+    "летопись: %(relic)s выходит наружу.",
+    "Старики говорили, что под %(where)s спит беда. Старики оказались правы: "
+    "%(relic)s подаёт голос.",
+    "%(relic_cap)s было здесь раньше городов, раньше племён, раньше имён. "
+    "Теперь оно просыпается.",
+)
+
+
+def lair_awakens(rng, relic, world, year: int):
+    """Пробуждение логова, которое карта положила в мир до начала истории."""
+    region = world.regions.get(relic.region_id)
+    data = {
+        "relic": relic.name,
+        "relic_cap": cap(relic.name),
+        "where": region.name if region is not None else "глухих землях",
+    }
+    return ("Пробуждение: %s" % relic.name,
+            cap(rng.choice(LAIR_WAKE_TEMPLATES) % data))
+
+
 ECHO_TEMPLATES = (
     "Отголосок старой беды: %(relic)s не даёт покоя окрестным землям. "
     "Корень этого — %(origin)s.",

@@ -91,9 +91,34 @@ def upkeep(ctx, year: int, period: int) -> None:
 # Рождение веры
 # ---------------------------------------------------------------------------
 
+def _land_magic(ctx, race) -> float:
+    """Какова магия земель, где этот народ живёт: -1 дурная, +1 светлая.
+
+    Боги являются не в пустоте. Народ, осевший в землях с дурной славой,
+    скорее уверует в кого-то тёмного, чем тот, что живёт в светлом краю.
+    """
+    if ctx.map is None:
+        return 0.0
+    world = ctx.world
+    homes = []
+    for settlement_id in world.active_settlements:
+        settlement = world.settlements[settlement_id]
+        if settlement.race_id == race.id:
+            homes.append((settlement.region_id, settlement.population))
+    for tribe_id in world.active_tribes:
+        tribe = world.tribes[tribe_id]
+        if tribe.race_id == race.id:
+            homes.append((tribe.region_id, tribe.population))
+    if not homes:
+        return 0.0
+    total = float(sum(weight for _, weight in homes)) or 1.0
+    return sum(ctx.map.magic_of(region_id) * weight
+               for region_id, weight in homes) / total
+
+
 def _race_alignment(ctx, rng, race) -> int:
     """К какому мировоззрению тянет народ."""
-    tilt = ctx.dark_tilt
+    tilt = ctx.dark_tilt - 0.5 * _land_magic(ctx, race)
     if race.category == races_mod.EVIL:
         return rng.weighted(((-3, 3.0), (-2, 3.0), (-1, 1.0)))
     if race.id == "dark_elf":

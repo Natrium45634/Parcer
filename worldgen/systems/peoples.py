@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from .. import mapworld
 from .. import narrative
 from .. import races as races_mod
 from ..models import GONE
@@ -32,12 +33,21 @@ FIRST_TRIBE_MAX = 180
 # ---------------------------------------------------------------------------
 
 def plan_awakenings(ctx) -> None:
-    """Раскладывает расы по годам: кто когда впервые появится в мире."""
+    """Раскладывает расы по годам: кто когда впервые появится в мире.
+
+    На настоящей карте расе может быть просто негде жить: мир без гор
+    остаётся без дворфов, мир без болот — без ящеролюдов. Такие народы
+    не просыпаются вовсе, и это честнее, чем селить их в чужой земле.
+    """
     world = ctx.world
     rng = ctx.rng("awakening", "plan")
     era_count = len(world.eras)
 
+    homeless = []
     for race in races_mod.RACES:
+        if ctx.map is not None and mapworld.homeland_score(ctx.map, race) <= 0.0:
+            homeless.append(race.name)
+            continue
         index = min(race.first_era, era_count - 1)
         era = world.eras[index]
         # Появляются в первых двух третях своей эпохи.
@@ -51,6 +61,9 @@ def plan_awakenings(ctx) -> None:
     # Порядок внутри года фиксирован — детерминированность превыше всего.
     for year in ctx.schedule:
         ctx.schedule[year].sort()
+
+    if homeless:
+        world.notes["не пробудились"] = sorted(homeless)
 
 
 def tick_awakening(ctx, year: int) -> None:
@@ -100,12 +113,18 @@ def found_tribe(ctx, race, region, year: int, rng, first: bool = False,
     if not population:
         population = rng.randint(FIRST_TRIBE_MIN, FIRST_TRIBE_MAX)
 
+    hex_index = -1
+    if ctx.map is not None:
+        hex_index = ctx.map.place(region.id, rng, kind="tribe")
+
     tribe = world.add_tribe(
         name=ctx.forge.tribe(rng, race), word=rng.choice(race.tribe_words),
         race_id=race.id, founded=ctx.date_in(rng, year, after), founder_id=leader.id,
         region_id=region.id, population=population, chief_id=leader.id,
-        parent_id=parent.id if parent else "",
+        parent_id=parent.id if parent else "", hex_index=hex_index,
     )
+    if ctx.map is not None and hex_index >= 0:
+        ctx.map.claim(hex_index, tribe.id)
     leader.home_id = tribe.id
     leader.roles.append("основатель племени")
 

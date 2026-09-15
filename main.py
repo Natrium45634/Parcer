@@ -13,6 +13,11 @@
     --density X       плотность событий, 0.2…3.0 (по умолчанию 1.0)
     --importance N    что попадёт в текст: 1 — всё, 5 — только эпохальное
     --out ФАЙЛ        куда сохранить летопись (.txt) или мир (.json)
+    --map ФАЙЛ        карта .world из TECTONIC WORLDFORGE; тогда история
+                      опирается на настоящую географию, а не на выдумку
+    --map-interval N  раз во столько лет снимать кадр границ (по умолчанию 50)
+    --chronicle ФАЙЛ  записать chronicle.json — политическую карту по годам
+                      для вкладки «Страны» картогенератора
 """
 
 from __future__ import annotations
@@ -28,7 +33,8 @@ def run_cli(argv) -> int:
     from worldgen.engine import Settings, generate
 
     options = {"--seed": "Начало", "--years": "10000", "--regions": "18",
-               "--density": "1.0", "--out": "", "--importance": "3"}
+               "--density": "1.0", "--out": "", "--importance": "3",
+               "--map": "", "--map-interval": "50", "--chronicle": ""}
     index = 0
     while index < len(argv):
         key = argv[index]
@@ -38,19 +44,40 @@ def run_cli(argv) -> int:
         else:
             index += 1
 
+    map_path = options["--map"]
+    if map_path and not os.path.exists(map_path):
+        print("Карта не найдена: %s" % map_path)
+        return 2
+
     settings = Settings(seed=options["--seed"], years=int(float(options["--years"])),
                         regions=int(float(options["--regions"])),
-                        density=float(options["--density"]))
+                        density=float(options["--density"]),
+                        map_path=map_path,
+                        map_interval=int(float(options["--map-interval"])))
 
     def progress(part, note):
         sys.stdout.write("\r  %3d%%  %-42s" % (int(part * 100), note))
         sys.stdout.flush()
 
+    if map_path:
+        print("Карта: %s" % os.path.basename(map_path))
     print("Генерация мира «%s»…" % settings.seed)
     world = generate(settings, progress=progress)
     print("\nГотово.")
     for key, value in world.stats().items():
         print("  %-26s %s" % (key + ":", value))
+
+    chronicle_out = options["--chronicle"]
+    if chronicle_out:
+        if world.map_recorder is None:
+            print("chronicle.json пишется только для мира по карте — задайте --map")
+        else:
+            from worldgen import chronicle_map
+            payload = chronicle_map.export(world, world.map_recorder, chronicle_out)
+            section = payload["map"]
+            print("Политическая карта: %s (кадров %d, держав %d, городов %d)" % (
+                chronicle_out, len(section["frames"]),
+                len(section["realmColors"]), len(section["cities"])))
 
     out = options["--out"]
     if out:

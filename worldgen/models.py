@@ -113,7 +113,11 @@ class Figure:
 
 @dataclass
 class Region:
-    """Географическая область мира."""
+    """Географическая область мира.
+
+    Если мир построен по карте, земля помнит свои гексы и всё, что карта
+    о них знает: плодородие, магию, дикость, чем грозит округа.
+    """
 
     id: str
     name: str
@@ -123,6 +127,29 @@ class Region:
     neighbors: list = field(default_factory=list)
     capacity: float = 1.0
     discovered_by: str = ""
+
+    # --- данные карты (пусто, если земля создана процедурно) ---
+    hexes: list = field(default_factory=list)
+    center_hex: int = -1
+    habitat: float = 0.0        # насколько тут вообще можно жить, 0…1
+    fertility: float = 0.0
+    magic: float = 0.0          # минус — тёмная, плюс — светлая
+    savagery: float = 0.0
+    richness: float = 0.0       # руды и камень
+    risk: float = 0.0           # как часто тут беда
+    risk_kinds: list = field(default_factory=list)   # чем земля грозит
+    boons: list = field(default_factory=list)        # и чем одаривает
+    coastal: bool = False
+    river: bool = False
+    island: bool = False
+    elev_m: int = 0
+    temp: float = 0.0
+    moist: float = 0.0
+    landmass: str = ""
+
+    @property
+    def from_map(self) -> bool:
+        return bool(self.hexes)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -147,6 +174,7 @@ class Tribe:
     parent_id: str = ""       # от какого племени откололось
     end_reason: str = ""
     faith_id: str = ""
+    hex_index: int = -1            # гекс карты, если мир построен по карте
 
     @property
     def full_name(self) -> str:
@@ -179,6 +207,7 @@ class Settlement:
     origin_tribe_id: str = ""
     end_reason: str = ""
     faith_id: str = ""             # во что верят жители
+    hex_index: int = -1            # гекс карты, если мир построен по карте
 
     @property
     def full_name(self) -> str:
@@ -247,6 +276,7 @@ class Camp:
     ended: Date = None
     end_reason: str = ""
     faith_id: str = ""
+    hex_index: int = -1            # гекс карты, если мир построен по карте
 
     @property
     def full_name(self) -> str:

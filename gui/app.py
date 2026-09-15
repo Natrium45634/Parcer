@@ -50,6 +50,12 @@ def pick_font(candidates, size, weight="normal"):
     return tkfont.Font(size=size, weight=weight)
 
 
+def _fit(text: str, limit: int = 44) -> str:
+    """Подрезает подпись, чтобы она не растягивала панель настроек."""
+    text = str(text)
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
 class ChronicleApp(tk.Tk):
     def __init__(self):
         tk.Tk.__init__(self)
@@ -148,6 +154,8 @@ class ChronicleApp(tk.Tk):
         file_menu.add_separator()
         file_menu.add_command(label="Сохранить летопись в текст…",
                               command=self.export_text)
+        file_menu.add_command(label="Сохранить политическую карту (chronicle.json)…",
+                              command=self.export_chronicle_map)
         file_menu.add_separator()
         file_menu.add_command(label="Выход", command=self.destroy)
         menu.add_cascade(label="Файл", menu=file_menu)
@@ -172,6 +180,8 @@ class ChronicleApp(tk.Tk):
         self.years_var = tk.StringVar(value="10000")
         self.regions_var = tk.StringVar(value="18")
         self.density_var = tk.StringVar(value=DENSITY_CHOICES[1][0])
+        self.map_path = ""
+        self.map_label_var = tk.StringVar(value="нет — земли придумает движок")
 
         ttk.Label(panel, text="Сид:", style="Panel.TLabel").grid(
             row=1, column=0, sticky="e", padx=(0, 6))
@@ -197,13 +207,23 @@ class ChronicleApp(tk.Tk):
                      values=[name for name, _ in DENSITY_CHOICES]).grid(
             row=2, column=1, columnspan=2, sticky="w", pady=(8, 0))
 
+        ttk.Label(panel, text="Карта мира:", style="Panel.TLabel").grid(
+            row=3, column=0, sticky="e", padx=(0, 6), pady=(8, 0))
+        ttk.Label(panel, textvariable=self.map_label_var, style="Panel.TLabel",
+                  width=44, anchor="w").grid(
+            row=3, column=1, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(panel, text="Выбрать .world…", command=self.choose_map).grid(
+            row=3, column=3, sticky="w", padx=(18, 6), pady=(8, 0))
+        ttk.Button(panel, text="Убрать", command=self.clear_map).grid(
+            row=3, column=4, sticky="w", pady=(8, 0))
+
         self.go_button = ttk.Button(panel, text="Сгенерировать мир",
                                     style="Go.TButton", command=self.start_generation)
         self.go_button.grid(row=2, column=4, columnspan=3, sticky="w",
                             padx=(18, 0), pady=(8, 0))
 
         self.progress = ttk.Progressbar(panel, mode="determinate", maximum=1000)
-        self.progress.grid(row=3, column=0, columnspan=8, sticky="we", pady=(10, 0))
+        self.progress.grid(row=4, column=0, columnspan=8, sticky="we", pady=(10, 0))
         panel.columnconfigure(7, weight=1)
 
     # ------------------------------------------------------------------
@@ -382,7 +402,59 @@ class ChronicleApp(tk.Tk):
             regions = 18
         density = dict(DENSITY_CHOICES).get(self.density_var.get(), 1.0)
         seed = self.seed_var.get().strip() or "Начало"
-        return Settings(seed=seed, years=years, regions=regions, density=density)
+        return Settings(seed=seed, years=years, regions=regions, density=density,
+                        map_path=self.map_path)
+
+    def choose_map(self) -> None:
+        """Выбирает файл .world — карту из TECTONIC WORLDFORGE."""
+        path = filedialog.askopenfilename(
+            title="Карта мира",
+            filetypes=[("Карта мира", "*.world"), ("Все файлы", "*.*")])
+        if not path:
+            return
+        try:
+            from worldgen import worldmap
+            wmap = worldmap.load(path)
+        except Exception as error:
+            messagebox.showerror("Карта не читается", str(error))
+            return
+        self.map_path = path
+        self.map_label_var.set(_fit(
+            "%s — %d×%d гексов, сид «%s»" % (
+                os.path.basename(path), wmap.width, wmap.height, wmap.seed_text)))
+
+    def clear_map(self) -> None:
+        self.map_path = ""
+        self.map_label_var.set("нет — земли придумает движок")
+
+    def export_chronicle_map(self) -> None:
+        """Пишет chronicle.json — политическую карту по годам."""
+        if self.world is None:
+            messagebox.showinfo("Нечего сохранять", "Сначала создайте мир.")
+            return
+        if self.world.map_recorder is None:
+            messagebox.showinfo(
+                "Мир создан без карты",
+                "Политическая карта пишется только для мира, построенного "
+                "по файлу .world. Выберите карту в настройках и создайте мир "
+                "заново.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Политическая карта для картогенератора",
+            defaultextension=".json", initialfile="chronicle.json",
+            filetypes=[("chronicle.json", "*.json"), ("Все файлы", "*.*")])
+        if not path:
+            return
+        from worldgen import chronicle_map
+        payload = chronicle_map.export(self.world, self.world.map_recorder, path)
+        section = payload["map"]
+        messagebox.showinfo(
+            "Готово",
+            "Записано %s\n\nКадров границ: %d\nДержав: %d\nГородов: %d\n\n"
+            "Откройте файл во вкладке «Страны» картогенератора — и история "
+            "проиграется по годам прямо на карте."
+            % (os.path.basename(path), len(section["frames"]),
+               len(section["realmColors"]), len(section["cities"])))
 
     def start_generation(self) -> None:
         if self.worker is not None and self.worker.is_alive():
@@ -1090,6 +1162,18 @@ class ChronicleApp(tk.Tk):
         self.seed_var.set(self.world.seed_text)
         self.years_var.set(str(self.world.total_years))
         self.regions_var.set(str(settings.get("regions", len(self.world.regions))))
+        # Карта мира сохраняется ссылкой на файл: он мог и переехать.
+        source = self.world.map_source or ""
+        if source and os.path.exists(source):
+            self.map_path = source
+            self.map_label_var.set(_fit(
+                "%s — карта этого мира" % os.path.basename(source)))
+        elif source:
+            self.map_path = ""
+            self.map_label_var.set(_fit(
+                "%s — файл не найден" % os.path.basename(source)))
+        else:
+            self.clear_map()
         self._fill_all()
 
     def export_text(self) -> None:

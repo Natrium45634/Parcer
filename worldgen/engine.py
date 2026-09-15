@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 
+from .chronicle_map import MapRecorder
 from .context import GenContext
 from .eras import build_eras
 from .rng import seed_to_int
@@ -41,13 +42,16 @@ class Settings:
     years: int = 10000
     regions: int = 18
     density: float = 1.0
+    map_path: str = ""          # файл .world; пусто — процедурная карта
+    map_interval: int = 50      # раз во столько лет снимается кадр границ
 
     def normalized(self) -> "Settings":
         years = max(50, min(100000, int(self.years)))
         regions = max(6, min(60, int(self.regions)))
         density = max(0.2, min(3.0, float(self.density)))
         return Settings(seed=str(self.seed), years=years, regions=regions,
-                        density=density)
+                        density=density, map_path=str(self.map_path or ""),
+                        map_interval=max(5, min(1000, int(self.map_interval))))
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -75,6 +79,13 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     peoples.plan_awakenings(ctx)
     calamity.prepare(ctx)
     religion.prepare(ctx)
+
+    # По настоящей карте ведём ещё и политическую летопись: кто чем владел
+    # в такой-то год. Её потом читает вкладка «Страны» картогенератора.
+    recorder = None
+    if ctx.map is not None:
+        recorder = MapRecorder(ctx.map, world, settings.map_interval)
+        world.map_recorder = recorder
 
     total = settings.years
     step = max(1, total // 120)
@@ -110,6 +121,11 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         era = era_ends.get(year)
         if era is not None:
             era_events.finish(ctx, era, is_last=(era.index == last_era_index))
+
+        if recorder is not None:
+            boundary = era is not None or year in era_starts or year == total
+            if recorder.should_record(year, boundary):
+                recorder.record(year, boundary)
 
         if progress is not None and year % step == 0:
             span = world.era_at(year)

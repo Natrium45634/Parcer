@@ -69,7 +69,7 @@ def tick_settling(ctx, year: int) -> None:
     if not spec.allow_settlements:
         return
     rng = ctx.rng("settling", year)
-    if not rng.chance(ctx.rate(spec.settle_rate)):
+    if not rng.chance(ctx.spread_rate(spec.settle_rate)):
         return
 
     settled_by_race = {}
@@ -96,12 +96,19 @@ def tick_settling(ctx, year: int) -> None:
 
     leader, _ = _leader_of(ctx, rng, race, year, tribe=tribe, kind="founder")
     date = ctx.date_in(rng, year)
+    hex_index = tribe.hex_index if tribe.hex_index >= 0 else -1
+    if ctx.map is not None and hex_index < 0:
+        hex_index = ctx.map.place(region.id, rng, kind="city")
+
     settlement = world.add_settlement(
         name=ctx.forge.settlement(rng, race), kind=_kind_for(rng, race),
         race_id=race.id, founded=date, founder_id=leader.id,
         region_id=region.id, population=max(120, int(tribe.population * 0.92)),
+        hex_index=hex_index,
         origin_tribe_id=tribe.id,
     )
+    if ctx.map is not None and hex_index >= 0:
+        ctx.map.claim(hex_index, settlement.id)
     leader.roles.append("основатель поселения")
     leader.home_id = settlement.id
 
@@ -138,7 +145,7 @@ def tick_colonies(ctx, year: int) -> None:
     if not spec.allow_settlements:
         return
     rng = ctx.rng("colonies", year)
-    if not rng.chance(ctx.rate(spec.colony_rate)):
+    if not rng.chance(ctx.spread_rate(spec.colony_rate)):
         return
 
     settled_by_race = {}
@@ -181,12 +188,15 @@ def tick_colonies(ctx, year: int) -> None:
                              region_id=region.id,
                              title=ctx.title_for(race, "founder", sex), sex=sex)
     date = ctx.date_in(rng, year)
+    colony_hex = ctx.map.place(region.id, rng, kind="city") if ctx.map else -1
     settlement = world.add_settlement(
         name=ctx.forge.settlement(rng, race), kind=_kind_for(rng, race),
         race_id=race.id, founded=date, founder_id=leader.id,
         region_id=region.id, population=rng.randint(150, 600),
-        polity_id=polity.id if polity else "",
+        polity_id=polity.id if polity else "", hex_index=colony_hex,
     )
+    if ctx.map is not None and colony_hex >= 0:
+        ctx.map.claim(colony_hex, settlement.id)
     leader.roles.append("основатель поселения")
     leader.home_id = settlement.id
     subjects = [settlement.id]
@@ -217,7 +227,7 @@ def tick_polities(ctx, year: int) -> None:
     if not spec.allow_polities:
         return
     rng = ctx.rng("polities", year)
-    if not rng.chance(ctx.rate(spec.polity_rate)):
+    if not rng.chance(ctx.spread_rate(spec.polity_rate)):
         return
 
     by_race = {}
@@ -308,7 +318,7 @@ def tick_camps(ctx, year: int) -> None:
     world = ctx.world
     spec = ctx.era_spec(year)
     rng = ctx.rng("camps", year)
-    if not rng.chance(ctx.rate(spec.camp_rate)):
+    if not rng.chance(ctx.spread_rate(spec.camp_rate)):
         return
 
     evil = [race for race in ctx.awakened if race.is_evil]
@@ -324,11 +334,15 @@ def tick_camps(ctx, year: int) -> None:
                              title=ctx.title_for(race, "chief", sex), sex=sex,
                              epithet_chance=0.75)
     date = ctx.date_in(rng, year)
+    camp_hex = ctx.map.place(region.id, rng, kind="camp") if ctx.map else -1
     camp = world.add_camp(
         name=ctx.forge.camp(rng, race), word=rng.choice(race.camp_words or ("Лагерь",)),
         race_id=race.id, founded=date, founder_id=leader.id,
         region_id=region.id, population=rng.randint(CAMP_MIN, CAMP_MAX),
+        hex_index=camp_hex,
     )
+    if ctx.map is not None and camp_hex >= 0:
+        ctx.map.claim(camp_hex, camp.id)
     leader.home_id = camp.id
     leader.roles.append("основатель лагеря")
 
@@ -355,6 +369,9 @@ def upkeep(ctx, year: int, period: int) -> None:
         race = races_mod.get_race(settlement.race_id)
         region = world.regions.get(settlement.region_id)
         capacity = 7000.0 * (region.capacity if region else 1.0)
+        if ctx.map is not None and region is not None and region.from_map:
+            # Урожайные годы и рыбный ход кормят больше ртов, чем голая земля.
+            capacity *= 0.85 + 0.5 * ctx.map.bounty(region.id)
         if settlement.is_capital:
             capacity *= 2.1
         elif settlement.polity_id:
