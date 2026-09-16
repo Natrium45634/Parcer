@@ -642,6 +642,60 @@ def _ruined_temples(ctx, year: int) -> None:
 # Расколы
 # ---------------------------------------------------------------------------
 
+# Сколько живых вер может возглавлять один бог. Без потолка одно божество
+# за тысячелетия подминало под себя всю веру мира: ересь наследовала главу
+# родителя, ересь ереси — снова его, и так до последней эпохи.
+MAX_FAITHS_PER_DEITY = 3
+
+
+def _faiths_led_by(world, deity_id: str) -> int:
+    """Сколько живых вер сейчас возглавляет этот бог."""
+    return sum(1 for fid in world.living_faiths
+               if world.faiths[fid].chief_deity_id == deity_id)
+
+
+def _schism_gods(ctx, rng, parent, deities, race, alignment, year: int):
+    """Кого ересь уносит с собой и кого ставит во главе.
+
+    Раскол не повторяет родителя. Из пантеона ересь возвышает младшего
+    бога — того, кто стоял в тени; из культа одного бога она либо
+    открывает нового, либо перетолковывает прежнего, и это бывает редко.
+    Возвращает (унесённые боги, глава, было ли откровение).
+    """
+    world = ctx.world
+    parent_chief = world.deities.get(parent.chief_deity_id)
+    others = [d for d in deities if d.id != parent.chief_deity_id]
+
+    # Пантеон раскалывается по живому: во главе встаёт тот, кто был вторым.
+    if len(others) >= 1 and rng.chance(0.82):
+        chief = rng.choice(sorted(others, key=lambda d: d.id))
+        kept = [chief]
+        rest = [d for d in deities if d.id != chief.id]
+        if rest:
+            kept.extend(rng.sample(sorted(rest, key=lambda d: d.id),
+                                   max(0, min(len(rest), len(deities) // 2 - 1))))
+        if _faiths_led_by(world, chief.id) < MAX_FAITHS_PER_DEITY:
+            return kept, chief, False
+
+    # Прежнего бога можно перетолковать — но не бесконечно.
+    if parent_chief is not None and rng.chance(0.3) \
+            and _faiths_led_by(world, parent_chief.id) < MAX_FAITHS_PER_DEITY:
+        kept = [parent_chief] + (
+            rng.sample(sorted(others, key=lambda d: d.id), min(2, len(others)))
+            if others else [])
+        return kept, parent_chief, False
+
+    # Иначе ересиарху является новый бог: так вера ветвится, а не тянет
+    # за собой одно и то же имя через десять тысяч лет.
+    used = {key for deity in deities for key in deity.domains}
+    fresh = _make_deity(ctx, rng, race, alignment, year, used, "")
+    kept = [fresh]
+    if others and rng.chance(0.5):
+        kept.extend(rng.sample(sorted(others, key=lambda d: d.id),
+                               min(2, len(others))))
+    return kept, fresh, True
+
+
 def _maybe_schism(ctx, year: int) -> None:
     world = ctx.world
     rng = ctx.rng("schism", year)
@@ -673,17 +727,21 @@ def _maybe_schism(ctx, year: int) -> None:
     date = ctx.date_in(rng, year)
     deities = [world.deities[did] for did in parent.deity_ids
                if did in world.deities]
-    kept = rng.sample(deities, max(1, len(deities) // 2)) if deities else []
+    kept, chief, revelation = _schism_gods(ctx, rng, parent, deities, race,
+                                           alignment, year)
     faith = world.add_faith(
         name="", kind=pan.HERESY, founded=date, founder_id=heretic.id,
         deity_ids=[deity.id for deity in kept],
-        chief_deity_id=kept[0].id if kept else "",
+        chief_deity_id=chief.id if chief is not None else "",
         race_ids=list(parent.race_ids), alignment=alignment,
         forbidden=alignment <= pan.FORBIDDEN_FROM, parent_id=parent.id,
         high_priest_id=heretic.id)
     faith.name = ctx.forge.unique(
         "faith", lambda: texts.faith_name(rng, pan.HERESY, kept, alignment, race),
         rng)
+    if revelation and chief is not None:
+        chief.faith_id = faith.id
+        faith.notes.append("новое откровение: %s" % chief.full_name)
     heretic.faith_id = faith.id
 
     taken = rng.sample(sorted(followers, key=lambda s: s.id),

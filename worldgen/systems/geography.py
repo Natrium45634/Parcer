@@ -123,8 +123,37 @@ def _build_grid(ctx) -> None:
                 region.neighbors.append(other.id)
 
     _guarantee_homelands(ctx, rng)
+    _cut_off_islands(world)
     ctx.set_world_scale(len(world.regions))
     ctx.build_region_weights()
+
+
+def _cut_off_islands(world) -> None:
+    """Острова отрезаются от суши: до них теперь только вплавь.
+
+    На процедурной сетке всё связано со всем, и мореплавателям нечего было
+    бы открывать. Поэтому островные земли теряют сухопутных соседей и
+    получают морские: они остаются неведомыми, пока туда не доплывут.
+    """
+    islands = [region for region in world.regions.values()
+               if region.terrain == races_mod.ISLANDS]
+    if not islands:
+        return
+    island_ids = {region.id for region in islands}
+    for region in world.regions.values():
+        if region.id in island_ids:
+            region.sea_links = [rid for rid in region.neighbors
+                                if rid not in island_ids] or \
+                [r.id for r in world.regions.values()
+                 if r.id != region.id and r.id not in island_ids][:2]
+            region.neighbors = [rid for rid in region.neighbors
+                                if rid in island_ids]
+        else:
+            keep, sea = [], list(region.sea_links)
+            for rid in region.neighbors:
+                (sea if rid in island_ids else keep).append(rid)
+            region.neighbors = keep
+            region.sea_links = sea
 
 
 def _guarantee_homelands(ctx, rng) -> None:

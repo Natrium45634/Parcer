@@ -107,6 +107,33 @@ def polity_gen(polity) -> str:
     return _gen(polity)
 
 
+# Порядковые по родам: летопись так и нумерует повторившуюся беду —
+# «Вторая Великая Война», «Третий Чёрный Мор».
+ORDINALS = {
+    "m": ("", "Второй", "Третий", "Четвёртый", "Пятый", "Шестой", "Седьмой",
+          "Восьмой", "Девятый"),
+    "f": ("", "Вторая", "Третья", "Четвёртая", "Пятая", "Шестая", "Седьмая",
+          "Восьмая", "Девятая"),
+    "n": ("", "Второе", "Третье", "Четвёртое", "Пятое", "Шестое", "Седьмое",
+          "Восьмое", "Девятое"),
+}
+
+
+def unique_calamity_name(name: str, gender: str, taken) -> str:
+    """Если такая беда уже была, летопись нумерует новую по счёту."""
+    if name not in taken:
+        return name
+    forms = ORDINALS.get(gender or "m", ORDINALS["m"])
+    for index in range(1, len(forms)):
+        candidate = "%s %s" % (forms[index], name)
+        if candidate not in taken:
+            return candidate
+    index = len(forms)
+    while "%s (%d)" % (name, index) in taken:
+        index += 1
+    return "%s (%d)" % (name, index)
+
+
 # ---------------------------------------------------------------------------
 # Приход беды
 # ---------------------------------------------------------------------------
@@ -374,11 +401,39 @@ def ends(rng, world, calamity, spec, resolution: str, heroes, commanders):
             "Их насчитывали %s." % souls(calamity.host_size),
             "Из %s не возвращается почти никто." % souls(calamity.host_size),
         )))
-    lines.append(toll_text(world, calamity))
+    lines.append(toll_text(world, calamity, rng))
     return ("Конец бедствия: %s" % calamity.name, cap(" ".join(lines)))
 
 
-def toll_text(world, calamity) -> str:
+# Беда бывает страшной и при малом счёте погибших: если она приходит в
+# пустые земли или тянется веками, её работа не в убитых, а в том, что
+# земля так и не поднялась. Летопись должна это сказать, иначе
+# «апокалиптическое бедствие, погибло 124» читается как ошибка.
+EMPTY_TOLL = (
+    "Считать оказалось почти некого: беда пришла в земли, где и так никто "
+    "не жил.",
+    "Счёт погибших вышел малым — но там, где она прошла, после неё долго "
+    "никто не селился.",
+    "Убитых немного: губить было почти некого.",
+)
+SLOW_TOLL = (
+    "Убитых меньше, чем нерождённых: за эти века земля просто перестала "
+    "родить людей.",
+    "Счёт погибших мал для такого срока — беда брала не кровью, а тем, что "
+    "не давала подняться.",
+    "Она убивала медленно и почти незаметно, но после неё эти земли "
+    "считали жителей десятками там, где прежде считали тысячами.",
+)
+
+
+def toll_text(world, calamity, rng=None) -> str:
+    # Мелкий счёт при большой тяжести — не ошибка, а свойство беды.
+    if calamity.severity >= 3 and calamity.deaths < 2000:
+        pool = SLOW_TOLL if calamity.years >= 300 else EMPTY_TOLL
+        line = (rng.choice(pool) if rng is not None else pool[0])
+        if calamity.deaths > 0:
+            return "Всего погибло %s. %s" % (souls(calamity.deaths), line)
+        return line
     if calamity.deaths <= 0:
         return "Обошлось без большой крови."
     parts = ["Всего погибло %s." % souls(calamity.deaths)]

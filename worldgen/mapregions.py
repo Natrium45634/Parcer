@@ -119,7 +119,7 @@ class MapRegion:
                  "habitat", "fertility", "magic", "savagery", "richness",
                  "risk", "risk_kinds", "boons", "temp", "moist", "elev_m",
                  "coastal", "river", "island", "landmass", "features",
-                 "center", "x", "y")
+                 "center", "x", "y", "sea_links")
 
     def __init__(self):
         self.hexes = []
@@ -127,6 +127,7 @@ class MapRegion:
         self.name = ""
         self.capacity = 1.0
         self.neighbors = set()
+        self.sea_links = set()      # куда можно только доплыть
         self.habitat = 0.5
         self.fertility = 0.5
         self.magic = 0.0
@@ -460,11 +461,36 @@ def build_regions(wmap, ctx, rng, target: int) -> list:
         raise ValueError("на карте нет суши — истории негде случиться")
 
     keys = sorted(groups, key=lambda k: (-len(groups[k]), k))
+    target = max(1, min(int(target), 90))
 
-    # Совсем мелкие островки не заслуживают отдельной земли, пока есть куда расти.
-    major = [k for k in keys if len(groups[k]) >= 8] or keys[:1]
-    target = max(len(major), min(int(target), 80))
-    shares = _budget([len(groups[k]) for k in major], target)
+    # Бюджет земель делится между материками и островами.
+    #
+    # Материк — массив, заметный в масштабе карты: на 500×300 гексов иначе
+    # набегает три десятка островков по восемь клеток, они разбирают весь
+    # бюджет, и материк остаётся одним куском. Островам всё же положена
+    # своя доля: без них негде жить птицелюдам и высшим эльфам, да и
+    # открывать мореплавателям будет нечего. Совсем мелочь прирастает к
+    # ближайшей земле — так вокруг большого острова складывается архипелаг.
+    total_land = sum(len(chunk) for chunk in groups.values())
+    big_floor = max(24, int(total_land / max(1, target * 2)))
+    small_floor = max(8, int(total_land / max(1, target * 40)))
+
+    mainlands = [k for k in keys if len(groups[k]) >= big_floor]
+    islands = [k for k in keys
+               if small_floor <= len(groups[k]) < big_floor]
+    if not mainlands:
+        mainlands = keys[:1]
+        islands = [k for k in islands if k not in mainlands]
+
+    island_quota = max(1, min(len(islands), target // 5))
+    islands = islands[:island_quota]
+
+    major = mainlands + islands
+    target = max(len(major), target)
+    # Островам — по одной земле, остальное материкам по их площади.
+    mainland_budget = max(len(mainlands), target - len(islands))
+    shares = _budget([len(groups[k]) for k in mainlands], mainland_budget) + \
+        [1] * len(islands)
 
     habitat_layer = wmap.layer(wm.L_FERTILITY)
     land_indices = [i for i in range(wmap.size) if wmap.is_land(i)]
@@ -485,16 +511,19 @@ def build_regions(wmap, ctx, rng, target: int) -> list:
         for slot in sorted(buckets):
             region = MapRegion()
             region.hexes = sorted(buckets[slot])
-            region.island = len(hexes) < ISLAND_HEXES
+            region.island = len(hexes) < ISLAND_HEXES or key in islands
             regions.append(region)
             for index in region.hexes:
                 owner_of_hex[index] = len(regions) - 1
 
-    # Островки, не попавшие в разбиение, отходят ближайшей земле.
+    # Центры земель считаем заранее: по ним и приписываем мелочь. Сравнивать
+    # каждый брошенный гекс со всей сушей было бы вчетверо дороже всей сборки.
+    centers = [_centroid(wmap, region.hexes) for region in regions]
+
     leftovers = [k for k in keys if k not in major]
     for key in leftovers:
         for index in groups[key]:
-            nearest = _nearest_region(wmap, index, owner_of_hex)
+            nearest = _nearest_center(wmap, index, centers)
             if nearest is None:
                 continue
             regions[nearest].hexes.append(index)
@@ -505,19 +534,30 @@ def build_regions(wmap, ctx, rng, target: int) -> list:
     return regions
 
 
-def _nearest_region(wmap, index, owner_of_hex):
-    """Кому отдать оторванный островок — ищем по прямой, с учётом замыкания карты."""
+def _centroid(wmap, hexes):
+    """Середина земли в координатах карты."""
+    if not hexes:
+        return (0.0, 0.0)
+    columns = sum(index % wmap.width for index in hexes)
+    rows = sum(index // wmap.width for index in hexes)
+    count = float(len(hexes))
+    return (columns / count, rows / count)
+
+
+def _nearest_center(wmap, index, centers):
+    """К какой земле ближе этот оторванный островок."""
+    if not centers:
+        return None
     column, row = wmap.col_row(index)
     best, best_distance = None, 1e18
-    for other, region_slot in owner_of_hex.items():
-        ocolumn, orow = wmap.col_row(other)
-        dx = abs(ocolumn - column)
+    for slot, (ccolumn, crow) in enumerate(centers):
+        dx = abs(ccolumn - column)
         if wmap.wrap:
             dx = min(dx, wmap.width - dx)
-        dy = abs(orow - row)
+        dy = crow - row
         distance = dx * dx + dy * dy
         if distance < best_distance:
-            best, best_distance = region_slot, distance
+            best, best_distance = slot, distance
     return best
 
 
@@ -568,23 +608,26 @@ def _measure(regions, wmap, owner_of_hex) -> None:
                 if other is not None and other != slot:
                     region.neighbors.add(other)
 
-    # Соседство через узкие проливы: остров без соседей всё же не край света.
+    # Через воду земли тоже связаны, но иначе: пешком туда не дойти.
+    # Морские связи держим отдельно — по ним ходят только корабли, и
+    # заморская земля остаётся неведомой, пока её кто-нибудь не откроет.
     for slot, region in enumerate(regions):
-        if region.neighbors:
-            continue
-        nearest, best = None, 1e18
+        pairs = []
         for other_slot, other in enumerate(regions):
-            if other_slot == slot:
+            if other_slot == slot or other_slot in region.neighbors:
                 continue
             dx = abs(other.x - region.x)
             if wmap.wrap:
                 dx = min(dx, wmap.width - dx)
-            distance = dx * dx + (other.y - region.y) ** 2
-            if distance < best:
-                nearest, best = other_slot, distance
-        if nearest is not None:
-            region.neighbors.add(nearest)
-            regions[nearest].neighbors.add(slot)
+            distance = (dx * dx + (other.y - region.y) ** 2) ** 0.5
+            pairs.append((distance, other_slot))
+        pairs.sort()
+        # Ближайшие заморские соседи: до них можно доплыть, до прочих — нет.
+        limit = max(wmap.width, wmap.height) * 0.45
+        for distance, other_slot in pairs[:3]:
+            if distance <= limit:
+                region.sea_links.add(other_slot)
+                regions[other_slot].sea_links.add(slot)
 
 
 def _classify(regions, wmap, ctx, rng) -> None:

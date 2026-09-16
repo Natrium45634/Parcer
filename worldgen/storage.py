@@ -12,8 +12,8 @@ import io
 import json
 
 from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, EraSpan,
-                     Event, Faith, Figure, House, Polity, Region, Reign, Relic,
-                     Settlement, Temple, Tribe)
+                     Event, Expedition, Faith, Figure, House, Polity, Region,
+                     Reign, Relic, Settlement, Temple, Tribe)
 from .timeline import Date
 from .world import World
 
@@ -89,6 +89,8 @@ def world_to_dict(world: World) -> dict:
         "calamities": [_compact(Calamity, item.to_dict())
                        for item in world.calamities.values()],
         "relics": [_compact(Relic, item.to_dict()) for item in world.relics.values()],
+        "expeditions": [_compact(Expedition, item.to_dict())
+                        for item in world.expeditions.values()],
         "battles": [_compact(Battle, item.to_dict())
                     for item in world.battles.values()],
         "dark_ages": world.dark_ages,
@@ -174,6 +176,11 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("temples", ()):
         temple = Temple(**_clean(Temple, item))
         world.temples[temple.id] = temple
+    for item in data.get("expeditions", ()):
+        expedition = Expedition(**_clean(Expedition, item))
+        world.expeditions[expedition.id] = expedition
+        if expedition.end is None:
+            world.active_expeditions.append(expedition.id)
     for item in data.get("events", ()):
         world.events.append(Event(**_clean(Event, item)))
 

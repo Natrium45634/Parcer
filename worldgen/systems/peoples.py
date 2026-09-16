@@ -74,9 +74,12 @@ def tick_awakening(ctx, year: int) -> None:
 def _awaken(ctx, race, year: int) -> None:
     world = ctx.world
     rng = ctx.rng("awakening", race.id, year)
-    region = ctx.pick_region(rng, race)
+    # Народ приходит в мир там, где приходит: неведомых земель для него нет.
+    region = ctx.pick_region(rng, race, known_only=False)
     if region is None:
         return
+    world.discover_region(region, year, race_id=race.id)
+    ctx.spread_knowledge()
 
     awakening_date = Date(year, rng.randint(1, 7), rng.randint(1, 30))
     world.race_awakening[race.id] = year

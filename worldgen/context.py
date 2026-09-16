@@ -45,6 +45,9 @@ class GenContext:
         self.calamity_last = {}
         self.calamity_plans = {}
         self.climate_plan = []       # перемены климата, вписанные в карту
+        self.expedition_due = {}     # поход -> год возвращения
+        self.expedition_attempts = {}  # цель -> сколько раз к ней ходили
+        self.notable_done = {}       # ремесло -> уже сделанные работы
         self.lair_of_relic = {}      # след -> логово карты, из которого он взялся
         self.piety = 1.0             # набожность мира
         self.dark_tilt = 0.0         # склонность богов к тьме
@@ -124,10 +127,38 @@ class GenContext:
                 pairs.append((region.id, weight))
             self.region_weights[race.id] = pairs
 
-    def pick_region(self, rng, race, near: str = "", spread: float = 0.0):
-        """Выбирает землю для расы. near — желательная близость к этой земле."""
+    def spread_knowledge(self) -> None:
+        """Молва расходится по суше: сосед ведомой земли тоже становится ведом.
+
+        За море молва не идёт — туда нужен корабль и тот, кто рискнёт.
+        """
+        world = self.world
+        changed = True
+        while changed:
+            changed = False
+            for region in world.regions.values():
+                if not region.known:
+                    continue
+                for neighbor_id in region.neighbors:
+                    neighbor = world.regions.get(neighbor_id)
+                    if neighbor is not None and not neighbor.known:
+                        neighbor.known = True
+                        changed = True
+
+    def pick_region(self, rng, race, near: str = "", spread: float = 0.0,
+                    known_only: bool = True):
+        """Выбирает землю для расы. near — желательная близость к этой земле.
+
+        Селиться можно только там, куда уже дошли: заморская земля остаётся
+        пустой, пока её не откроют мореплаватели. Исключение — пробуждение
+        расы: народ появляется там, где появляется, и сам делает свою землю
+        ведомой.
+        """
         world = self.world
         pairs = self.region_weights.get(race.id) or []
+        if known_only:
+            pairs = [(region_id, weight) for region_id, weight in pairs
+                     if world.regions[region_id].known]
         if not pairs:
             return None
         if near and rng.chance(1.0 - spread):
@@ -203,6 +234,18 @@ class GenContext:
         if not pairs:
             return "вождь" if sex == "m" else "вождица"
         return pairs[1] if (sex == "f" and len(pairs) > 1) else pairs[0]
+
+    def ruler_title(self, polity, race, sex: str) -> str:
+        """Титул правителя страны.
+
+        Империей правит император, герцогством — герцог, а вот подгорным
+        королевством — король-под-горой: тут слово за расой. Если страна
+        сменила форму (королевство стало империей), титул меняется вместе
+        с ней.
+        """
+        form = getattr(polity, "form", "") if polity is not None else ""
+        return races_mod.title_for_form(form, sex, race.ruler_titles or
+                                        race.founder_titles or race.chief_titles)
 
     # ------------------------------------------------------------------
     # Прочее

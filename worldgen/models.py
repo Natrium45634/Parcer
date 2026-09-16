@@ -124,9 +124,13 @@ class Region:
     terrain: str
     x: int = 0
     y: int = 0
-    neighbors: list = field(default_factory=list)
+    neighbors: list = field(default_factory=list)      # соседи по суше
+    sea_links: list = field(default_factory=list)      # куда только доплыть
     capacity: float = 1.0
     discovered_by: str = ""
+    known: bool = False           # ведома ли земля обитаемому миру
+    discovered_year: int = 0
+    discovered_by_id: str = ""    # кто открыл: id личности
 
     # --- данные карты (пусто, если земля создана процедурно) ---
     hexes: list = field(default_factory=list)
@@ -247,6 +251,31 @@ class Polity:
     population: int = 0            # полное население: города и сельская округа
     peak_population: int = 0
     faith_id: str = ""             # государственная вера
+
+    # --- народы страны (блок 6) ---
+    # race_id выше — титульный народ, тот, чья знать сидит на престоле.
+    # Здесь же живут все прочие: завоёванные, пришлые, осевшие.
+    peoples: dict = field(default_factory=dict)      # раса -> душ
+    policy: str = ""               # как держава обходится с иными народами
+    policy_since: int = 0
+    titular_since: int = 0         # с какого года престол у нынешнего народа
+    grievance: dict = field(default_factory=dict)    # раса -> обида, 0…1
+    conquests: list = field(default_factory=list)    # id событий завоеваний
+
+    @property
+    def multiethnic(self) -> bool:
+        return len([race for race, souls in self.peoples.items() if souls > 0]) > 1
+
+    def share_of(self, race_id: str) -> float:
+        total = float(sum(self.peoples.values())) or 1.0
+        return self.peoples.get(race_id, 0) / total
+
+    def minorities(self) -> list:
+        """Народы страны, кроме титульного, от большего к меньшему."""
+        rows = [(race, souls) for race, souls in self.peoples.items()
+                if race != self.race_id and souls > 0]
+        rows.sort(key=lambda pair: (-pair[1], pair[0]))
+        return rows
 
     @property
     def full_name(self) -> str:
@@ -538,6 +567,41 @@ class Battle:
     def to_dict(self) -> dict:
         data = asdict(self)
         data["date"] = _date_out(self.date)
+        return data
+
+
+@dataclass
+class Expedition:
+    """Поход в неизведанное: за море, за горы, за край света."""
+
+    id: str
+    name: str
+    kind: str                  # sea / land / ice / deep
+    leader_id: str
+    race_id: str
+    start: Date
+    polity_id: str = ""        # кто снарядил; пусто — вольный поход
+    from_region: str = ""
+    target_region: str = ""
+    target_name: str = ""      # что искали: остров, архипелаг, край света
+    end: Date = None
+    outcome: str = ""          # discovered / sighted / lost / empty
+    discovered: list = field(default_factory=list)
+    crew: int = 0
+    deaths: int = 0
+    attempt: int = 1           # какая по счёту попытка дойти до этой цели
+    notes: list = field(default_factory=list)
+
+    @property
+    def years(self) -> int:
+        if self.end is None:
+            return 0
+        return max(0, self.end.year - self.start.year)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["start"] = _date_out(self.start)
+        data["end"] = _date_out(self.end)
         return data
 
 

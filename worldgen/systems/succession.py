@@ -133,7 +133,7 @@ def _new_dynasty(ctx, polity, race, year: int, date, rng):
     sex = "f" if rng.chance(0.4) else "m"
     upstart = ctx.make_figure(
         rng, race, year, role="новая кровь", region_id=seat.region_id,
-        title=ctx.title_for(race, "ruler", sex), sex=sex, home_id=seat.id,
+        title=ctx.ruler_title(polity, race, sex), sex=sex, home_id=seat.id,
         epithet_chance=0.8)
     houses_mod.found_house(ctx, upstart, year, date, seat=seat, rank=GREAT,
                            polity=polity, importance=2)
@@ -164,7 +164,7 @@ def enthrone(ctx, polity, heir, date: Date, year: int, choice,
         houses_mod.attach(world, house, polity)
 
     heir.regnal_number = _regnal_number(world, polity, heir)
-    ruler_title = ctx.title_for(race, "ruler", heir.sex)
+    ruler_title = ctx.ruler_title(polity, race, heir.sex)
     if ruler_title in heir.titles:
         heir.titles.remove(ruler_title)
     heir.titles.insert(0, ruler_title)

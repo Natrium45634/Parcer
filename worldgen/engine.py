@@ -21,8 +21,9 @@ from .chronicle_map import MapRecorder
 from .context import GenContext
 from .eras import build_eras
 from .rng import seed_to_int
-from .systems import (calamity, era_events, founding, geography, houses, lives,
-                      peoples, religion, succession)
+from .systems import (calamity, era_events, exploration, founding, geography,
+                      houses, lives, nations, notables, peoples, religion,
+                      succession)
 from .timeline import Date
 from .world import World
 from . import narrative
@@ -105,6 +106,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         founding.tick_colonies(ctx, year)
         founding.tick_camps(ctx, year)
         succession.tick(ctx, year)
+        exploration.tick(ctx, year)
+        nations.tick(ctx, year)
+        notables.tick(ctx, year)
         calamity.tick(ctx, year)
         religion.tick(ctx, year)
         lives.tick(ctx, year)
@@ -115,6 +119,8 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             founding.upkeep(ctx, year, UPKEEP_PERIOD)
             houses.upkeep(ctx, year, UPKEEP_PERIOD)
             succession.upkeep(ctx, year, UPKEEP_PERIOD)
+            nations.upkeep(ctx, year, UPKEEP_PERIOD)
+            exploration.upkeep(ctx, year, UPKEEP_PERIOD)
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)
             religion.upkeep(ctx, year, UPKEEP_PERIOD)
 

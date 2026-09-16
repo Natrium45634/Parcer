@@ -126,6 +126,8 @@ class MapLink:
             region = made[slot]
             region.neighbors = [made[other].id for other in sorted(piece.neighbors)
                                 if 0 <= other < len(made)]
+            region.sea_links = [made[other].id for other in sorted(piece.sea_links)
+                                if 0 <= other < len(made)]
         return made
 
     # ------------------------------------------------------------------

@@ -367,7 +367,10 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
         host_size = _host_size(rng, spec, severity)
 
     date = ctx.date_in(rng, year)
-    name = texts.calamity_name(rng, spec, host, victim)
+    name = texts.unique_calamity_name(
+        texts.calamity_name(rng, spec, host, victim),
+        spec.noun[1] if len(spec.noun) > 1 else "m",
+        {item.name for item in world.calamities.values()})
     calamity = world.add_calamity(
         key=spec.key, kind=spec.kind, name=name, severity=severity,
         start=date, region_ids=list(region_ids),
@@ -613,11 +616,24 @@ def _targets(world, calamity) -> tuple:
     return settlements, tribes, camps
 
 
+# За сколько лет беда успевает взять своё. Дань не размазывается по всей
+# длительности: иначе ледник на две с половиной тысячи лет выходил безобиднее
+# зимы на полвека — чем дольше, тем безвреднее, ровно наоборот замыслу.
+# Настоящая долгая беда работает иначе: сперва обвал, потом долгие века
+# прозябания, когда земля уже обезлюдела и убивать почти некого, а расти ей
+# не даёт мрак.
+COLLAPSE_WINDOW = 200
+LINGER_SHARE = 0.12        # какая доля давления остаётся после обвала
+
+
 def _damage(ctx, calamity, spec, plan, rng, year: int) -> None:
     world = ctx.world
     duration = max(1, plan["duration"])
     total = min(0.92, plan["toll"] * calamity.strength)
-    annual = 1.0 - (1.0 - total) ** (1.0 / duration)
+    window = min(duration, COLLAPSE_WINDOW)
+    annual = 1.0 - (1.0 - total) ** (1.0 / window)
+    if year - calamity.start.year > window:
+        annual *= LINGER_SHARE
     if annual <= 0:
         return
 
@@ -940,16 +956,17 @@ def _split_polity(ctx, calamity, polity, rng, year: int, date) -> None:
         founder = world.figures.get(capital.founder_id)
         house = world.houses.get(founder.house_id) if founder is not None else None
         head = world.figures.get(house.head_id) if house is not None else None
+        form = rng.choice(race.polity_words or ("Королевство",))
         if head is None or not head.alive_at(year):
             sex = "f" if rng.chance(0.4) else "m"
             head = ctx.make_figure(
                 rng, race, year, role="правитель", region_id=capital.region_id,
-                title=ctx.title_for(race, "ruler", sex), sex=sex,
-                home_id=capital.id, epithet_chance=0.7)
+                title=races_mod.title_for_form(form, sex, race.ruler_titles),
+                sex=sex, home_id=capital.id, epithet_chance=0.7)
 
         new_polity = world.add_polity(
             name=ctx.forge.polity(rng, race),
-            form=rng.choice(race.polity_words or ("Королевство",)),
+            form=form,
             race_id=race.id, founded=date, founder_id=head.id,
             capital_id=capital.id, ruler_id="", region_ids=[], settlement_ids=[],
             predecessor_id=polity.id)

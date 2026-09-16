@@ -271,14 +271,16 @@ def tick_polities(ctx, year: int) -> None:
 
     leader, is_new = _leader_of(ctx, rng, race, year, settlement=capital, kind="ruler")
     sex = leader.sex
-    ruler_title = ctx.title_for(race, "ruler", sex)
+    # Форму выбираем до титула: империей правит император, а не король.
+    form = rng.choice(race.polity_words or ("Королевство",))
+    ruler_title = races_mod.title_for_form(form, sex, race.ruler_titles)
     if ruler_title not in leader.titles:
         leader.titles.insert(0, ruler_title)
     leader.roles.append("основатель страны")
 
     date = ctx.date_in(rng, year)
     polity = world.add_polity(
-        name=ctx.forge.polity(rng, race), form=rng.choice(race.polity_words or ("Королевство",)),
+        name=ctx.forge.polity(rng, race), form=form,
         race_id=race.id, founded=date, founder_id=leader.id,
         capital_id=capital.id, ruler_id=leader.id,
         region_ids=[], settlement_ids=[],

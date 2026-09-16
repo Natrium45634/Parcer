@@ -32,6 +32,12 @@ GENERIC_TOTEMS = (
     "Солнца", "Тени", "Костра", "Копья",
 )
 
+# Отличающие признаки при совпадении имён. Согласованы с полом: у богов
+# бывает и средний род, но им достаётся мужская форма — «Иной» звучит
+# уместно и для безликого божества.
+MALE_MARKS = ("Младший", "Старший", "Второй", "Третий", "Иной")
+FEMALE_MARKS = ("Младшая", "Старшая", "Вторая", "Третья", "Иная")
+
 GENERIC_EPITHETS = (
     "Смелый", "Мудрый", "Молчаливый", "Хитрый", "Суровый", "Щедрый",
     "Быстрый", "Терпеливый", "Упрямый", "Долговязый", "Одинокий", "Дерзкий",
@@ -737,7 +743,8 @@ class NameForge:
 
     # --- служебное ------------------------------------------------------
 
-    def _unique(self, bucket: str, maker, rng, attempts: int = 12) -> str:
+    def _unique(self, bucket: str, maker, rng, attempts: int = 12,
+                sex: str = "") -> str:
         taken = self.used.setdefault(bucket, set())
         name = None
         for _ in range(attempts):
@@ -747,8 +754,10 @@ class NameForge:
                 return name
         # Всё занято — добавляем отличающий признак. Людям он идёт вслед
         # («Скирек Младший»), местам — впереди («Новый Вестгард»).
+        # Признак согласуется с полом: не «Шерра Третий», а «Шерра Третья».
         if bucket.startswith("person") or bucket == "deity":
-            for suffix in ("Младший", "Старший", "Второй", "Третий", "Иной"):
+            suffixes = (FEMALE_MARKS if sex == "f" else MALE_MARKS)
+            for suffix in suffixes:
                 candidate = "%s %s" % (name, suffix)
                 if candidate not in taken:
                     taken.add(candidate)
@@ -765,9 +774,10 @@ class NameForge:
         taken.add(candidate)
         return candidate
 
-    def unique(self, bucket: str, maker, rng, attempts: int = 12) -> str:
+    def unique(self, bucket: str, maker, rng, attempts: int = 12,
+               sex: str = "") -> str:
         """Обёртка для имён, которые собираются вне кузницы (например, вер)."""
-        return self._unique(bucket, maker, rng, attempts)
+        return self._unique(bucket, maker, rng, attempts, sex=sex)
 
     @staticmethod
     def style_of(race) -> NameStyle:
@@ -783,7 +793,7 @@ class NameForge:
             return _assemble(rng, st.starts, st.middles, ends,
                              st.middle_chance, st.apostrophe)
 
-        return self._unique("person:" + race.id, make, rng)
+        return self._unique("person:" + race.id, make, rng, sex=sex)
 
     def epithet(self, rng, race, sex: str) -> str:
         """Прозвище вида «Среброликая» или «Каменный Клык»."""
@@ -855,7 +865,7 @@ class NameForge:
                 word = word[:cut] + "'" + word[cut:]
             return _capitalize(word)
 
-        return self._unique("deity", make, rng)
+        return self._unique("deity", make, rng, sex=sex)
 
     def house(self, rng, race) -> str:
         """Родовое имя: «Альдеринг», «Камнерез», «Аэлиндор», «Рыжехвост»."""

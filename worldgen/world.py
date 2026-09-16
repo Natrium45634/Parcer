@@ -12,9 +12,9 @@ import heapq
 
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
-                     Battle, Calamity, Camp, Deity, Event, Faith, Figure,
-                     House, Polity, Region, Reign, Relic, Settlement, Temple,
-                     Tribe)
+                     Battle, Calamity, Camp, Deity, Event, Expedition, Faith,
+                     Figure, House, Polity, Region, Reign, Relic, Settlement,
+                     Temple, Tribe)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
@@ -65,6 +65,8 @@ class World:
         self._death_queue = []         # куча (год смерти, порядок, id личности)
         self._death_order = 0
         self.race_awakening = {}       # race_id -> год пробуждения
+        self.expeditions = {}
+        self.active_expeditions = []
         self.notes = {}                # свободные заметки для будущих блоков
         self.map_source = ""           # файл карты, если мир построен по ней
         self.map_recorder = None       # политическая карта по годам (не сохраняется)
@@ -163,6 +165,34 @@ class World:
         self.calamities[calamity.id] = calamity
         self.active_calamities.append(calamity.id)
         return calamity
+
+    def add_expedition(self, **kwargs) -> "Expedition":
+        expedition = Expedition(id=self.next_id("X"), **kwargs)
+        self.expeditions[expedition.id] = expedition
+        self.active_expeditions.append(expedition.id)
+        return expedition
+
+    def end_expedition(self, expedition, date: Date, outcome: str) -> None:
+        expedition.end = date
+        expedition.outcome = outcome
+        if expedition.id in self.active_expeditions:
+            self.active_expeditions.remove(expedition.id)
+
+    def discover_region(self, region, year: int, figure_id: str = "",
+                        race_id: str = "") -> bool:
+        """Отмечает землю ведомой. Возвращает True, если она была неведома."""
+        if region is None or region.known:
+            return False
+        region.known = True
+        region.discovered_year = int(year)
+        if figure_id:
+            region.discovered_by_id = figure_id
+        if race_id and not region.discovered_by:
+            region.discovered_by = race_id
+        return True
+
+    def known_regions(self) -> list:
+        return [region for region in self.regions.values() if region.known]
 
     def add_relic(self, **kwargs) -> Relic:
         relic = Relic(id=self.next_id("L"), **kwargs)
@@ -417,18 +447,22 @@ class World:
         return int(settlement.population * RURAL_FACTOR)
 
     def refresh_populations(self) -> None:
-        """Пересчитывает население стран по их поселениям."""
+        """Пересчитывает население стран по их поселениям — и по народам."""
         totals = {}
+        peoples = {}
         for settlement_id in self.active_settlements:
             settlement = self.settlements[settlement_id]
             if not settlement.polity_id:
                 continue
-            totals[settlement.polity_id] = totals.get(settlement.polity_id, 0) + \
-                self.settlement_realm(settlement)
+            souls = self.settlement_realm(settlement)
+            totals[settlement.polity_id] = totals.get(settlement.polity_id, 0) + souls
+            by_race = peoples.setdefault(settlement.polity_id, {})
+            by_race[settlement.race_id] = by_race.get(settlement.race_id, 0) + souls
         for polity_id in self.active_polities:
             polity = self.polities[polity_id]
             polity.population = totals.get(polity_id, 0)
             polity.peak_population = max(polity.peak_population, polity.population)
+            polity.peoples = peoples.get(polity_id, {})
 
     def world_population(self) -> int:
         total = 0
@@ -567,6 +601,9 @@ class World:
             "Бедствий": len(self.calamities),
             "Сражений": len(self.battles),
             "Следов бедствий": len(self.relics),
+            "Походов в неизведанное": len(self.expeditions),
+            "Открытых земель": sum(1 for r in self.regions.values()
+                                   if r.discovered_year),
             "Тёмных веков": len(self.dark_ages),
             "Богов": len(self.deities),
             "Вер (всего)": len(self.faiths),

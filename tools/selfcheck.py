@@ -17,7 +17,10 @@
    верующие ссылаются на существующие веры;
 7. карта: мир, построенный по файлу .world, детерминирован так же, земли
    покрывают всю сушу без пересечений, поселения стоят в своих землях,
-   а политическая карта для картогенератора собирается без изъянов.
+   а политическая карта для картогенератора собирается без изъянов;
+8. народы и походы: доли народов в державе сходятся с её населением,
+   титульный народ живёт в стране, заморские земли открыты до того, как
+   в них поселились, а труды учёных не повторяются.
 """
 
 from __future__ import annotations
@@ -32,12 +35,68 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from worldgen import chronicle, storage                       # noqa: E402
 from worldgen.engine import Settings, generate                # noqa: E402
+from worldgen.models import ACTIVE                             # noqa: E402
 from worldgen.races import BEASTFOLK, EVIL, get_race          # noqa: E402
 
 SEEDS = ("Ясень-7", "Первый мир", "проверка", "1234")
 MAP_SEEDS = ("карта-1", "карта-2")
 SAMPLE_MAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "maps", "aurora-7.world")
+
+
+def check_nations(world, seed: str) -> list:
+    """Проверяет народы держав и походы в неизведанное."""
+    problems = []
+
+    for polity in world.polities.values():
+        if polity.status != ACTIVE or not polity.peoples:
+            continue
+        total = sum(polity.peoples.values())
+        if abs(total - polity.population) > max(50, polity.population * 0.02):
+            problems.append("сид «%s»: у страны %s народов на %d душ, а "
+                            "населения %d" % (seed, polity.name, total,
+                                              polity.population))
+            break
+        if polity.race_id not in polity.peoples:
+            problems.append("сид «%s»: титульный народ страны %s в ней не живёт"
+                            % (seed, polity.name))
+            break
+        for value in polity.grievance.values():
+            if not (0.0 <= value <= 1.0):
+                problems.append("сид «%s»: обида в стране %s вышла за пределы"
+                                % (seed, polity.name))
+                break
+
+    for expedition in world.expeditions.values():
+        if expedition.end is not None and expedition.end.ordinal < expedition.start.ordinal:
+            problems.append("сид «%s»: поход «%s» вернулся раньше, чем вышел"
+                            % (seed, expedition.name))
+            break
+        if expedition.deaths > expedition.crew:
+            problems.append("сид «%s»: в походе «%s» погибло больше, чем ушло"
+                            % (seed, expedition.name))
+            break
+        for region_id in expedition.discovered:
+            region = world.regions.get(region_id)
+            if region is None or not region.known:
+                problems.append("сид «%s»: поход «%s» открыл землю, которая "
+                                "так и не стала ведомой" % (seed, expedition.name))
+                break
+
+    # Города не ставят в землях, о которых никто не знает.
+    for settlement in world.settlements.values():
+        region = world.regions.get(settlement.region_id)
+        if region is not None and not region.known:
+            problems.append("сид «%s»: город %s стоит в неведомой земле %s"
+                            % (seed, settlement.name, region.name))
+            break
+
+    # Один труд — один раз за всю историю мира.
+    works = [note for figure in world.figures.values() for note in figure.notes
+             if note.startswith("труд: ")]
+    if len(works) != len(set(works)):
+        problems.append("сид «%s»: труды учёных повторяются" % seed)
+    return problems
 
 
 def check_map_world(world, link_regions, seed: str) -> list:
@@ -331,6 +390,7 @@ def main() -> int:
         failures.extend(check_nobility(first, seed))
         failures.extend(check_calamities(first, seed))
         failures.extend(check_faiths(first, seed))
+        failures.extend(check_nations(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -365,6 +425,7 @@ def main() -> int:
             failures.extend(check_nobility(first, "карта/" + seed))
             failures.extend(check_calamities(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
+            failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_map_world(first, None, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "

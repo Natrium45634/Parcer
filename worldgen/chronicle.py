@@ -12,6 +12,17 @@ IMPORTANCE_MARKS = {5: "***", 4: " **", 3: "  *", 2: "   ", 1: "   "}
 
 KIND_LABELS = {
     "world_begin": "Сотворение",
+    "conquest": "Завоевание",
+    "revolt": "Восстание",
+    "oppression": "Притеснение народа",
+    "assimilation": "Врастание народа",
+    "policy_decree": "Указ о народах",
+    "titular_shift": "Смена титульного народа",
+    "expedition_start": "Поход в неизведанное",
+    "expedition_end": "Исход похода",
+    "colony_overseas": "Колония за морем",
+    "colony_free": "Отделение колонии",
+    "notable_deed": "Труд, оставшийся в памяти",
     "era_begin": "Начало эпохи",
     "era_end": "Конец эпохи",
     "race_awakening": "Пробуждение расы",
@@ -260,6 +271,84 @@ def render_regions(world) -> str:
     return "\n".join(rows)
 
 
+def render_expeditions(world) -> str:
+    """Походы в неизведанное и что из них вышло."""
+    rows = ["ПОХОДЫ В НЕИЗВЕДАННОЕ", ""]
+    if not world.expeditions:
+        rows.append("  За море в этом мире так и не вышел никто.")
+        return "\n".join(rows)
+
+    names = {"discovered": "земля найдена", "sighted": "берег видели",
+             "lost": "не вернулся никто", "empty": "впустую", "": "в пути"}
+    kinds = {"sea": "за море", "ice": "к краю света", "deep": "в открытую воду",
+             "land": "за горы"}
+    found = sum(1 for x in world.expeditions.values() if x.discovered)
+    rows.append("  Всего походов: %d. Открытых земель: %d." % (
+        len(world.expeditions), found))
+    edge = world.notes.get("край света") or []
+    if edge:
+        rows.append("  Края света достигали: %s." % "; ".join(edge))
+    rows.append("")
+
+    for expedition in sorted(world.expeditions.values(),
+                             key=lambda x: x.start.ordinal):
+        leader = world.figures.get(expedition.leader_id)
+        polity = world.polities.get(expedition.polity_id)
+        rows.append("  %d — %s (%s)" % (expedition.start.year, expedition.name,
+                                        kinds.get(expedition.kind, expedition.kind)))
+        rows.append("      ведёт: %s%s" % (
+            leader.name if leader else "—",
+            "; снаряжает %s" % polity.full_name if polity is not None else
+            "; поход вольный"))
+        rows.append("      цель: %s; попытка %d; людей: %d" % (
+            expedition.target_name or "—", expedition.attempt, expedition.crew))
+        rows.append("      исход: %s%s" % (
+            names.get(expedition.outcome, expedition.outcome),
+            "; погибло %d" % expedition.deaths if expedition.deaths else ""))
+        for region_id in expedition.discovered:
+            region = world.regions.get(region_id)
+            if region is not None:
+                rows.append("      открыто: %s (%s)" % (region.name, region.terrain))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def render_peoples(world) -> str:
+    """Народы внутри держав: титульные, покорённые, пришлые."""
+    from . import nations as pol
+
+    rows = ["НАРОДЫ ДЕРЖАВ", ""]
+    living = [world.polities[pid] for pid in world.active_polities]
+    multi = [p for p in living if p.multiethnic]
+    rows.append("  Живых держав: %d, из них многонародных: %d."
+                % (len(living), len(multi)))
+    shifts = world.notes.get("смены титульного народа") or []
+    if shifts:
+        rows.append("  Титульный народ менялся: %d раз." % len(shifts))
+        for line in shifts[:8]:
+            rows.append("      %s" % line)
+    rows.append("")
+
+    for polity in sorted(living, key=lambda p: -p.population):
+        rows.append("  %s" % polity.full_name)
+        rows.append("      %s" % (pol.describe(polity, world) or "нет сведений"))
+        if polity.policy:
+            rows.append("      закон о народах: %s"
+                        % pol.POLICY_DESCRIPTIONS.get(polity.policy, polity.policy))
+        anger = {race_id: value for race_id, value in polity.grievance.items()
+                 if value >= 0.15}
+        if anger:
+            from . import races as races_mod
+            rows.append("      копят обиду: %s" % ", ".join(
+                "%s (%.0f%%)" % (races_mod.RACES_BY_ID[race_id].name, value * 100)
+                for race_id, value in sorted(anger.items(), key=lambda kv: -kv[1])
+                if race_id in races_mod.RACES_BY_ID))
+        if polity.conquests:
+            rows.append("      завоеваний на счету: %d" % len(polity.conquests))
+        rows.append("")
+    return "\n".join(rows)
+
+
 def render_pantheon(world) -> str:
     """Боги мира: имена, сферы, мировоззрение, праздники."""
     from . import pantheon as pan
@@ -488,7 +577,9 @@ def full_text(world) -> str:
         render_chronicle(world),
         render_eras(world),
         render_regions(world),
+        render_expeditions(world),
         render_dynasties(world),
+        render_peoples(world),
         render_houses(world),
         render_pantheon(world),
         render_faiths(world),

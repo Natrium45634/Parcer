@@ -290,6 +290,8 @@ class ChronicleApp(tk.Tk):
             ("Имя", "Раса", "Пол", "Годы жизни", "Род", "Титул", "Роли", "Событий"),
             (230, 120, 60, 110, 150, 150, 200, 70), self._on_figure_open,
             toolbar=self._figures_toolbar, filler=lambda: self._fill_figures())
+        self.peoples_text = self._add_text_tab("Народы")
+        self.expeditions_text = self._add_text_tab("Походы")
         self.regions_text = self._add_text_tab("Земли")
         self.stats_text = self._add_text_tab("Итоги")
         self.tabs.bind("<<NotebookTabChanged>>", self._on_tab_changed)
@@ -553,6 +555,9 @@ class ChronicleApp(tk.Tk):
         self._filled = set()
         self.refresh_chronicle()
         self._set_text(self.eras_text, chronicle.render_eras(world))
+        self._set_text(self.peoples_text, chronicle.render_peoples(world))
+        self._set_text(self.expeditions_text,
+                       chronicle.render_expeditions(world))
         self._set_text(self.regions_text, chronicle.render_regions(world))
         self._set_text(self.stats_text, chronicle.render_stats(world))
         self._on_tab_changed()
