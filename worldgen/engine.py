@@ -23,7 +23,7 @@ from .eras import build_eras
 from .rng import seed_to_int
 from .systems import (calamity, era_events, exploration, founding, geography,
                       houses, lives, nations, notables, peoples, religion,
-                      succession)
+                      succession, trade)
 from .timeline import Date
 from .world import World
 from . import narrative
@@ -85,7 +85,8 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     # в такой-то год. Её потом читает вкладка «Страны» картогенератора.
     recorder = None
     if ctx.map is not None:
-        recorder = MapRecorder(ctx.map, world, settings.map_interval)
+        recorder = MapRecorder(ctx.map, world, settings.map_interval,
+                               travel=ctx.travel)
         world.map_recorder = recorder
 
     total = settings.years
@@ -121,6 +122,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             succession.upkeep(ctx, year, UPKEEP_PERIOD)
             nations.upkeep(ctx, year, UPKEEP_PERIOD)
             exploration.upkeep(ctx, year, UPKEEP_PERIOD)
+            trade.upkeep(ctx, year, UPKEEP_PERIOD)
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)
             religion.upkeep(ctx, year, UPKEEP_PERIOD)
 

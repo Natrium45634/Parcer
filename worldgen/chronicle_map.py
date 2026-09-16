@@ -20,15 +20,18 @@
 
 from __future__ import annotations
 
+import heapq
 import json
-from collections import deque
 
 from . import races as races_mod
 
 DEFAULT_INTERVAL = 50          # как часто снимать кадр границ
-BASE_REACH = 2.0               # округа даже у самого малого города
-REACH_PER_SOUL = 0.016         # насколько дальше тянется город за каждого жителя
-MAX_REACH = 14.0
+# Округа города меряется не в гексах по прямой, а в цене пути: за хребтом
+# она обрывается, вдоль реки тянется далеко. Так держава на карте получает
+# настоящие очертания, а не круг.
+BASE_REACH = 7.0               # округа даже у самого малого города
+REACH_PER_SOUL = 0.0014        # насколько дальше тянется город за жителя
+MAX_REACH = 30.0
 
 # Цвет народа: тон в градусах и насыщенность. Держава получает оттенок
 # своего народа, чтобы карта читалась по расам, а не по номерам.
@@ -96,9 +99,11 @@ def _encode_rle(values) -> list:
 class MapRecorder:
     """Снимает кадры политической карты по ходу генерации."""
 
-    def __init__(self, link, world, interval: int = DEFAULT_INTERVAL):
+    def __init__(self, link, world, interval: int = DEFAULT_INTERVAL,
+                 travel=None):
         self.link = link
         self.world = world
+        self.travel = travel or getattr(link, "travel", None)
         self.interval = max(5, int(interval))
         self.frames = []            # [{"y": год, "key": веха, "rle": [...]}]
         self.slots = {}             # polity_id -> номер державы на карте
@@ -125,13 +130,20 @@ class MapRecorder:
     # ------------------------------------------------------------------
 
     def _ownership(self) -> list:
-        """Владение по гексам: номер державы или -1, если земля ничья."""
+        """Владение по гексам: номер державы или -1, если земля ничья.
+
+        Волна идёт не по числу шагов, а по цене пути: через болото держава
+        дотягивается вдвое хуже, чем по равнине, через хребет — почти
+        никак, а вдоль реки — далеко. Поэтому граница на карте ложится по
+        рельефу, как ей и положено.
+        """
         wmap = self.link.wmap
         size = wmap.size
         owner = [-1] * size
-        best = [1e9] * size
+        best = [1e18] * size
+        costs = self.travel.land if self.travel is not None else None
 
-        queue = deque()
+        heap = []
         for settlement_id in self.world.active_settlements:
             settlement = self.world.settlements[settlement_id]
             index = settlement.hex_index
@@ -144,22 +156,88 @@ class MapRecorder:
                         BASE_REACH + settlement.population * REACH_PER_SOUL)
             owner[index] = slot
             best[index] = 0.0
-            queue.append((index, 0.0, reach, slot))
+            heapq.heappush(heap, (0.0, index, reach, slot))
 
-        # Волна от каждого города: ближе — значит его.
-        while queue:
-            index, distance, reach, slot = queue.popleft()
-            if distance >= reach:
+        while heap:
+            spent, index, reach, slot = heapq.heappop(heap)
+            if spent > best[index] or spent >= reach:
                 continue
-            step = distance + 1.0
             for neighbor in wmap.neighbors(index):
                 if not wmap.is_land(neighbor):
                     continue
-                if step < best[neighbor]:
-                    best[neighbor] = step
+                step = costs[neighbor] if costs is not None else 1.0
+                if step >= 1e8:
+                    continue        # через пики держава не тянется
+                fresh = spent + step
+                if fresh < reach and fresh < best[neighbor]:
+                    best[neighbor] = fresh
                     owner[neighbor] = slot
-                    queue.append((neighbor, step, reach, slot))
+                    heapq.heappush(heap, (fresh, neighbor, reach, slot))
         return owner
+
+    # ------------------------------------------------------------------
+
+    def trade_routes(self) -> list:
+        """Торговые пути для карты: настоящий путь по гексам, не прямая."""
+        wmap = self.link.wmap
+        out = []
+        for route in self.world.routes.values():
+            if not route.path:
+                continue
+            flat = []
+            for index in route.path:
+                column, row = wmap.col_row(index)
+                flat.append(int(column))
+                flat.append(int(row))
+            seller = self.world.polities.get(route.seller_id)
+            buyer = self.world.polities.get(route.buyer_id)
+            out.append({
+                "a": self.slot_of(route.seller_id),
+                "b": self.slot_of(route.buyer_id),
+                "sea": 1 if route.by_sea else 0,
+                "est": int(route.opened.year) if route.opened else 0,
+                "sev": int(route.closed.year) if route.closed else -1,
+                "name": "%s — %s" % (seller.name if seller else "?",
+                                     buyer.name if buyer else "?"),
+                "goods": route.good,
+                "path": flat,
+            })
+        return out
+
+    def roads(self) -> list:
+        """Дороги внутри держав: от столицы к каждому своему городу."""
+        if self.travel is None:
+            return []
+        wmap = self.link.wmap
+        out = []
+        for polity_id in self.world.active_polities:
+            polity = self.world.polities[polity_id]
+            capital = self.world.settlements.get(polity.capital_id)
+            if capital is None or capital.hex_index < 0:
+                continue
+            slot = self.slot_of(polity_id)
+            for settlement_id in polity.settlement_ids:
+                settlement = self.world.settlements.get(settlement_id)
+                if settlement is None or settlement.id == capital.id:
+                    continue
+                if settlement.status != "активно" or settlement.hex_index < 0:
+                    continue
+                path, cost = self.travel.route(capital.hex_index,
+                                               settlement.hex_index,
+                                               limit=300.0)
+                if not path:
+                    continue
+                flat = []
+                for index in path:
+                    column, row = wmap.col_row(index)
+                    flat.append(int(column))
+                    flat.append(int(row))
+                out.append({
+                    "sea": 0, "int": 1,
+                    "est": int(settlement.founded.year),
+                    "path": flat, "pA": slot, "pB": slot,
+                })
+        return out
 
     # ------------------------------------------------------------------
 
@@ -229,8 +307,8 @@ class MapRecorder:
                            for pid, slot in self.slots.items()
                            if pid in self.world.polities},
             "cities": self.cities(),
-            "routes": [],
-            "roads": [],
+            "routes": self.trade_routes(),
+            "roads": self.roads(),
             "frames": self.frames,
             "tribes": self.tribes_section(),
         }

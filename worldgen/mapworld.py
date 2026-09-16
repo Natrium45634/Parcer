@@ -74,13 +74,19 @@ LAIR_POTENCY = {"ancient": 5, "dormant": 3, "remnant": 2}
 class MapLink:
     """Всё, что движок истории берёт у карты."""
 
-    def __init__(self, wmap, path: str = ""):
+    def __init__(self, wmap, path: str = "", travel=None):
         self.wmap = wmap
         self.path = path
+        self.travel = travel         # цены хода: нужны для выбора места
         self.regions = {}            # region_id -> MapRegion
         self.region_of_hex = {}      # индекс гекса -> region_id
-        self.taken = set()           # занятые гексы: город, лагерь, стоянка
-        self.hex_owner = {}          # индекс гекса -> id поселения или лагеря
+        # Занятость считается по живым поселениям, а не по всем, что когда-то
+        # были. Иначе за десять тысяч лет вся суша оказывается «занята»
+        # призраками сгинувших городов, и новым уже негде вставать —
+        # они садятся куда попало, мимо рек и удобных мест.
+        self.blocked = {}            # гекс -> сколько городов его держат
+        self.hex_owner = {}          # гекс -> id живого поселения
+        self.owner_hex = {}          # id поселения -> его гекс
         self._risk_index = None      # вид беды -> {земля: насколько она ей грозит}
         self._magic_span = None      # разброс магии на этой карте
 
@@ -154,39 +160,73 @@ class MapLink:
 
         best, best_score = -1, -1e18
         for index in piece.hexes:
-            if index in self.taken:
+            if self.blocked.get(index):
                 continue
-            score = float(fert[index]) if fert is not None else 0.5
             if kind == "camp":
                 # Логово прячется: чем глуше и злее место, тем лучше.
+                fertility = float(fert[index]) if fert is not None else 0.5
                 score = (savage[index] / 255.0 if savage is not None else 0.4) \
-                    - 0.5 * score
+                    - 0.5 * fertility
+            elif self.travel is not None:
+                # Город встаёт там, где сходятся пути: слияние рек, устье,
+                # брод, выход из перевала. Такие места живут тысячелетиями.
+                score = self.travel.site_score(index)
             else:
+                score = float(fert[index]) if fert is not None else 0.5
                 if wmap.is_river(index):
                     score += 0.35
                 if wmap.is_coast(index):
                     score += 0.25
             # Небольшой разброс, чтобы города одной земли не жались в одну точку.
-            score += rng.uniform(0.0, 0.12)
+            score += rng.uniform(0.0, 0.25)
             if score > best_score:
                 best, best_score = index, score
         if best < 0:
             best = piece.center
         return best
 
-    def claim(self, index: int, owner_id: str) -> None:
-        if index is None or index < 0:
-            return
-        self.taken.add(index)
-        self.hex_owner[index] = owner_id
-        # Ближайшие гексы тоже занимаем: два города вплотную не стоят.
-        for neighbor in self.wmap.neighbors(index):
-            self.taken.add(neighbor)
+    # Насколько города держатся друг от друга. Два кольца для городов —
+    # это примерно дневной переход: ближе города не ставят, иначе за десять
+    # тысяч лет карта зарастает ими сплошь.
+    CITY_SPACING = 2
+    CAMP_SPACING = 1
 
-    def release(self, index: int) -> None:
+    def _ring(self, index: int, rings: int) -> set:
+        """Гексы вокруг точки на столько-то колец, считая её саму."""
+        seen = {index}
+        frontier = {index}
+        for _ in range(rings):
+            fresh = set()
+            for current in frontier:
+                for neighbor in self.wmap.neighbors(current):
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        fresh.add(neighbor)
+            frontier = fresh
+        return seen
+
+    def claim(self, index: int, owner_id: str, kind: str = "city") -> None:
         if index is None or index < 0:
             return
+        rings = self.CAMP_SPACING if kind == "camp" else self.CITY_SPACING
+        self.hex_owner[index] = owner_id
+        self.owner_hex[owner_id] = (index, rings)
+        for hexagon in self._ring(index, rings):
+            self.blocked[hexagon] = self.blocked.get(hexagon, 0) + 1
+
+    def release(self, owner_id: str) -> None:
+        """Поселение сгинуло — его земля снова свободна."""
+        row = self.owner_hex.pop(owner_id, None)
+        if row is None:
+            return
+        index, rings = row
         self.hex_owner.pop(index, None)
+        for hexagon in self._ring(index, rings):
+            left = self.blocked.get(hexagon, 0) - 1
+            if left > 0:
+                self.blocked[hexagon] = left
+            else:
+                self.blocked.pop(hexagon, None)
 
     # ------------------------------------------------------------------
     # Чем грозит земля

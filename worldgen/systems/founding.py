@@ -374,7 +374,7 @@ def tick_camps(ctx, year: int) -> None:
         hex_index=camp_hex,
     )
     if ctx.map is not None and camp_hex >= 0:
-        ctx.map.claim(camp_hex, camp.id)
+        ctx.map.claim(camp_hex, camp.id, kind="camp")
     leader.home_id = camp.id
     leader.roles.append("основатель лагеря")
 
@@ -404,6 +404,11 @@ def upkeep(ctx, year: int, period: int) -> None:
         if ctx.map is not None and region is not None and region.from_map:
             # Урожайные годы и рыбный ход кормят больше ртов, чем голая земля.
             capacity *= 0.85 + 0.5 * ctx.map.bounty(region.id)
+        polity = world.polities.get(settlement.polity_id)
+        if polity is not None and polity.hunger:
+            # Города державы, которой нечем кормить, просто не растут:
+            # это честнее постоянного мора и куда точнее по сути.
+            capacity *= max(0.35, 1.0 - polity.hunger * 0.8)
         if settlement.is_capital:
             capacity *= 2.1
         elif settlement.polity_id:

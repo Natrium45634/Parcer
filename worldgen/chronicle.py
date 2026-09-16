@@ -24,6 +24,10 @@ KIND_LABELS = {
     "colony_free": "Отделение колонии",
     "notable_deed": "Труд, оставшийся в памяти",
     "folk_awakening": "Новый народ",
+    "trade_pact": "Торговый путь",
+    "trade_break": "Конец торгового пути",
+    "shortage": "Нужда",
+    "famine": "Голод",
     "era_begin": "Начало эпохи",
     "era_end": "Конец эпохи",
     "race_awakening": "Пробуждение расы",
@@ -425,6 +429,59 @@ def render_folks(world) -> str:
     return "\n".join(rows)
 
 
+def render_trade(world) -> str:
+    """Чем державы богаты, чего им не хватает и кто с кем торгует."""
+
+    rows = ["ХОЗЯЙСТВО И ТОРГОВЛЯ", ""]
+    living = [world.polities[pid] for pid in world.active_polities]
+    open_routes = [world.routes[rid] for rid in world.active_routes]
+    rows.append("  Держав: %d. Торговых путей за историю: %d, действует: %d."
+                % (len(living), len(world.routes), len(open_routes)))
+    by_sea = sum(1 for route in world.routes.values() if route.by_sea)
+    if world.routes:
+        rows.append("  Из них морем: %d." % by_sea)
+    rows.append("")
+
+    if open_routes:
+        rows.append("  ДЕЙСТВУЮЩИЕ ПУТИ")
+        for route in sorted(open_routes, key=lambda r: r.opened.year):
+            seller = world.polities.get(route.seller_id)
+            buyer = world.polities.get(route.buyer_id)
+            rows.append("    %d — %s → %s: %s%s"
+                        % (route.opened.year,
+                           seller.full_name if seller else "?",
+                           buyer.full_name if buyer else "?",
+                           route.good,
+                           ", морем" if route.by_sea else ""))
+            if route.back:
+                rows.append("        обратный груз: %s" % route.back)
+            if route.length:
+                rows.append("        путь: %d гексов" % route.length)
+        rows.append("")
+
+    for polity in sorted(living, key=lambda p: -p.population):
+        if not polity.goods:
+            continue
+        rows.append("  %s" % polity.full_name)
+        wealth = ", ".join("%s %d" % (good, values[0])
+                           for good, values in sorted(
+                               polity.goods.items(),
+                               key=lambda kv: -kv[1][0])[:6])
+        rows.append("      даёт: %s" % (wealth or "—"))
+        if polity.shortages:
+            rows.append("      не хватает: %s" % ", ".join(
+                "%s (%.0f%%)" % (good, value * 100)
+                for good, value in polity.shortages[:4]))
+        if polity.surpluses:
+            rows.append("      в избытке: %s" % ", ".join(
+                good for good, _ in polity.surpluses[:4]))
+        if polity.hunger >= 0.2:
+            rows.append("      сытость: %s"
+                        % ("впроголодь" if polity.hunger < 0.45 else "голодает"))
+        rows.append("")
+    return "\n".join(rows)
+
+
 def render_pantheon(world) -> str:
     """Боги мира: имена, сферы, мировоззрение, праздники."""
     from . import pantheon as pan
@@ -654,6 +711,7 @@ def full_text(world) -> str:
         render_eras(world),
         render_regions(world),
         render_folks(world),
+        render_trade(world),
         render_expeditions(world),
         render_dynasties(world),
         render_peoples(world),

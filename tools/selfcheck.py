@@ -107,6 +107,30 @@ def check_nations(world, seed: str) -> list:
                             % (seed, settlement.name))
             break
 
+    # Торговые пути: настоящие, связные и не через пики.
+    link = getattr(world, "map_link", None)
+    if link is not None:
+        wmap = link.wmap
+        for route in world.routes.values():
+            if not route.path:
+                continue
+            broken = False
+            for first, second in zip(route.path, route.path[1:]):
+                if second not in wmap.neighbors(first):
+                    broken = True
+                    break
+            if broken:
+                problems.append("сид «%s»: торговый путь %s рвётся"
+                                % (seed, route.id))
+                break
+            wrong = any(wmap.is_ocean(index) for index in route.path) \
+                if not route.by_sea else \
+                any(wmap.is_land(index) for index in route.path[1:-1])
+            if wrong:
+                problems.append("сид «%s»: путь %s идёт не своей стихией"
+                                % (seed, route.id))
+                break
+
     # Один труд — один раз за всю историю мира.
     works = [note for figure in world.figures.values() for note in figure.notes
              if note.startswith("труд: ")]

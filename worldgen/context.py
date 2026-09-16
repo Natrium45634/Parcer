@@ -32,6 +32,7 @@ class GenContext:
         self.hub = RngHub(world.seed_value)
         self.forge = NameForge()
         self.map = None              # связь с картой .world, если она задана
+        self.travel = None           # цены хода по гексам и поиск путей
         # Движок настроен на восемнадцать земель. На большой карте их
         # втрое больше, и без поправки мир заселялся бы втрое медленнее.
         self.world_scale = 1.0

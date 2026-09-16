@@ -13,7 +13,8 @@ import json
 
 from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, EraSpan,
                      Event, Expedition, Faith, Figure, Folk, House, Polity,
-                     Region, Reign, Relic, Settlement, Temple, Tribe)
+                     Region, Reign, Relic, Settlement, Temple, TradeRoute,
+                     Tribe)
 from .timeline import Date
 from .world import World
 
@@ -21,7 +22,8 @@ FORMAT_NAME = "fantasy-chronicle-world"
 FORMAT_VERSION = 1
 
 _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
-                "created", "awakened", "revealed", "born"}
+                "created", "awakened", "revealed", "born", "opened",
+                "closed"}
 
 
 def _defaults(cls) -> dict:
@@ -93,6 +95,8 @@ def world_to_dict(world: World) -> dict:
         "expeditions": [_compact(Expedition, item.to_dict())
                         for item in world.expeditions.values()],
         "folks": [_compact(Folk, item.to_dict()) for item in world.folks.values()],
+        "routes": [_compact(TradeRoute, item.to_dict())
+                   for item in world.routes.values()],
         "battles": [_compact(Battle, item.to_dict())
                     for item in world.battles.values()],
         "dark_ages": world.dark_ages,
@@ -178,6 +182,11 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("temples", ()):
         temple = Temple(**_clean(Temple, item))
         world.temples[temple.id] = temple
+    for item in data.get("routes", ()):
+        route = TradeRoute(**_clean(TradeRoute, item))
+        world.routes[route.id] = route
+        if route.status == ACTIVE:
+            world.active_routes.append(route.id)
     for item in data.get("folks", ()):
         folk = Folk(**_clean(Folk, item))
         world.folks[folk.id] = folk

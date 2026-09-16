@@ -292,6 +292,7 @@ class ChronicleApp(tk.Tk):
             toolbar=self._figures_toolbar, filler=lambda: self._fill_figures())
         self.folks_text = self._add_text_tab("Народы")
         self.peoples_text = self._add_text_tab("Державы и народы")
+        self.trade_text = self._add_text_tab("Хозяйство")
         self.expeditions_text = self._add_text_tab("Походы")
         self.regions_text = self._add_text_tab("Земли")
         self.stats_text = self._add_text_tab("Итоги")
@@ -558,6 +559,7 @@ class ChronicleApp(tk.Tk):
         self._set_text(self.eras_text, chronicle.render_eras(world))
         self._set_text(self.folks_text, chronicle.render_folks(world))
         self._set_text(self.peoples_text, chronicle.render_peoples(world))
+        self._set_text(self.trade_text, chronicle.render_trade(world))
         self._set_text(self.expeditions_text,
                        chronicle.render_expeditions(world))
         self._set_text(self.regions_text, chronicle.render_regions(world))

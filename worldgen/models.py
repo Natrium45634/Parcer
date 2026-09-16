@@ -271,6 +271,15 @@ class Polity:
     grievance: dict = field(default_factory=dict)    # раса -> обида, 0…1
     conquests: list = field(default_factory=list)    # id событий завоеваний
 
+    # --- хозяйство (блок 7) ---
+    goods: dict = field(default_factory=dict)        # товар -> (есть, надо)
+    shortages: list = field(default_factory=list)    # чего не хватает
+    surpluses: list = field(default_factory=list)    # чем торгует
+    routes: list = field(default_factory=list)       # id торговых путей
+    roads: list = field(default_factory=list)        # проложенные дороги
+    hunger: float = 0.0        # насколько державе нечего есть, 0…1
+    last_famine: int = 0       # год последнего голода
+
     @property
     def multiethnic(self) -> bool:
         return len([race for race, souls in self.peoples.items() if souls > 0]) > 1
@@ -576,6 +585,31 @@ class Battle:
     def to_dict(self) -> dict:
         data = asdict(self)
         data["date"] = _date_out(self.date)
+        return data
+
+
+@dataclass
+class TradeRoute:
+    """Торговый путь между двумя державами — настоящий, по гексам."""
+
+    id: str
+    seller_id: str
+    buyer_id: str
+    good: str                  # что везут туда
+    back: str = ""             # что везут обратно
+    by_sea: bool = False
+    path: list = field(default_factory=list)    # гексы карты
+    length: int = 0            # длина пути в гексах
+    cost: float = 0.0          # во что обходится дорога
+    opened: Date = None
+    closed: Date = None
+    status: str = ACTIVE
+    end_reason: str = ""
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["opened"] = _date_out(self.opened)
+        data["closed"] = _date_out(self.closed)
         return data
 
 

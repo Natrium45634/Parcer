@@ -18,6 +18,7 @@ import math
 
 from .. import mapworld
 from .. import races as races_mod
+from .. import travel
 from .. import worldmap as wmod
 
 TERRAIN_WEIGHTS = (
@@ -58,7 +59,8 @@ def _build_from_map(ctx, path: str) -> None:
     world = ctx.world
     rng = ctx.rng("geography")
     wmap = wmod.load(path)
-    link = mapworld.MapLink(wmap, path)
+    roads = travel.TravelMap(wmap)
+    link = mapworld.MapLink(wmap, path, travel=roads)
 
     # На настоящей карте земель нужно больше, иначе степь и пустыня
     # растворятся в лесу, который их окружает.
@@ -68,6 +70,8 @@ def _build_from_map(ctx, path: str) -> None:
 
     link.build(ctx, rng, count)
     ctx.map = link
+    ctx.travel = roads
+    world.map_link = link
     world.map_source = path
     world.notes["карта"] = {
         "файл": path.rsplit("/", 1)[-1],

@@ -14,7 +14,7 @@ from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Battle, Calamity, Camp, Deity, Event, Expedition, Faith,
                      Figure, Folk, House, Polity, Region, Reign, Relic,
-                     Settlement, Temple, Tribe)
+                     Settlement, Temple, TradeRoute, Tribe)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
@@ -68,9 +68,12 @@ class World:
         self.expeditions = {}
         self.active_expeditions = []
         self.folks = {}
+        self.routes = {}
+        self.active_routes = []
         self.notes = {}                # свободные заметки для будущих блоков
         self.map_source = ""           # файл карты, если мир построен по ней
         self.geography = {}            # имена океанов, материков, хребтов
+        self.map_link = None           # связь с картой: чтобы освобождать гексы
         self.map_recorder = None       # политическая карта по годам (не сохраняется)
 
     # ------------------------------------------------------------------
@@ -167,6 +170,25 @@ class World:
         self.calamities[calamity.id] = calamity
         self.active_calamities.append(calamity.id)
         return calamity
+
+    def add_route(self, **kwargs) -> TradeRoute:
+        route = TradeRoute(id=self.next_id("T"), **kwargs)
+        self.routes[route.id] = route
+        self.active_routes.append(route.id)
+        return route
+
+    def close_route(self, route, date: Date, reason: str) -> None:
+        if route.status != ACTIVE:
+            return
+        route.status = ENDED
+        route.closed = date
+        route.end_reason = reason
+        if route.id in self.active_routes:
+            self.active_routes.remove(route.id)
+        for polity_id in (route.seller_id, route.buyer_id):
+            polity = self.polities.get(polity_id)
+            if polity is not None and route.id in polity.routes:
+                polity.routes.remove(route.id)
 
     def add_folk(self, **kwargs) -> Folk:
         folk = Folk(id=self.next_id("N"), **kwargs)
@@ -338,6 +360,8 @@ class World:
         tribe.end_reason = reason
         if tribe.id in self.active_tribes:
             self.active_tribes.remove(tribe.id)
+        if self.map_link is not None:
+            self.map_link.release(tribe.id)
 
     def end_settlement(self, settlement, date: Date, reason: str,
                        status: str = RUINED) -> None:
@@ -348,6 +372,8 @@ class World:
         settlement.end_reason = reason
         if settlement.id in self.active_settlements:
             self.active_settlements.remove(settlement.id)
+        if self.map_link is not None:
+            self.map_link.release(settlement.id)
         polity = self.polities.get(settlement.polity_id)
         if polity is not None and settlement.id in polity.settlement_ids:
             polity.settlement_ids.remove(settlement.id)
@@ -381,6 +407,8 @@ class World:
         camp.end_reason = reason
         if camp.id in self.active_camps:
             self.active_camps.remove(camp.id)
+        if self.map_link is not None:
+            self.map_link.release(camp.id)
 
     def end_house(self, house, date: Date, reason: str,
                   status: str = EXTINCT) -> None:
@@ -637,6 +665,8 @@ class World:
             "Сражений": len(self.battles),
             "Следов бедствий": len(self.relics),
             "Народов": len(self.folks),
+            "Торговых путей": len(self.routes),
+            "Путей действует": len(self.active_routes),
             "Походов в неизведанное": len(self.expeditions),
             "Открытых земель": sum(1 for r in self.regions.values()
                                    if r.discovered_year),
