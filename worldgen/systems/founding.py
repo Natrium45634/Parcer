@@ -25,6 +25,34 @@ CROWDING = 0.12
 POLITY_CROWDING = 0.6
 
 
+def _colony_folk(world, mother, polity, race) -> str:
+    """Народ новой колонии: тот же, что у её матери-города или столицы.
+
+    Народ обязан быть своей расы. После завоевания или смены титульного
+    народа столица державы может оказаться совсем другой крови — тогда
+    колония переселенцев к её народу отношения не имеет.
+    """
+    def fits(folk_id):
+        folk = world.folks.get(folk_id)
+        return folk is not None and folk.race_id == race.id
+
+    if mother is not None and fits(getattr(mother, "folk_id", "")):
+        return mother.folk_id
+    if polity is not None:
+        capital = world.settlements.get(polity.capital_id)
+        if capital is not None and fits(capital.folk_id):
+            return capital.folk_id
+        for settlement_id in polity.settlement_ids:
+            settlement = world.settlements.get(settlement_id)
+            if settlement is not None and fits(settlement.folk_id):
+                return settlement.folk_id
+    # Иначе — самый многочисленный народ этой расы в мире.
+    kin = [folk for folk in world.folks.values() if folk.race_id == race.id]
+    if kin:
+        return max(kin, key=lambda f: (f.population, f.id)).id
+    return ""
+
+
 def _crowding(count: int, factor: float = CROWDING) -> float:
     return 1.0 / (1.0 + count * factor)
 POLITY_MIN_CAPITAL = 2200
@@ -104,7 +132,7 @@ def tick_settling(ctx, year: int) -> None:
         name=ctx.forge.settlement(rng, race), kind=_kind_for(rng, race),
         race_id=race.id, founded=date, founder_id=leader.id,
         region_id=region.id, population=max(120, int(tribe.population * 0.92)),
-        hex_index=hex_index,
+        hex_index=hex_index, folk_id=tribe.folk_id,
         origin_tribe_id=tribe.id,
     )
     if ctx.map is not None and hex_index >= 0:
@@ -194,6 +222,8 @@ def tick_colonies(ctx, year: int) -> None:
         race_id=race.id, founded=date, founder_id=leader.id,
         region_id=region.id, population=rng.randint(150, 600),
         polity_id=polity.id if polity else "", hex_index=colony_hex,
+        folk_id=_colony_folk(world, source if kind == "free" else None,
+                             polity, race),
     )
     if ctx.map is not None and colony_hex >= 0:
         ctx.map.claim(colony_hex, settlement.id)

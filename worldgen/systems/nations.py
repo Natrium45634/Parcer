@@ -337,6 +337,14 @@ def _assimilate(ctx, polity, rng, year: int, period: int, minorities) -> None:
         return
     settlement = rng.choice(sorted(cities, key=lambda s: s.id))
     settlement.race_id = polity.race_id
+    # Город сменил кровь — значит, сменил и народ: прежний ему больше
+    # не родня. Берём тот народ титульной расы, что и у столицы.
+    settlement.folk_id = ""
+    capital = world.settlements.get(polity.capital_id)
+    if capital is not None:
+        kin = world.folks.get(capital.folk_id)
+        if kin is not None and kin.race_id == polity.race_id:
+            settlement.folk_id = capital.folk_id
     race = races_mod.RACES_BY_ID.get(race_id)
     if race is None or not rng.chance(ASSIMILATE_CHANCE):
         return

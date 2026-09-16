@@ -91,6 +91,22 @@ def check_nations(world, seed: str) -> list:
                             % (seed, settlement.name, region.name))
             break
 
+    # Народы: имя своё, колыбель настоящая, раса совпадает с носителями.
+    names = [folk.name for folk in world.folks.values()]
+    if len(names) != len(set(names)):
+        problems.append("сид «%s»: имена народов повторяются" % seed)
+    for folk in world.folks.values():
+        if folk.cradle_region and folk.cradle_region not in world.regions:
+            problems.append("сид «%s»: у народа %s колыбель в несуществующей земле"
+                            % (seed, folk.name))
+            break
+    for settlement in world.settlements.values():
+        folk = world.folks.get(settlement.folk_id)
+        if folk is not None and folk.race_id != settlement.race_id:
+            problems.append("сид «%s»: город %s приписан народу чужой расы"
+                            % (seed, settlement.name))
+            break
+
     # Один труд — один раз за всю историю мира.
     works = [note for figure in world.figures.values() for note in figure.notes
              if note.startswith("труд: ")]

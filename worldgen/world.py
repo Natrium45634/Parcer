@@ -13,8 +13,8 @@ import heapq
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Battle, Calamity, Camp, Deity, Event, Expedition, Faith,
-                     Figure, House, Polity, Region, Reign, Relic, Settlement,
-                     Temple, Tribe)
+                     Figure, Folk, House, Polity, Region, Reign, Relic,
+                     Settlement, Temple, Tribe)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
@@ -67,8 +67,10 @@ class World:
         self.race_awakening = {}       # race_id -> год пробуждения
         self.expeditions = {}
         self.active_expeditions = []
+        self.folks = {}
         self.notes = {}                # свободные заметки для будущих блоков
         self.map_source = ""           # файл карты, если мир построен по ней
+        self.geography = {}            # имена океанов, материков, хребтов
         self.map_recorder = None       # политическая карта по годам (не сохраняется)
 
     # ------------------------------------------------------------------
@@ -165,6 +167,39 @@ class World:
         self.calamities[calamity.id] = calamity
         self.active_calamities.append(calamity.id)
         return calamity
+
+    def add_folk(self, **kwargs) -> Folk:
+        folk = Folk(id=self.next_id("N"), **kwargs)
+        self.folks[folk.id] = folk
+        return folk
+
+    def refresh_folks(self) -> None:
+        """Пересчитывает, сколько за каким народом душ, городов и стран."""
+        for folk in self.folks.values():
+            folk.population = folk.settlements = folk.tribes = folk.polities = 0
+        for settlement_id in self.active_settlements:
+            settlement = self.settlements[settlement_id]
+            folk = self.folks.get(settlement.folk_id)
+            if folk is None:
+                continue
+            folk.population += self.settlement_realm(settlement)
+            folk.settlements += 1
+        for tribe_id in self.active_tribes:
+            tribe = self.tribes[tribe_id]
+            folk = self.folks.get(tribe.folk_id)
+            if folk is None:
+                continue
+            folk.population += tribe.population
+            folk.tribes += 1
+        for polity_id in self.active_polities:
+            polity = self.polities[polity_id]
+            capital = self.settlements.get(polity.capital_id)
+            folk = self.folks.get(capital.folk_id) if capital is not None else None
+            if folk is not None:
+                folk.polities += 1
+
+    def folks_of_race(self, race_id: str) -> list:
+        return [folk for folk in self.folks.values() if folk.race_id == race_id]
 
     def add_expedition(self, **kwargs) -> "Expedition":
         expedition = Expedition(id=self.next_id("X"), **kwargs)
@@ -601,6 +636,7 @@ class World:
             "Бедствий": len(self.calamities),
             "Сражений": len(self.battles),
             "Следов бедствий": len(self.relics),
+            "Народов": len(self.folks),
             "Походов в неизведанное": len(self.expeditions),
             "Открытых земель": sum(1 for r in self.regions.values()
                                    if r.discovered_year),

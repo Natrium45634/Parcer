@@ -119,7 +119,8 @@ class MapRegion:
                  "habitat", "fertility", "magic", "savagery", "richness",
                  "risk", "risk_kinds", "boons", "temp", "moist", "elev_m",
                  "coastal", "river", "island", "landmass", "features",
-                 "center", "x", "y", "sea_links")
+                 "center", "x", "y", "sea_links", "landmass_kind", "sea",
+                 "sea_kind", "range_name", "rivers")
 
     def __init__(self):
         self.hexes = []
@@ -143,6 +144,11 @@ class MapRegion:
         self.river = False
         self.island = False
         self.landmass = ""
+        self.landmass_kind = ""
+        self.sea = ""
+        self.sea_kind = ""
+        self.range_name = ""
+        self.rivers = []
         self.features = []
         self.center = 0
         self.x = 0
@@ -410,6 +416,88 @@ def _name_of(region, wmap, used, ctx, rng) -> str:
     return ctx.forge.region(rng, region.terrain)
 
 
+# Как называть объекты карты по-русски. Имя всегда идёт следом
+# в именительном падеже — «океан Коранен», «материк Вайрен», — поэтому
+# оборот годится в любом падеже: «за океаном Коранен», «на материке Вайрен».
+FEATURE_NOUNS = {
+    "ocean": "океан", "sea": "море", "bay": "залив", "lake": "озеро",
+    "inlandsea": "внутреннее море", "continent": "материк",
+    "island": "остров", "bigisland": "большой остров",
+    "archipelago": "архипелаг", "range": "хребет", "river": "река",
+}
+WATER_KINDS = ("ocean", "sea", "bay", "inlandsea")
+LAND_KINDS = ("continent", "bigisland", "island", "archipelago")
+
+
+def _distance(wmap, column, row, feature) -> float:
+    dx = abs(feature.get("cx", 0) - column)
+    if wmap.wrap:
+        dx = min(dx, wmap.width - dx)
+    dy = feature.get("cy", 0) - row
+    return (dx * dx + dy * dy) ** 0.5
+
+
+def _attach_geography(regions, wmap) -> None:
+    """Приписывает каждой земле её материк, воду, хребет и реки.
+
+    Имена берутся у самой карты: картогенератор уже назвал океаны, моря,
+    материки, хребты и реки, и в летописи они должны звучать так же.
+    """
+    by_kind = {}
+    for feature in wmap.features:
+        by_kind.setdefault(feature.get("type"), []).append(feature)
+
+    lands = [f for kind in LAND_KINDS for f in by_kind.get(kind, ())]
+    waters = [f for kind in WATER_KINDS for f in by_kind.get(kind, ())]
+    ranges = by_kind.get("range", [])
+    rivers = by_kind.get("river", [])
+
+    for region in regions:
+        column, row = region.x, region.y
+
+        # Материк: тот, чьё пятно накрывает середину земли; иначе ближайший.
+        best, best_score = None, 1e18
+        for feature in lands:
+            reach = max(4.0, (feature.get("area", 1) ** 0.5) * 0.75)
+            distance = _distance(wmap, column, row, feature)
+            score = distance - reach
+            if score < best_score:
+                best, best_score = feature, score
+        if best is not None:
+            region.landmass = translit(best.get("name", ""))
+            region.landmass_kind = FEATURE_NOUNS.get(best.get("type"), "земля")
+
+        # Большая вода — ближайшая к берегу.
+        best, best_distance = None, 1e18
+        for feature in waters:
+            distance = _distance(wmap, column, row, feature)
+            if distance < best_distance:
+                best, best_distance = feature, distance
+        if best is not None:
+            region.sea = translit(best.get("name", ""))
+            region.sea_kind = FEATURE_NOUNS.get(best.get("type"), "море")
+
+        # Хребет — только если земля и правда горная.
+        if region.elev_m >= HILL_METERS:
+            best, best_distance = None, 1e18
+            for feature in ranges:
+                distance = _distance(wmap, column, row, feature)
+                reach = max(5.0, (feature.get("area", 1) ** 0.5) * 1.1)
+                if distance <= reach and distance < best_distance:
+                    best, best_distance = feature, distance
+            if best is not None:
+                region.range_name = translit(best.get("name", ""))
+
+        # Реки: те, чьё русло проходит близко.
+        near = []
+        for feature in rivers:
+            if _distance(wmap, column, row, feature) <= 14.0:
+                near.append((_distance(wmap, column, row, feature),
+                             translit(feature.get("name", ""))))
+        near.sort()
+        region.rivers = [name for _, name in near[:3] if name]
+
+
 def _risk_kinds(wmap, hexes):
     """Чем земля грозит и чем одаривает — по маске событий карты.
 
@@ -657,9 +745,4 @@ def _classify(regions, wmap, ctx, rng) -> None:
         region.name = _name_of(region, wmap, used, ctx, rng)
         used.add(region.name)
 
-    landmass_names = {}
-    for feature in wmap.features:
-        if feature.get("type") in ("continent", "bigisland", "island", "archipelago"):
-            landmass_names[feature.get("id")] = translit(feature.get("name", ""))
-    for region in regions:
-        region.landmass = landmass_names.get(region.center, "")
+    _attach_geography(regions, wmap)

@@ -122,6 +122,41 @@ def from_where(rng, region) -> str:
     return rng.choice(FROM_TEMPLATES) % region.name
 
 
+# Второй и третий очаги расы: родня первым, но уже свой народ.
+FOLK_AWAKENING_TEMPLATES = (
+    "Далеко от первых костров %(where)s просыпается ещё один очаг того же "
+    "рода. Себя они зовут иначе: %(folk)s.",
+    "%(where_cap)s открывают глаза те же по крови, но не те же по имени: "
+    "%(folk)s.",
+    "Пробуждение случается не в одном месте. %(where_cap)s поднимается "
+    "второй народ — %(folk)s.",
+    "Между этими и первыми — недели пути и разные боги. Имя им — %(folk)s.",
+    "Тот же род, другая земля: %(where)s начинается история %(folk_gen)s.",
+)
+FOLK_TRAIT_LINES = (
+    "Соседи будут звать их %(traits)s — и не всегда в похвалу.",
+    "О них говорят коротко: %(traits)s.",
+    "Чем они славятся, станет ясно позже: %(traits)s.",
+)
+
+
+def folk_awakening(rng, race, folk, region):
+    """Второй очаг расы — рождение отдельного народа."""
+    from .folk import folk_gen
+    spot = where(rng, region)
+    data = {
+        "where": spot,
+        "where_cap": cap(spot),
+        "folk": folk.name,
+        "folk_gen": folk_gen(folk),
+        "traits": ", ".join(folk.traits) or "молчуны",
+    }
+    lines = [rng.choice(FOLK_AWAKENING_TEMPLATES) % data]
+    if folk.traits:
+        lines.append(rng.choice(FOLK_TRAIT_LINES) % data)
+    return ("Новый народ: %s" % folk.name, cap(" ".join(lines)))
+
+
 def souls_prep(count: int) -> str:
     """«о 71 душе», «о 110 душах» — предложный падеж."""
     from .timeline import plural

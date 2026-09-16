@@ -23,6 +23,7 @@ KIND_LABELS = {
     "colony_overseas": "Колония за морем",
     "colony_free": "Отделение колонии",
     "notable_deed": "Труд, оставшийся в памяти",
+    "folk_awakening": "Новый народ",
     "era_begin": "Начало эпохи",
     "era_end": "Конец эпохи",
     "race_awakening": "Пробуждение расы",
@@ -214,8 +215,31 @@ def render_stats(world) -> str:
     return "\n".join(rows)
 
 
+# Родительный падеж родовых слов: имя следом остаётся в именительном,
+# поэтому «у океана Коранен» верно в любом обороте.
+_WATER_GEN = {"океан": "океана", "море": "моря", "залив": "залива",
+              "внутреннее море": "внутреннего моря", "озеро": "озера"}
+
+
+def _water_gen(kind: str, name: str) -> str:
+    return "%s %s" % (_WATER_GEN.get(kind, kind or "моря"), name)
+
+
 def render_regions(world) -> str:
     rows = ["ЗЕМЛИ МИРА", ""]
+
+    if world.geography:
+        rows.append("  ОБЛИК МИРА")
+        order = ("океан", "море", "залив", "внутреннее море", "материк",
+                 "большой остров", "остров", "архипелаг", "озеро", "хребет",
+                 "река")
+        for noun in order:
+            items = world.geography.get(noun)
+            if not items:
+                continue
+            rows.append("    %s: %s" % (noun.capitalize(),
+                                        ", ".join(row["name"] for row in items)))
+        rows.append("")
 
     card = world.notes.get("карта")
     if card:
@@ -251,6 +275,18 @@ def render_regions(world) -> str:
                     "   влажность: %.2f"
                     % (len(region.hexes), region.elev_m, region.temp,
                        region.moist))
+        place = []
+        if region.landmass:
+            place.append("%s %s" % (region.landmass_kind or "земля",
+                                    region.landmass))
+        if region.sea:
+            place.append("у %s" % _water_gen(region.sea_kind, region.sea))
+        if region.range_name:
+            place.append("хребет %s" % region.range_name)
+        if region.rivers:
+            place.append("реки: %s" % ", ".join(region.rivers))
+        if place:
+            rows.append("      %s" % "; ".join(place))
         rows.append("      пригодность для жизни: %.2f   плодородие: %.2f   "
                     "руды: %.2f   дикость: %.2f"
                     % (region.habitat, region.fertility, region.richness,
@@ -345,6 +381,46 @@ def render_peoples(world) -> str:
                 if race_id in races_mod.RACES_BY_ID))
         if polity.conquests:
             rows.append("      завоеваний на счету: %d" % len(polity.conquests))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def render_folks(world) -> str:
+    """Народы внутри рас: где проснулись, чем славятся, что от них осталось."""
+    from . import races as races_mod
+
+    world.refresh_folks()
+    rows = ["НАРОДЫ МИРА", ""]
+    if not world.folks:
+        rows.append("  Народы в этом мире не разделились.")
+        return "\n".join(rows)
+
+    alive = [folk for folk in world.folks.values() if folk.population > 0]
+    rows.append("  Всего народов: %d, из них живых: %d." % (len(world.folks),
+                                                            len(alive)))
+    rows.append("")
+
+    by_race = {}
+    for folk in world.folks.values():
+        by_race.setdefault(folk.race_id, []).append(folk)
+
+    for race in races_mod.RACES:
+        folks = by_race.get(race.id)
+        if not folks:
+            continue
+        rows.append("  %s — очагов %d" % (race.name, len(folks)))
+        for folk in sorted(folks, key=lambda f: -f.population):
+            cradle = world.regions.get(folk.cradle_region)
+            rows.append("      %s%s" % (folk.name,
+                                        " — угас" if folk.population <= 0 else ""))
+            rows.append("          колыбель: %s; пробуждение: %d год"
+                        % (cradle.name if cradle else "—", folk.born.year))
+            if folk.traits:
+                rows.append("          слывут: %s" % ", ".join(folk.traits))
+            if folk.population > 0:
+                rows.append("          душ: %d; городов: %d; племён: %d; "
+                            "держав: %d" % (folk.population, folk.settlements,
+                                            folk.tribes, folk.polities))
         rows.append("")
     return "\n".join(rows)
 
@@ -577,6 +653,7 @@ def full_text(world) -> str:
         render_chronicle(world),
         render_eras(world),
         render_regions(world),
+        render_folks(world),
         render_expeditions(world),
         render_dynasties(world),
         render_peoples(world),

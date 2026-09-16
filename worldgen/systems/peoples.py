@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from .. import folk as folk_mod
 from .. import mapworld
 from .. import narrative
 from .. import races as races_mod
@@ -71,34 +72,104 @@ def tick_awakening(ctx, year: int) -> None:
         _awaken(ctx, races_mod.get_race(race_id), year)
 
 
+def _cradles(ctx, race, rng) -> list:
+    """Где раса просыпается: один-три очага в лучших для неё землях.
+
+    Очаги нарочно разносятся по карте. Два очага людей на разных берегах —
+    это не одно племя, а два народа, которые за тысячу лет разойдутся
+    настолько, что будут воевать между собой.
+    """
+    world = ctx.world
+    scored = []
+    for region in world.regions.values():
+        if region.terrain not in race.terrains:
+            continue
+        rank = race.terrains.index(region.terrain)
+        value = (1.0 / (1.0 + rank)) * (0.4 + region.habitat)
+        if region.from_map:
+            value *= 0.5 + region.fertility
+        scored.append((value, region))
+    if not scored:
+        return []
+    scored.sort(key=lambda pair: (-pair[0], pair[1].id))
+
+    # Сколько очагов: у многочисленных и расселяющихся рас их больше.
+    limit = 1
+    if len(scored) >= 3 and race.settles:
+        limit = rng.weighted(((1, 2.0), (2, 3.0), (3, 1.6)))
+    limit = min(limit, len(scored))
+
+    chosen = [scored[0][1]]
+    for _ in range(limit - 1):
+        best, best_score = None, -1.0
+        for value, region in scored:
+            if region in chosen:
+                continue
+            # Чем дальше от уже выбранных очагов, тем лучше.
+            apart = min(_gap(region, other) for other in chosen)
+            score = value * (0.5 + min(3.0, apart) * 0.6)
+            if score > best_score:
+                best, best_score = region, score
+        if best is None:
+            break
+        chosen.append(best)
+    return chosen
+
+
+def _gap(region, other) -> float:
+    """Грубое расстояние между землями — по их координатам на карте."""
+    return (abs(region.x - other.x) ** 2 + abs(region.y - other.y) ** 2) ** 0.5
+
+
 def _awaken(ctx, race, year: int) -> None:
     world = ctx.world
     rng = ctx.rng("awakening", race.id, year)
-    # Народ приходит в мир там, где приходит: неведомых земель для него нет.
-    region = ctx.pick_region(rng, race, known_only=False)
-    if region is None:
-        return
-    world.discover_region(region, year, race_id=race.id)
-    ctx.spread_knowledge()
+    cradles = _cradles(ctx, race, rng)
+    if not cradles:
+        # Подходящей земли нет — пусть народ появится хоть где-нибудь.
+        region = ctx.pick_region(rng, race, known_only=False)
+        if region is None:
+            return
+        cradles = [region]
 
     awakening_date = Date(year, rng.randint(1, 7), rng.randint(1, 30))
     world.race_awakening[race.id] = year
     ctx.awakened.append(race)
     ctx.awakened_ids.add(race.id)
-    if region is not None and not region.discovered_by:
-        region.discovered_by = race.id
 
-    title, text = narrative.race_awakening(rng, race, region)
-    world.add_event(
-        date=awakening_date, era_index=world.era_index_at(year),
-        kind="race_awakening", title=title, text=text, importance=4,
-        region_id=region.id, race_id=race.id,
-    )
+    used_names = {folk.name for folk in world.folks.values()}
+    for index, region in enumerate(cradles):
+        world.discover_region(region, year, race_id=race.id)
+        if not region.discovered_by:
+            region.discovered_by = race.id
 
-    count = rng.randint(2, 3)
-    for i in range(count):
-        spot = region if i == 0 else (ctx.pick_region(rng, race, near=region.id, spread=0.2) or region)
-        found_tribe(ctx, race, spot, year, rng, first=(i == 0), after=awakening_date)
+        name, kind = folk_mod.folk_name(rng, race, region, used_names)
+        used_names.add(name)
+        folk = world.add_folk(
+            name=name, name_kind=kind, race_id=race.id,
+            cradle_region=region.id, born=awakening_date,
+            traits=folk_mod.folk_traits(rng, region))
+
+        if index == 0:
+            title, text = narrative.race_awakening(rng, race, region)
+            world.add_event(
+                date=awakening_date, era_index=world.era_index_at(year),
+                kind="race_awakening", title=title, text=text, importance=4,
+                region_id=region.id, race_id=race.id)
+        else:
+            title, text = narrative.folk_awakening(rng, race, folk, region)
+            world.add_event(
+                date=awakening_date, era_index=world.era_index_at(year),
+                kind="folk_awakening", title=title, text=text, importance=3,
+                subjects=[folk.id], region_id=region.id, race_id=race.id)
+
+        count = rng.randint(2, 3) if index == 0 else rng.randint(1, 2)
+        for i in range(count):
+            spot = region if i == 0 else (
+                ctx.pick_region(rng, race, near=region.id, spread=0.2) or region)
+            found_tribe(ctx, race, spot, year, rng, first=(index == 0 and i == 0),
+                        after=awakening_date, folk=folk)
+    ctx.spread_knowledge()
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +177,7 @@ def _awaken(ctx, race, year: int) -> None:
 # ---------------------------------------------------------------------------
 
 def found_tribe(ctx, race, region, year: int, rng, first: bool = False,
-                 parent=None, population: int = 0, after=None):
+                 parent=None, population: int = 0, after=None, folk=None):
     world = ctx.world
     sex = "f" if rng.chance(0.42) else "m"
     title = ctx.title_for(race, "chief", sex)
@@ -125,7 +196,10 @@ def found_tribe(ctx, race, region, year: int, rng, first: bool = False,
         race_id=race.id, founded=ctx.date_in(rng, year, after), founder_id=leader.id,
         region_id=region.id, population=population, chief_id=leader.id,
         parent_id=parent.id if parent else "", hex_index=hex_index,
+        folk_id=(folk.id if folk is not None else
+                 (parent.folk_id if parent is not None else "")),
     )
+    leader.folk_id = tribe.folk_id
     if ctx.map is not None and hex_index >= 0:
         ctx.map.claim(hex_index, tribe.id)
     leader.home_id = tribe.id

@@ -65,6 +65,7 @@ class Figure:
     faith_id: str = ""           # во что верил(а)
     patron_deity_id: str = ""    # кто покровительствовал или проклял
     divine_mark: str = ""        # «благословение», «проклятие»
+    folk_id: str = ""            # народ внутри расы
 
     @property
     def name(self) -> str:
@@ -149,7 +150,13 @@ class Region:
     elev_m: int = 0
     temp: float = 0.0
     moist: float = 0.0
-    landmass: str = ""
+    # --- география с карты: имена, которые дал сам картогенератор ---
+    landmass: str = ""            # материк или остров, «Вайрен»
+    landmass_kind: str = ""       # «материк», «большой остров», «архипелаг»
+    sea: str = ""                 # ближайшая большая вода, «Коранен»
+    sea_kind: str = ""            # «океан», «море», «залив»
+    range_name: str = ""          # хребет, если земля горная
+    rivers: list = field(default_factory=list)   # реки, текущие через землю
 
     @property
     def from_map(self) -> bool:
@@ -179,6 +186,7 @@ class Tribe:
     end_reason: str = ""
     faith_id: str = ""
     hex_index: int = -1            # гекс карты, если мир построен по карте
+    folk_id: str = ""              # народ внутри расы
 
     @property
     def full_name(self) -> str:
@@ -212,6 +220,7 @@ class Settlement:
     end_reason: str = ""
     faith_id: str = ""             # во что верят жители
     hex_index: int = -1            # гекс карты, если мир построен по карте
+    folk_id: str = ""              # народ внутри расы
 
     @property
     def full_name(self) -> str:
@@ -567,6 +576,37 @@ class Battle:
     def to_dict(self) -> dict:
         data = asdict(self)
         data["date"] = _date_out(self.date)
+        return data
+
+
+@dataclass
+class Folk:
+    """Народ внутри расы.
+
+    Люди болот у большой реки и люди предгорий за тысячу вёрст — родня,
+    но не один народ: свои имена, свои промыслы, свои враги.
+    """
+
+    id: str
+    name: str
+    name_kind: str             # как построено имя: ethnic / mark / landmark
+    race_id: str
+    cradle_region: str         # где проснулись
+    born: Date
+    traits: list = field(default_factory=list)
+    population: int = 0
+    settlements: int = 0
+    tribes: int = 0
+    polities: int = 0
+    parent_id: str = ""
+    status: str = ACTIVE
+    ended: Date = None
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["born"] = _date_out(self.born)
+        data["ended"] = _date_out(self.ended)
         return data
 
 

@@ -12,8 +12,8 @@ import io
 import json
 
 from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, EraSpan,
-                     Event, Expedition, Faith, Figure, House, Polity, Region,
-                     Reign, Relic, Settlement, Temple, Tribe)
+                     Event, Expedition, Faith, Figure, Folk, House, Polity,
+                     Region, Reign, Relic, Settlement, Temple, Tribe)
 from .timeline import Date
 from .world import World
 
@@ -21,7 +21,7 @@ FORMAT_NAME = "fantasy-chronicle-world"
 FORMAT_VERSION = 1
 
 _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
-                "created", "awakened", "revealed"}
+                "created", "awakened", "revealed", "born"}
 
 
 def _defaults(cls) -> dict:
@@ -76,6 +76,7 @@ def world_to_dict(world: World) -> dict:
         "total_years": world.total_years,
         "settings": world.settings,
         "map_source": world.map_source,
+        "geography": world.geography,
         "eras": [era.to_dict() for era in world.eras],
         "regions": [_compact(Region, item.to_dict()) for item in world.regions.values()],
         "figures": [_compact(Figure, item.to_dict()) for item in world.figures.values()],
@@ -91,6 +92,7 @@ def world_to_dict(world: World) -> dict:
         "relics": [_compact(Relic, item.to_dict()) for item in world.relics.values()],
         "expeditions": [_compact(Expedition, item.to_dict())
                         for item in world.expeditions.values()],
+        "folks": [_compact(Folk, item.to_dict()) for item in world.folks.values()],
         "battles": [_compact(Battle, item.to_dict())
                     for item in world.battles.values()],
         "dark_ages": world.dark_ages,
@@ -176,6 +178,9 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("temples", ()):
         temple = Temple(**_clean(Temple, item))
         world.temples[temple.id] = temple
+    for item in data.get("folks", ()):
+        folk = Folk(**_clean(Folk, item))
+        world.folks[folk.id] = folk
     for item in data.get("expeditions", ()):
         expedition = Expedition(**_clean(Expedition, item))
         world.expeditions[expedition.id] = expedition
@@ -188,6 +193,7 @@ def dict_to_world(data: dict) -> World:
     world._counters = dict(data.get("counters") or {})
     world.notes = dict(data.get("notes") or {})
     world.map_source = data.get("map_source", "") or ""
+    world.geography = dict(data.get("geography") or {})
     return world
 
 

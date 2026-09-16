@@ -116,6 +116,11 @@ class MapLink:
             region.temp = round(piece.temp, 1)
             region.moist = round(piece.moist, 3)
             region.landmass = piece.landmass
+            region.landmass_kind = piece.landmass_kind
+            region.sea = piece.sea
+            region.sea_kind = piece.sea_kind
+            region.range_name = piece.range_name
+            region.rivers = piece.rivers
             made.append(region)
             self.regions[region.id] = piece
             for index in piece.hexes:

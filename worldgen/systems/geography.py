@@ -75,8 +75,34 @@ def _build_from_map(ctx, path: str) -> None:
         "размер": "%d×%d" % (wmap.width, wmap.height),
         "земель": len(world.regions),
     }
+    _record_geography(world, wmap)
     ctx.set_world_scale(len(world.regions))
     ctx.build_region_weights()
+
+
+def _record_geography(world, wmap) -> None:
+    """Сохраняет имена, которые карта дала океанам, материкам и хребтам.
+
+    Летопись должна звать их так же, как карта: «океан Коранен»,
+    «материк Вайрен», «хребет Вириран». Имя всегда стоит следом
+    в именительном падеже, поэтому оборот годится в любом месте фразы.
+    """
+    from ..mapregions import FEATURE_NOUNS, translit
+
+    catalogue = {}
+    for feature in wmap.features:
+        kind = feature.get("type")
+        noun = FEATURE_NOUNS.get(kind)
+        if not noun:
+            continue
+        name = translit(feature.get("name", ""))
+        if not name:
+            continue
+        catalogue.setdefault(noun, []).append(
+            {"name": name, "area": int(feature.get("area", 0))})
+    for rows in catalogue.values():
+        rows.sort(key=lambda row: (-row["area"], row["name"]))
+    world.geography = catalogue
 
 
 def _build_grid(ctx) -> None:
