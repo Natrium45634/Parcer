@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from .. import aristocracy as arist
 from .. import narrative_dynasty as texts
 from .. import races as races_mod
 from ..models import ACTIVE, EXTINCT, GREAT, MINOR, ROYAL
@@ -38,6 +39,7 @@ def found_house(ctx, figure, year: int, date, seat=None, rank: str = MINOR,
         parent_id=parent.id if parent is not None else "",
         prestige=1.0 + (1.5 if rank == ROYAL else 0.0),
     )
+    arist.endow(rng, house, race)
     _join(world, figure, house)
     if polity is not None:
         attach(world, house, polity)
@@ -210,5 +212,12 @@ def _split_cadet(ctx, house, race, year: int, rng) -> None:
     founder.surname = ""
 
     date = ctx.date_in(rng, year)
-    found_house(ctx, founder, year, date, seat=seat, rank=MINOR,
-                polity=polity, parent=house, importance=2)
+    branch = found_house(ctx, founder, year, date, seat=seat, rank=MINOR,
+                         polity=polity, parent=house, importance=2)
+    if branch is not None:
+        # Младшая ветвь недалеко падает от ствола, но и не повторяет его:
+        # обиженный младший сын на то и обиженный.
+        branch.alignment = max(-3, min(3, house.alignment
+                                       + rng.randint(-1, 1)))
+        branch.wealth = max(0.2, round(house.wealth * rng.uniform(0.3, 0.8), 2))
+        branch.ambition = max(0.2, round(house.ambition * rng.uniform(0.8, 1.5), 2))

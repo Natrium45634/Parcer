@@ -634,12 +634,14 @@ def render_calamities(world) -> str:
 
 
 def render_houses(world) -> str:
-    """Справочник знатных родов."""
+    """Справочник знатных родов: кто, чей, какого достоинства и нрава."""
+    from . import narrative_aristocracy as texts
     from . import races as races_mod
 
     rows = ["ЗНАТНЫЕ РОДА", ""]
-    header = "  %-24s %-16s %8s %-12s %-22s %6s %s" % (
-        "Род", "Раса", "Основан", "Ранг", "Родовое гнездо", "Живых", "Состояние")
+    header = "  %-24s %-16s %8s %-12s %-18s %-22s %6s %s" % (
+        "Род", "Раса", "Основан", "Ранг", "Титул", "Родовое гнездо",
+        "Живых", "Состояние")
     rows.append(header)
     rows.append("  " + "-" * (len(header) - 2))
     houses = sorted(world.houses.values(), key=lambda h: h.founded.ordinal)
@@ -648,14 +650,107 @@ def render_houses(world) -> str:
         state = house.status
         if house.ended is not None:
             state = "%s (%d)" % (house.status, house.ended.year)
-        rows.append("  %-24s %-16s %8d %-12s %-22s %6d %s" % (
+        rows.append("  %-24s %-16s %8d %-12s %-18s %-22s %6d %s" % (
             house.full_name, races_mod.get_race(house.race_id).name,
-            house.founded.year, house.rank, seat.name if seat else "—",
-            house.alive_count, state))
+            house.founded.year, house.rank, (house.style or "—")[:18],
+            (seat.name if seat else "—")[:22], house.alive_count, state))
+        note = texts.house_character(house)
+        if house.motto:
+            note += " · девиз %s" % house.motto
+        if house.charters:
+            note += " · вольностей у короны: %d" % house.charters
+        if house.thrones:
+            note += " · венец брал %d раз" % house.thrones
+        rows.append("      %s" % note)
     rows.append("")
     rows.append("  Всего родов: %d, из них живы: %d" % (
         len(world.houses), len(world.active_houses)))
     return "\n".join(rows)
+
+
+def _ruler_life(world, reign, ruler) -> str:
+    """Строка жизни: когда родился, на ком женился, когда взошёл и умер.
+
+    Ради неё всё и затевалось: король в летописи должен быть человеком
+    с датами, роднёй и концом, а не строкой в таблице.
+    """
+    if ruler is None:
+        return ""
+    parts = []
+    if ruler.birth is not None:
+        parts.append("род. %d" % ruler.birth.year)
+    crown = "венец %d" % reign.start.year
+    if reign.relation:
+        crown += " (%s)" % reign.relation
+    parts.append(crown)
+    spouse = world.figures.get(ruler.spouse_id)
+    if spouse is not None:
+        who = spouse.plain_name
+        spouse_house = world.houses.get(spouse.house_id)
+        if spouse_house is not None and spouse_house.id != ruler.house_id:
+            who += " (%s)" % spouse_house.full_name
+        if ruler.married is not None:
+            parts.append("брак %d: %s" % (ruler.married.year, who))
+        else:
+            parts.append("супруг(а): %s" % who)
+    kids = len([cid for cid in ruler.children if cid in world.figures])
+    if kids:
+        parts.append("детей %d" % kids)
+    if ruler.death is not None:
+        age = max(0, ruler.death.year - (ruler.birth.year if ruler.birth else 0))
+        end = "ум. %d (%d)" % (ruler.death.year, age)
+        if ruler.death_cause:
+            end += ", %s" % ruler.death_cause
+        parts.append(end)
+    return " · ".join(parts)
+
+
+def _ruler_nature(reign, ruler) -> str:
+    """Нрав, умения и приговор истории — одной строкой."""
+    from . import rulers as rulers_mod
+
+    sex = ruler.sex if ruler is not None else "m"
+    parts = []
+    if reign.traits or reign.skills:
+        nature = rulers_mod.alignment_label(reign.alignment, sex)
+        traits = rulers_mod.traits_text(reign.traits, sex)
+        parts.append(", ".join(part for part in (nature, traits) if part))
+        if reign.skills:
+            parts.append(", ".join(
+                "%s %d" % (key, reign.skills.get(key, 5))
+                for key in rulers_mod.SKILLS))
+    if reign.verdict:
+        if reign.closing.get("fallen"):
+            parts.append("итог: гибельное — держава не пережила правления")
+        else:
+            parts.append("итог: %s (×%s)" % (
+                reign.verdict, ("%.2f" % reign.score).replace(".", ",")))
+    return " · ".join(parts)
+
+
+def _noble_ladder(world, polity, race) -> str:
+    """Какие ступени знатности держава успела развести — и кто на них.
+
+    Показывает не справочную лестницу народа, а ту, что страна в самом
+    деле использует: в трёхгородном княжестве она короткая.
+    """
+    from . import aristocracy as arist
+
+    counts = {}
+    for house_id in polity.house_ids:
+        house = world.houses.get(house_id)
+        if house is None or house.id == polity.house_id or house.rung < 0:
+            continue
+        counts[house.rung] = counts.get(house.rung, 0) + 1
+    if not counts:
+        return ""
+    parts = []
+    for rung in range(max(counts), -1, -1):
+        if not counts.get(rung):
+            continue
+        parts.append("%s — %d" % (arist.style_text(race, rung, "m"),
+                                  counts[rung]))
+    return "; ".join(parts)
 
 
 def render_dynasties(world) -> str:
@@ -677,7 +772,10 @@ def render_dynasties(world) -> str:
             polity.succession, "не определён"))
         if house is not None:
             rows.append("    правящий род на конец истории: %s" % house.full_name)
-        rows.append("    %-4s %-14s %-40s %-24s %s" % (
+        ladder = _noble_ladder(world, polity, race)
+        if ladder:
+            rows.append("    лестница знати: %s" % ladder)
+        rows.append("    %-4s %-14s %-52s %-24s %s" % (
             "№", "годы", "правитель", "род", "чем кончилось"))
         for reign_id in polity.reign_ids:
             reign = world.reigns.get(reign_id)
@@ -688,6 +786,8 @@ def render_dynasties(world) -> str:
             years = "%d—%s" % (reign.start.year,
                                reign.end.year if reign.end else "…")
             name = ruler.plain_name if ruler is not None else "?"
+            if ruler is not None and ruler.posthumous:
+                name = "%s «%s»" % (name, ruler.posthumous)
             if reign.title:
                 name = "%s %s" % (reign.title, name)
             mark = ""
@@ -695,10 +795,14 @@ def render_dynasties(world) -> str:
                 mark = " *"
             elif reign.regent_id:
                 mark = " (регент)"
-            rows.append("    %-4d %-14s %-40s %-24s %s" % (
-                reign.number, years, (name + mark)[:40],
+            rows.append("    %-4d %-14s %-52s %-24s %s" % (
+                reign.number, years, (name + mark)[:52],
                 (reign_house.full_name if reign_house else "—")[:24],
                 reign.end_reason or "правит"))
+            for line in (_ruler_life(world, reign, ruler),
+                         _ruler_nature(reign, ruler)):
+                if line:
+                    rows.append("         %s" % line)
         rows.append("")
     rows.append("  * — власть получена не по закону.")
     return "\n".join(rows)

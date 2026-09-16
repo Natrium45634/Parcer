@@ -23,7 +23,7 @@ FORMAT_VERSION = 1
 
 _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
                 "created", "awakened", "revealed", "born", "opened",
-                "closed"}
+                "closed", "married"}
 
 
 def _defaults(cls) -> dict:

@@ -22,8 +22,10 @@
 from __future__ import annotations
 
 from .. import nations as pol
+from .. import narrative
 from .. import narrative_nations as texts
 from .. import races as races_mod
+from .. import rulers as rulers_mod
 from ..models import ACTIVE, GREAT, RUINED
 from ..world import RURAL_FACTOR
 from . import houses as houses_mod
@@ -100,7 +102,11 @@ def _pick_victim(world, rng, attacker):
         if len(_live_cities(world, other)) < 1:
             continue
         # Воюют не со всяким соседом, а с тем, кого рассчитывают одолеть.
-        edge = (attacker.population + 1.0) / (other.population + 1.0)
+        # Воинское умение государей входит в расчёт наравне с числом душ:
+        # полководец на престоле берётся и за равного, а неумеха робеет.
+        edge = ((attacker.population + 1.0) / (other.population + 1.0)
+                * rulers_mod.war_edge(world, attacker)
+                / max(0.5, rulers_mod.war_edge(world, other)))
         if edge < 1.3:
             continue
         pairs.append((other, min(6.0, edge)))
@@ -228,6 +234,13 @@ def _tend(ctx, polity, year: int, period: int) -> None:
     _maybe_decree(ctx, polity, rng, year)
 
     drift = pol.POLICY_GRIEVANCE.get(polity.policy, 0.01) * (period / 10.0)
+    # Один и тот же закон при добром государе жжёт слабее, при звере —
+    # сильнее: подданные помнят не букву указа, а руку, которая его держит.
+    harsh = rulers_mod.harshness(ctx.world, polity)
+    if drift > 0:
+        drift *= max(0.25, 1.0 + harsh * 0.45)       # зверь растравляет
+    else:
+        drift *= max(0.25, 1.0 - harsh * 0.35)       # добрый залечивает
     for race_id, souls in minorities:
         share = polity.share_of(race_id)
         # Чем многочисленнее народ, тем громче он помнит обиду.
@@ -258,7 +271,11 @@ def _maybe_decree(ctx, polity, rng, year: int) -> None:
     ruler = world.figures.get(reign.ruler_id)
     faith = world.faiths.get(polity.faith_id)
     alignment = faith.alignment if faith is not None else 0
-    toward_harsh = rng.chance(0.5 + 0.12 * (-alignment) + 0.3 * ctx.dark_tilt)
+    # Указ пишет не держава, а человек: жестокий закручивает, добрый
+    # отпускает, и вера с духом эпохи лишь подталкивают его руку.
+    own = int(getattr(ruler, "alignment", 0) or 0) if ruler is not None else 0
+    toward_harsh = rng.chance(0.5 + 0.12 * (-alignment) + 0.11 * (-own)
+                              + 0.3 * ctx.dark_tilt)
     old = polity.policy
     new = pol.harsher(old) if toward_harsh else pol.softer(old)
     if new == old:
@@ -465,7 +482,8 @@ def _maybe_revolt(ctx, polity, rng, year: int, minorities) -> None:
 
     if outcome == "crushed":
         leader.death_cause = "казнён после мятежа"
-        world.schedule_death(leader, date, "казнён после мятежа")
+        world.schedule_death(leader, date, narrative.fate(
+            ("казнён после мятежа", "казнена после мятежа"), leader.sex))
         polity.grievance[race_id] = min(1.0, anger + 0.15)
     else:
         polity.grievance[race_id] = 0.0
@@ -518,11 +536,11 @@ def _take_over(ctx, polity, race, leader, date, year, rng) -> None:
     # Форма державы остаётся, титул правителя меняется под новый народ.
     reign = world.current_reign(polity)
     if reign is not None and reign.end is None:
-        reign.end = date
-        reign.end_reason = "свергнут восставшими"
+        succession.close_reign(ctx, reign, date, "свергнут восставшими")
         old_ruler = world.figures.get(reign.ruler_id)
         if old_ruler is not None and old_ruler.alive_at(year):
-            world.schedule_death(old_ruler, date, "убит восставшими")
+            world.schedule_death(old_ruler, date, narrative.fate(
+                ("убит восставшими", "убита восставшими"), old_ruler.sex))
     capital = world.settlements.get(polity.capital_id)
     houses_mod.found_house(ctx, leader, year, date,
                            seat=capital, rank=GREAT, polity=polity, importance=2)

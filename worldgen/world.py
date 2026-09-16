@@ -385,6 +385,12 @@ class World:
         if reign is not None and reign.end is None:
             reign.end = date
             reign.end_reason = "гибель страны"
+            # Правление, при котором держава кончилась, историей не
+            # оправдывается — чем бы ни была вызвана гибель.
+            reign.closing = {"population": 0, "cities": 0, "regions": 0,
+                             "fallen": True}
+            reign.verdict = "гибельное"
+            reign.score = 0.0
         house = self.houses.get(polity.house_id)
         if house is not None and house.rank == "правящий":
             house.rank = "великий"

@@ -21,6 +21,7 @@ from __future__ import annotations
 from . import houses as houses_mod
 from . import succession
 from .. import catastrophe as cat
+from .. import narrative
 from .. import narrative_calamity as texts
 from .. import races as races_mod
 from ..models import ACTIVE, MINOR, RUINED
@@ -485,7 +486,9 @@ def _summon_host(ctx, rng, spec, year: int, region_ids, severity: int):
             title=title, sex=sex, epithet_chance=0.95)
         leader.roles.append("бедствие мира")
         if mortal_lich:
-            leader.notes.append("при жизни принадлежал(а) к смертным народам")
+            leader.notes.append(narrative.fate(
+                ("при жизни принадлежал к смертным народам",
+                 "при жизни принадлежала к смертным народам"), leader.sex))
 
         low, high = spec.generals
         for _ in range(rng.randint(low, max(low, high))):
@@ -778,12 +781,16 @@ def _fight(ctx, calamity, spec, plan, rng, year: int, decisive: bool) -> None:
     # Полководцы гибнут — и это меняет судьбу их стран.
     for figure in defenders:
         if rng.chance(0.35 if not defender_wins else 0.18):
-            world.schedule_death(figure, date, "пал в битве «%s»" % battle.name)
+            world.schedule_death(figure, date, narrative.fate(
+                ("пал в битве «%s»", "пала в битве «%s»"), figure.sex)
+                                 % battle.name)
             battle.fallen_ids.append(figure.id)
     if defender_wins and calamity.general_ids and rng.chance(0.6):
         general = world.figures.get(rng.choice(calamity.general_ids))
         if general is not None and general.alive_at(year):
-            world.schedule_death(general, date, "убит в битве «%s»" % battle.name)
+            world.schedule_death(general, date, narrative.fate(
+            ("убит в битве «%s»", "убита в битве «%s»"), general.sex)
+                             % battle.name)
             battle.fallen_ids.append(general.id)
 
     _record_deaths(calamity, deaths, "", "")
@@ -815,7 +822,9 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
     leader = world.figures.get(calamity.leader_id)
     if leader is not None and leader.alive_at(year) and resolution in (
             "hero", "heroes", "coalition", "dispersed", "suppressed"):
-        world.schedule_death(leader, date, "сражён при разгроме вторжения")
+        world.schedule_death(leader, date, narrative.fate(
+            ("сражён при разгроме вторжения",
+             "сражена при разгроме вторжения"), leader.sex))
     elif leader is not None and resolution == "sealed":
         leader.notes.append("запечатан(а), но не убит(а)")
 
@@ -872,10 +881,14 @@ def _raise_heroes(ctx, calamity, spec, rng, year: int, resolution: str) -> tuple
         # Часть героев не переживает победу.
         if resolution in ("sealed", "dispersed") and rng.chance(0.55):
             world.schedule_death(hero, ctx.date_in(rng, year),
-                                 "погиб(ла), запечатывая беду")
+                                 narrative.fate(("погиб, запечатывая беду",
+                                                 "погибла, запечатывая беду"),
+                                                hero.sex))
         elif rng.chance(0.2):
             world.schedule_death(hero, ctx.date_in(rng, year),
-                                 "пал(а) в последней битве")
+                                 narrative.fate(("пал в последней битве",
+                                                 "пала в последней битве"),
+                                                hero.sex))
 
     # Уцелевший герой может положить начало знатному роду.
     for hero in heroes:

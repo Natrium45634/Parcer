@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from . import rulers as rulers_mod
 from .morph import accusative_noun, dative_noun, genitive_noun
 from .narrative import cap
 from .races import (ABSOLUTE_PRIMOGENITURE, COUNCIL, ELECTIVE, MALE_PRIMOGENITURE,
@@ -54,6 +55,94 @@ def ruler_word(sex: str, case: str = "nom") -> str:
         "ins": ("новым правителем", "новой правительницей"),
     }[case]
     return by_sex(forms, sex)
+
+
+# ---------------------------------------------------------------------------
+# Каков государь
+# ---------------------------------------------------------------------------
+
+CHARACTER_LEADS = (
+    "О новом государе говорят коротко: %(traits)s.",
+    "При дворе быстро выясняется, каков %(who)s: %(traits)s.",
+    "Молва расходится прежде указов: %(traits)s.",
+    "Тем, кто ждал перемен, сообщают главное: %(traits)s.",
+    "Летописец записывает о %(whom)s: %(traits)s.",
+    "Послы шлют домой одно и то же описание: %(traits)s.",
+    "В первый же год страна узнаёт своего государя: %(traits)s.",
+    "Прежде дел о нём судят по нраву: %(traits)s.",
+)
+
+# Чем государь берёт — то, что заметно снаружи, а не цифры в таблице.
+STRENGTH_NOTES = {
+    "война": (
+        "Войско принимает своего государя охотно.",
+        "Меч этот человек держал раньше, чем печать.",
+        "Походы начинаются рано и кончаются удачно.",
+    ),
+    "правление": (
+        "Счёт житницам и податям ведётся лично.",
+        "Первым делом пересматривают подати — и они сходятся.",
+        "Хозяйство держава ведёт крепкой рукой.",
+    ),
+    "двор": (
+        "Двор присмирел в первую же зиму.",
+        "Заговорщики обнаруживают, что их сосчитали заранее.",
+        "Слушают всех, верят никому — и это работает.",
+    ),
+    "вера": (
+        "Храмы получают больше, чем просили.",
+        "Жрецы находят в новом государе опору.",
+        "Служба стоится ежедневно, и это замечают.",
+    ),
+}
+
+WEAKNESS_NOTES = {
+    "война": (
+        "Войско к своему государю относится без почтения.",
+        "Оружия этот человек не любит и не скрывает.",
+        "Военные дела передоверены другим — и зря.",
+    ),
+    "правление": (
+        "Казна пустеет быстрее, чем наполняется.",
+        "Подати собирают кое-как, а тратят охотно.",
+        "Хозяйственные бумаги ложатся под сукно.",
+    ),
+    "двор": (
+        "Двор быстро понимает, что бояться некого.",
+        "Советники говорят одно в глаза и другое за спиной.",
+        "Интриги плетут почти открыто.",
+    ),
+    "вера": (
+        "Храмы жалуются на забвение.",
+        "Жрецы не находят у престола ни слуха, ни денег.",
+        "Обряды справляют небрежно, и молва это помнит.",
+    ),
+}
+
+
+def character_line(rng, figure) -> str:
+    """Одна строка о том, каков человек, севший на престол."""
+    traits = getattr(figure, "traits", None)
+    if not traits:
+        return ""
+    words = rulers_mod.traits_text(traits, figure.sex)
+    nature = rulers_mod.alignment_label(getattr(figure, "alignment", 0), figure.sex)
+    data = {
+        "traits": "%s, %s" % (nature, words),
+        "who": by_sex(("новый государь", "новая государыня"), figure.sex),
+        "whom": by_sex(("новом государе", "новой государыне"), figure.sex),
+    }
+    line = cap(rng.choice(CHARACTER_LEADS) % data)
+
+    skills = getattr(figure, "skills", None) or {}
+    if skills and rng.chance(0.55):
+        best = max(sorted(skills.items()), key=lambda pair: pair[1])
+        worst = min(sorted(skills.items()), key=lambda pair: pair[1])
+        if best[1] >= 8:
+            line += " " + rng.choice(STRENGTH_NOTES[best[0]])
+        elif worst[1] <= 2:
+            line += " " + rng.choice(WEAKNESS_NOTES[worst[0]])
+    return line
 
 
 # ---------------------------------------------------------------------------
@@ -222,15 +311,41 @@ ACCESSION_TEMPLATES = (
 )
 
 RELATION_NOTES = {
+    # Прямое наследование — самый частый случай в мире, и пул здесь должен
+    # быть шире прочих: иначе одна строка стоит под каждым вторым венчанием.
     "сын": ("Наследует старший сын.", "Венец переходит от отца к сыну.",
-            "Сын садится на место отца без единого спора."),
+            "Сын садится на место отца без единого спора.",
+            "Наследник ждал этого дня столько, что успел поседеть.",
+            "Переход прост: тот же дом, то же имя, другое лицо.",
+            "Сына готовили к этому с детства, и это заметно.",
+            "Сына готовили к этому с детства, и это, увы, незаметно.",
+            "Отцовский совет остаётся при сыне почти в прежнем составе.",
+            "Первым делом наследник подтверждает все прежние грамоты.",
+            "Первым делом наследник отменяет половину отцовских указов.",
+            "Спорить было некому: сын один и других не предвиделось.",
+            "Между смертью отца и венчанием сына проходит девять дней."),
     "дочь": ("Наследует дочь.", "Венец принимает дочь покойного.",
-             "Дочь занимает место, на которое многие рассчитывали сами."),
+             "Дочь занимает место, на которое многие рассчитывали сами.",
+             "Отец не оставил сыновей, и это знали заранее.",
+             "Дочь венчают тем же венцом и по тому же обряду.",
+             "Возражения высказаны тихо и приняты к сведению не были.",
+             "Наследница вступает в права, не дожидаясь конца траура.",
+             "Половина двора помнит её ребёнком и не умеет этого скрыть.",
+             "Права наследницы подтверждены грамотой ещё при жизни отца."),
     "брат": ("Наследует брат — так велит обычай.",
              "Детей не осталось, и корона уходит брату.",
-             "Брат покойного принимает венец как должное."),
+             "Брат покойного принимает венец как должное.",
+             "Братья не ладили, и это ещё скажется.",
+             "Венец переходит вбок, а не вниз: так здесь и принято.",
+             "Наследник всю жизнь был вторым и знает цену первому месту.",
+             "О детях покойного говорят коротко: их нет.",
+             "Брат принимает державу вместе с братниными долгами."),
     "сестра": ("Наследует сестра.", "Корона достаётся сестре покойного.",
-               "Сестра берёт власть, которую при жизни брата не имела."),
+               "Сестра берёт власть, которую при жизни брата не имела.",
+               "Право сестры оспаривают дважды и оба раза неудачно.",
+               "Наследница управляла делами и раньше — теперь и по имени.",
+               "Родная кровь нашлась только в одном человеке, и это она.",
+               "Сестра венчается, не меняя при дворе почти никого."),
     "внук": ("Корона миновала целое поколение и легла на внука.",
              "Сын не дожил, и наследует внук.",
              "Венец перескакивает через поколение."),
@@ -264,7 +379,8 @@ RELATION_NOTES = {
 }
 
 
-def accession(rng, polity, heir, choice, capital, race, first: bool = False):
+def accession(rng, polity, heir, choice, capital, race, first: bool = False,
+              character: str = ""):
     variants = RELATION_NOTES.get(choice.relation, ())
     note = rng.choice(variants) if variants else ""
     if first:
@@ -282,8 +398,10 @@ def accession(rng, polity, heir, choice, capital, race, first: bool = False):
         "capital": capital.name if capital is not None else "столица",
         "relation": note,
     }
-    return ("Восшествие: %s" % heir.plain_name,
-            cap(rng.choice(ACCESSION_TEMPLATES) % data))
+    text = cap(rng.choice(ACCESSION_TEMPLATES) % data)
+    if character:
+        text = "%s %s" % (text.rstrip(), character)
+    return ("Восшествие: %s" % heir.plain_name, text)
 
 
 DYNASTY_CHANGE_TEMPLATES = (
@@ -430,7 +548,8 @@ COUP_KIND_TITLES = {
 }
 
 
-def coup_success(rng, kind, polity, usurper, victim, house, capital, violent: bool):
+def coup_success(rng, kind, polity, usurper, victim, house, capital,
+                 violent: bool, verdict: str = ""):
     fate_pool = FATES if violent else EXILE_FATES
     fate = by_sex(rng.choice(fate_pool), victim.sex if victim is not None else "m")
     templates = {
@@ -451,8 +570,10 @@ def coup_success(rng, kind, polity, usurper, victim, house, capital, violent: bo
         "house_cap": cap(house_nom(house)) if house is not None else "Чужой род",
         "fate": fate,
     }
-    return ("%s: %s" % (COUP_KIND_TITLES[kind], polity.name),
-            cap(rng.choice(templates) % data))
+    text = cap(rng.choice(templates) % data)
+    if verdict:
+        text = "%s %s" % (text.rstrip(), verdict)
+    return ("%s: %s" % (COUP_KIND_TITLES[kind], polity.name), text)
 
 
 PLOT_FAILED_TEMPLATES = (
@@ -487,10 +608,12 @@ ABDICATION_TEMPLATES = (
 )
 
 
-def abdication(rng, polity, ruler):
-    return ("Отречение: %s" % ruler.plain_name,
-            cap(rng.choice(ABDICATION_TEMPLATES) % {"ruler": with_title(ruler),
-                                                    "polity": polity.full_name}))
+def abdication(rng, polity, ruler, verdict: str = ""):
+    text = cap(rng.choice(ABDICATION_TEMPLATES) % {"ruler": with_title(ruler),
+                                                   "polity": polity.full_name})
+    if verdict:
+        text = "%s %s" % (text.rstrip(), verdict)
+    return ("Отречение: %s" % ruler.plain_name, text)
 
 
 # ---------------------------------------------------------------------------
@@ -638,7 +761,18 @@ RULER_LEGACY = (
 )
 
 
-def ruler_death(rng, polity, ruler, reign_years: int, cause: str = ""):
+BYNAME_LINES = (
+    "Потомки прибавят к имени прозвище: %s.",
+    "В летописях это имя будет стоять с прозвищем: %s.",
+    "Через поколение государя станут звать иначе: %s.",
+    "Имя запомнят не одно: к нему прирастёт прозвище — %s.",
+    "Правнуки будут знать этого государя по прозвищу: %s.",
+    "На надгробии выбьют имя, а в памяти останется прозвище: %s.",
+)
+
+
+def ruler_death(rng, polity, ruler, reign_years: int, cause: str = "",
+                verdict: str = "", byname: str = ""):
     legacy = rng.choice(RULER_LEGACY)
     if cause:
         legacy = "%s %s" % (cap(cause), legacy)
@@ -650,5 +784,9 @@ def ruler_death(rng, polity, ruler, reign_years: int, cause: str = ""):
         "reign": years_text(max(1, reign_years)),
         "legacy": legacy,
     }
-    return ("Смерть правителя: %s" % ruler.plain_name,
-            cap(rng.choice(RULER_DEATH_TEMPLATES) % data))
+    text = cap(rng.choice(RULER_DEATH_TEMPLATES) % data)
+    if verdict:
+        text = "%s %s" % (text.rstrip(), verdict)
+    if byname:
+        text = "%s %s" % (text.rstrip(), rng.choice(BYNAME_LINES) % byname)
+    return ("Смерть правителя: %s" % ruler.plain_name, text)

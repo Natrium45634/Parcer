@@ -38,13 +38,16 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from worldgen import aristocracy as arist                        # noqa: E402
 from worldgen import nations as pol                              # noqa: E402
+from worldgen import rulers                                      # noqa: E402
 from worldgen.catastrophe import KIND_NAMES, SEVERITY_NAMES      # noqa: E402
 from worldgen.engine import Settings, generate                   # noqa: E402
 from worldgen.pantheon import (ALIGNMENT_NAMES, DOMAINS_BY_KEY,  # noqa: E402
                                FAITH_KIND_NAMES)
 from worldgen.races import RACES_BY_ID, SUCCESSION_NAMES         # noqa: E402
 from worldgen.rng import random_seed_text                        # noqa: E402
+from worldgen.models import ACTIVE                                # noqa: E402
 from worldgen.world import RURAL_FACTOR                          # noqa: E402
 
 # Даты берутся по одной из каждой полосы истории: так срезы не сбиваются
@@ -102,7 +105,39 @@ def ruler_line(world, polity, year: int) -> str:
              "на престоле с %d (%s)" % (reign.start.year, reign.legitimacy)]
     if house is not None:
         parts.append("род %s" % house.full_name)
+    if reign.traits or reign.skills:
+        parts.append("нрав: %s" % ", ".join(part for part in (
+            rulers.alignment_label(reign.alignment, figure.sex),
+            rulers.traits_text(reign.traits, figure.sex)) if part))
+    if reign.skills:
+        parts.append("умения: " + "/".join(
+            "%s %d" % (key, reign.skills.get(key, 5)) for key in rulers.SKILLS))
     return "; ".join(parts)
+
+
+def nobility_line(world, polity, year: int) -> str:
+    """Лестница знати державы и самые весомые дома на ней."""
+    race = RACES_BY_ID.get(polity.race_id)
+    if race is None or not race.has_nobility:
+        return "знати нет"
+    houses = [world.houses[hid] for hid in polity.house_ids
+              if hid in world.houses and world.houses[hid].status == ACTIVE
+              and world.houses[hid].id != polity.house_id]
+    if not houses:
+        return "знатных родов нет"
+    steps = {}
+    for house in houses:
+        if house.rung >= 0:
+            steps[house.rung] = steps.get(house.rung, 0) + 1
+    ladder = "; ".join("%s — %d" % (arist.style_text(race, rung, "m"), count)
+                       for rung, count in sorted(steps.items(), reverse=True))
+    houses.sort(key=lambda h: (-h.prestige, h.id))
+    top = ", ".join("%s (%s, %s%s)" % (
+        house.full_name, house.style or "без титула",
+        arist.alignment_word(house.alignment),
+        ", недовольство %.2f" % house.discontent if house.discontent > 0.3 else "")
+        for house in houses[:3])
+    return "%s | верхушка: %s" % (ladder or "ступени не разведены", top)
 
 
 def faith_line(world, faith_id: str) -> str:
@@ -214,6 +249,7 @@ def snapshot(world, year: int, out) -> None:
             "%s (%s)" % (world.regions[r].name, world.regions[r].terrain)
             for r in polity.region_ids if r in world.regions))
         out("   правитель: %s" % ruler_line(world, polity, year))
+        out("   знать: %s" % nobility_line(world, polity, year))
         out("   наследование: %s" % SUCCESSION_NAMES.get(polity.succession,
                                                          polity.succession))
         if polity.peoples:
@@ -346,7 +382,50 @@ def audit(world) -> list:
         note("возможные падежные ошибки после предлога: %d случаев (%s)"
              % (len(suspicious), suspicious[0][1]))
 
-    # 8. Повторы текста — главное, из-за чего мир перестаёт читаться живым.
+    # 8. Правители как личности: у каждого правления должны быть нрав,
+    #    умения и приговор истории, иначе короли снова станут переменными.
+    reigns = [r for r in world.reigns.values() if r.end is not None]
+    if reigns:
+        faceless = [r for r in reigns if not r.skills]
+        if faceless:
+            bad("правлений без нрава и умений: %d из %d"
+                % (len(faceless), len(reigns)))
+        judged = [r for r in reigns
+                  if (r.end.year - r.start.year) >= 8 and not r.verdict]
+        if judged:
+            bad("долгих правлений без приговора истории: %d" % len(judged))
+        grades = Counter(r.verdict for r in reigns if r.verdict)
+        if grades:
+            top, count = grades.most_common(1)[0]
+            if count > len(reigns) * 0.85:
+                note("приговор «%s» стоит у %.0f%% правлений — оценка не "
+                     "различает правителей" % (top, count * 100.0 / len(reigns)))
+        # Черта нрава без женской формы выдала бы «королева, мстительный».
+        unknown = set()
+        for reign in reigns:
+            for trait in reign.traits:
+                if trait not in rulers.TRAIT_FEMALE:
+                    unknown.add(trait)
+        if unknown:
+            bad("черты нрава без женской формы: %s" % ", ".join(sorted(unknown)))
+
+    # 9. Знать как сила: в крупной старой державе лестница должна быть
+    #    разведена, а дома — иметь нрав и достаток.
+    grown = [p for p in world.polities.values()
+             if len(p.house_ids) >= 4 and p.reign_ids]
+    if grown:
+        flat = [p for p in grown
+                if not any(world.houses[h].rung >= 0 for h in p.house_ids
+                           if h in world.houses)]
+        if len(flat) > len(grown) * 0.5:
+            note("держав со знатью, но без разведённой лестницы: %d из %d"
+                 % (len(flat), len(grown)))
+    faceless_houses = [h for h in world.houses.values() if not h.motto]
+    if faceless_houses:
+        bad("знатных родов без нрава и девиза: %d из %d"
+            % (len(faceless_houses), len(world.houses)))
+
+    # 10. Повторы текста — главное, из-за чего мир перестаёт читаться живым.
     sentences = Counter()
     for event in world.events:
         for piece in re.split(r"(?<=[.!?])\s+", event.text):

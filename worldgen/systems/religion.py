@@ -15,11 +15,14 @@
 from __future__ import annotations
 
 from . import calamity as calamity_mod
+from .. import narrative
 from .. import narrative_faith as texts
 from .. import pantheon as pan
+from .. import cosmogony
 from .. import races as races_mod
+from .. import rulers as rulers_mod
 from ..models import ACTIVE
-from ..timeline import DAYS_IN_MONTH, MONTHS_IN_YEAR
+from ..timeline import DAYS_IN_MONTH, MONTHS_IN_YEAR, Date
 
 FAITH_RATE = 0.0075         # годовой шанс рождения новой веры
 SPREAD_RATE = 0.075         # миссионерство
@@ -50,12 +53,63 @@ def prepare(ctx) -> None:
     ctx.faith_dawn = era.start_year + rng.randint(0, max(1, int(era.length * 0.6)))
     ctx.faith_seen = set()
 
+    # Как этот мир появился на свет — и есть ли у него творец.
+    makers = _make_creators(ctx, rng)
     world.notes["вера мира"] = {
         "устройство": ctx.faith_style,
         "набожность": round(ctx.piety, 2),
         "склонность к тьме": round(ctx.dark_tilt, 2),
         "первая вера": ctx.faith_dawn,
+        "мироздание": ctx.cosmogony,
+        "творцы": [deity.full_name for deity in makers],
     }
+
+
+def _make_creators(ctx, rng) -> list:
+    """Заводит первотворцов мира, если этот мир вообще кем-то сделан.
+
+    Творцы существуют с первого дня, но верить в них начинают позже —
+    а могут и не начать. Их имена всё равно ложатся в лор: даже мир, где
+    творца забыли, помнит, что он был.
+    """
+    world = ctx.world
+    ctx.cosmogony = cosmogony.pick(rng)
+    ctx.creators = []
+    count = cosmogony.MAKER_COUNT.get(ctx.cosmogony, 0)
+    if not count:
+        world.notes["миф о начале"] = cosmogony.myth_line(rng, ctx.cosmogony)
+        return []
+
+    # Творцу не приписывают народ: он старше всех народов.
+    race = rng.choice(sorted(races_mod.RACES, key=lambda r: r.id))
+    used = set()
+    used_titles = set()
+    for index in range(count):
+        alignment = rng.weighted(((3, 1.5), (2, 2.0), (1, 1.5), (0, 2.5),
+                                  (-1, 1.0), (-2, 0.6)))
+        deity = _make_deity(ctx, rng, race, alignment, 1, used, "")
+        deity.primordial = True
+        deity.maker = True
+        # Пол берём тот, под который уже сложено имя, иначе выйдет
+        # «Лаарумира, Творец».
+        for _ in range(8):
+            title = cosmogony.maker_title(rng, deity.sex)
+            if title not in used_titles:
+                break
+        used_titles.add(title)
+        deity.title = title
+        # Прозвище от сфер творцу не идёт: он старше всяких сфер.
+        deity.epithet = title
+        deity.race_id = ""
+        deity.patron_kind = "мироздание"
+        deity.patron_name = "самого мира"
+        deity.revealed = Date(1, 1, 1)
+        fate = cosmogony.maker_fate(rng, ctx.cosmogony)
+        if fate:
+            deity.notes.append("о творце говорят: %s" % fate)
+        ctx.creators.append(deity)
+    world.notes["миф о начале"] = cosmogony.myth_line(rng, ctx.cosmogony)
+    return ctx.creators
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +259,9 @@ def _make_deity(ctx, rng, race, faith_alignment: int, year: int, used_domains,
         festival_day=rng.randint(1, DAYS_IN_MONTH),
         revealed=ctx.date_in(rng, year),
     )
+    # Кому этот бог покровительствует: народу, ремеслу, сословию или месту.
+    deity.patron_kind, deity.patron_name = pan.roll_patronage(rng, race,
+                                                              alignment)
     deity.epithet = texts.deity_epithet(rng, title, domains)
     return deity
 
@@ -291,21 +348,39 @@ def _make_priest(ctx, rng, race, year: int, rank: int = 1, role: str = "жрец
 
 
 def _seed_followers(ctx, rng, faith, race, prophet) -> None:
-    """Первые верующие: родное поселение пророка и соседи того же народа."""
+    """Первые верующие: родное поселение пророка и соседи того же народа.
+
+    Если народ уже весь верует, пророк не остаётся ни с чем: он переманивает
+    паству у прежней веры — именно так новые религии и начинаются. Прежде
+    такая вера рождалась пустой и через полтора века тихо забывалась, так
+    и не увидев ни одного верующего.
+    """
     world = ctx.world
-    targets = []
+    free, taken = [], []
     for settlement_id in world.active_settlements:
         settlement = world.settlements[settlement_id]
-        if settlement.race_id == race.id and not settlement.faith_id:
-            targets.append(settlement)
+        if settlement.race_id != race.id:
+            continue
+        (free if not settlement.faith_id else taken).append(settlement)
     for tribe_id in world.active_tribes:
         tribe = world.tribes[tribe_id]
-        if tribe.race_id == race.id and not tribe.faith_id:
-            targets.append(tribe)
+        if tribe.race_id != race.id:
+            continue
+        (free if not tribe.faith_id else taken).append(tribe)
     for camp_id in world.active_camps:
         camp = world.camps[camp_id]
-        if camp.race_id == race.id and not camp.faith_id:
-            targets.append(camp)
+        if camp.race_id != race.id:
+            continue
+        (free if not camp.faith_id else taken).append(camp)
+
+    targets = free
+    if len(targets) < 2 and taken:
+        # Переманивать легче малые общины, чем столицы старой веры.
+        converts = rng.sample(
+            sorted(taken, key=lambda x: (getattr(x, "population", 0), x.id)),
+            max(1, min(len(taken), rng.randint(1, 3))))
+        targets = targets + converts
+        faith.notes.append("паства отбита у прежней веры")
     if not targets:
         return
     count = max(1, min(len(targets), rng.randint(2, 7)))
@@ -578,6 +653,11 @@ def _maybe_temple(ctx, year: int) -> None:
         weight = float(max(50, settlement.population))
         if settlement.is_capital:
             weight *= 2.5
+        # Благочестие государя видно по храмам: при набожном их ставят
+        # чаще и богаче, при равнодушном — не ставят вовсе.
+        polity = world.polities.get(settlement.polity_id)
+        if polity is not None:
+            weight *= rulers_mod.zeal(world, polity)
         options.append((settlement, weight))
     if not options:
         return
@@ -798,7 +878,12 @@ def _maybe_persecution(ctx, year: int) -> None:
         hunters.append(polity)
     if not hunters:
         return
-    hunter = rng.choice(sorted(hunters, key=lambda p: p.id))
+    # Гонение начинает не всякая держава, а та, у которой государь
+    # ревностен в вере и не мягок нравом.
+    hunter = rng.weighted([
+        (polity, max(0.1, rulers_mod.zeal(world, polity)
+                     * (1.0 + 0.4 * max(0.0, rulers_mod.harshness(world, polity)))))
+        for polity in sorted(hunters, key=lambda p: p.id)])
 
     inside = [world.settlements[sid] for sid in hunter.settlement_ids
               if sid in world.settlements
@@ -904,7 +989,9 @@ def _maybe_blessing(ctx, year: int) -> None:
             extra = int(max(5, (figure.death.year - year) * rng.uniform(0.4, 1.2)))
             from ..timeline import Date
             world.schedule_death(figure, Date.random_in_year(
-                rng, figure.death.year + extra), "прожил(а) дольше положенного")
+                rng, figure.death.year + extra),
+                narrative.fate(("прожил дольше положенного",
+                                "прожила дольше положенного"), figure.sex))
         title, text = texts.blessing(rng, figure, deity, gift, effect, reason)
         kind = "blessing"
     else:
@@ -921,7 +1008,8 @@ def _maybe_blessing(ctx, year: int) -> None:
             from ..timeline import Date
             world.schedule_death(figure, Date.random_in_year(
                 rng, year + rng.randint(1, max(2, (figure.death.year - year) // 2))),
-                "умер(ла) под проклятием")
+                narrative.fate(("умер под проклятием",
+                                "умерла под проклятием"), figure.sex))
         house = world.houses.get(figure.house_id)
         if house is not None:
             house.prestige = max(0.15, house.prestige - 1.2)

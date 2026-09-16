@@ -285,6 +285,10 @@ class ChronicleApp(tk.Tk):
             "Правители",
             filler=lambda: self._set_text(self.dynasty_text,
                                           chronicle.render_dynasties(self.world)))
+        self.houses_text = self._add_text_tab(
+            "Знать",
+            filler=lambda: self._set_text(self.houses_text,
+                                          chronicle.render_houses(self.world)))
         self.figure_tree = self._add_tree_tab(
             "Личности",
             ("Имя", "Раса", "Пол", "Годы жизни", "Род", "Титул", "Роли", "Событий"),

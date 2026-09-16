@@ -67,6 +67,14 @@ class Figure:
     divine_mark: str = ""        # «благословение», «проклятие»
     folk_id: str = ""            # народ внутри расы
 
+    # --- нрав, умения и брак (блок 8) ---
+    # Заполняется у тех, кто садится на престол: для прочих всё среднее.
+    alignment: int = 0           # от 3 (праведный) до -3 (бесчеловечный)
+    skills: dict = field(default_factory=dict)    # война/правление/двор/вера
+    traits: list = field(default_factory=list)    # черты нрава, мужская форма
+    married: Date = None         # когда был заключён брак
+    posthumous: str = ""         # прозвище, данное потомками: «Грозный»
+
     @property
     def name(self) -> str:
         parts = [self.given_name]
@@ -108,6 +116,7 @@ class Figure:
         data = asdict(self)
         data["birth"] = _date_out(self.birth)
         data["death"] = _date_out(self.death)
+        data["married"] = _date_out(self.married)
         data["name"] = self.name
         return data
 
@@ -361,6 +370,16 @@ class House:
     end_reason: str = ""
     thrones: int = 0           # сколько раз род всходил на престол
 
+    # --- нрав, достаток и место на лестнице знати (блок 8) ---
+    alignment: int = 0         # от 3 (безупречный) до -3 (гнилой)
+    wealth: float = 1.0        # достаток рода
+    ambition: float = 1.0      # насколько род тянется к венцу
+    motto: str = ""            # девиз над воротами
+    rung: int = -1             # ступень титула; -1 — ещё не размечен
+    style: str = ""            # сам титул: «граф», «тан», «ярл»
+    discontent: float = 0.0    # накопленное недовольство властью
+    charters: int = 0          # сколько вольностей вырвано у короны
+
     @property
     def full_name(self) -> str:
         return "%s %s" % (self.word, self.name)
@@ -389,6 +408,21 @@ class Reign:
     regency_until: int = 0     # год совершеннолетия
     legitimacy: str = "законное"   # «законное», «узурпация», «избрание»
     title: str = ""
+    # --- каким был государь и что после него осталось (блок 8) ---
+    relation: str = ""         # кем приходился предшественнику
+    alignment: int = 0
+    skills: dict = field(default_factory=dict)
+    traits: list = field(default_factory=list)
+    opening: dict = field(default_factory=dict)   # держава в начале правления
+    closing: dict = field(default_factory=dict)   # и в конце
+    verdict: str = ""          # «великое» … «гибельное»
+    score: float = 0.0         # во сколько раз держава выросла или ужалась
+
+    @property
+    def length(self) -> int:
+        if self.end is None:
+            return 0
+        return max(0, self.end.year - self.start.year)
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -416,6 +450,11 @@ class Deity:
     revealed: Date = None
     status: str = "почитается"  # почитается / забыт / низвергнут
     epithet: str = ""          # «Владыка Леса»
+    # --- покровительство и первородство (блок 8) ---
+    primordial: bool = False   # был ли при сотворении мира
+    maker: bool = False        # творец ли этого мира
+    patron_kind: str = ""      # «народ», «ремесло», «сословие», «земля»
+    patron_name: str = ""      # кому или чему покровительствует
     notes: list = field(default_factory=list)
 
     @property

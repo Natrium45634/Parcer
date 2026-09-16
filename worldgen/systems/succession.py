@@ -13,8 +13,10 @@ from __future__ import annotations
 
 from . import houses as houses_mod
 from .. import dynasty
+from .. import narrative
 from .. import narrative_dynasty as texts
 from .. import races as races_mod
+from .. import rulers as rulers_mod
 from ..models import ACTIVE, GREAT, ROYAL
 from ..timeline import Date
 
@@ -52,11 +54,13 @@ def _check_throne(ctx, polity, year: int) -> None:
     rng = ctx.rng("throne", polity.id, year)
     if reign is not None and reign.end is None and ruler is not None:
         death_date = ruler.death or ctx.date_in(rng, year)
-        _close_reign(world, reign, death_date, "смерть")
+        close_reign(ctx, reign, death_date, "смерть")
         years_ruled = max(0, death_date.year - reign.start.year)
         if years_ruled >= 1 or rng.chance(0.5):
             title, text = texts.ruler_death(rng, polity, ruler, years_ruled,
-                                            ruler.death_cause)
+                                            ruler.death_cause,
+                                            verdict=_verdict_text(rng, reign),
+                                            byname=ruler.posthumous)
             world.add_event(
                 date=death_date, era_index=world.era_index_at(year),
                 kind="ruler_death", title=title, text=text, importance=2,
@@ -67,11 +71,72 @@ def _check_throne(ctx, polity, year: int) -> None:
     _succeed(ctx, polity, year, after, rng)
 
 
-def _close_reign(world, reign, date: Date, reason: str) -> None:
+def close_reign(ctx, reign, date: Date, reason: str) -> None:
+    """Закрывает правление и выносит ему приговор истории.
+
+    Судят не по нраву, а по тому, что осталось: сколько людей, городов
+    и земель было принято и сколько отдано наследнику.
+    """
+    world = ctx.world
     if reign is None or reign.end is not None:
         return
     reign.end = date
     reign.end_reason = reason
+
+    polity = world.polities.get(reign.polity_id)
+    if polity is None:
+        return
+    world.refresh_populations()
+    closing = rulers_mod.snapshot(world, polity)
+    if polity.status != ACTIVE:
+        closing["fallen"] = True
+    reign.closing = closing
+    opening = reign.opening or closing
+    grade, score = rulers_mod.judge(opening, closing,
+                                    max(0, date.year - reign.start.year))
+    reign.verdict = grade
+    reign.score = round(score, 3)
+    _name_by_deeds(ctx, polity, reign, date)
+
+
+def _name_by_deeds(ctx, polity, reign, date) -> None:
+    """Прозвище, которое дают потомки, а не современники.
+
+    Оно не переписывает прежние записи летописи: там государь ещё просто
+    король такой-то. Прозвище появляется вместе с приговором — и остаётся
+    в родословных таблицах навсегда.
+    """
+    world = ctx.world
+    ruler = world.figures.get(reign.ruler_id)
+    if ruler is None or ruler.posthumous:
+        return
+    years = max(0, date.year - reign.start.year)
+    if years < 10 or reign.verdict in ("", "серое"):
+        return
+    rng = ctx.rng("byname", ruler.id)
+    if not rng.chance(0.7 if reign.verdict in ("великое", "гибельное") else 0.35):
+        return
+    taken = set()
+    for reign_id in polity.reign_ids:
+        other = world.reigns.get(reign_id)
+        if other is None:
+            continue
+        previous = world.figures.get(other.ruler_id)
+        if previous is not None and previous.posthumous:
+            taken.add(previous.posthumous)
+    ruler.posthumous = rulers_mod.posthumous(rng, reign.verdict, reign.alignment,
+                                             ruler.sex, taken)
+
+
+def _verdict_text(rng, reign) -> str:
+    """Строка приговора для летописи — только там, где ей есть место."""
+    if reign is None or not reign.verdict:
+        return ""
+    years = max(0, (reign.end.year if reign.end else 0) - reign.start.year)
+    # За три года ни величия, ни гибели не наживают: молчим.
+    if years < 4 and reign.verdict in ("серое", "доброе"):
+        return ""
+    return rulers_mod.verdict_line(rng, reign.verdict, reign.alignment)
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +229,11 @@ def enthrone(ctx, polity, heir, date: Date, year: int, choice,
         houses_mod.attach(world, house, polity)
 
     heir.regnal_number = _regnal_number(world, polity, heir)
+    # Венчанный перестаёт быть наследником: «наследный принц» рядом с
+    # короной читается как ошибка, и это она и есть.
+    for stale in list(heir.titles):
+        if stale in race.heir_titles or stale in race.regent_titles:
+            heir.titles.remove(stale)
     ruler_title = ctx.ruler_title(polity, race, heir.sex)
     if ruler_title in heir.titles:
         heir.titles.remove(ruler_title)
@@ -182,15 +252,27 @@ def enthrone(ctx, polity, heir, date: Date, year: int, choice,
         regent = dynasty.pick_regent(world, rng, polity, heir, race, year)
         regency_until = heir.birth.year + race.adulthood
 
+    _endow(ctx, polity, heir, house, year)
+    world.refresh_populations()      # снимок державы на начало правления
     reign = world.add_reign(
         polity_id=polity.id, ruler_id=heir.id,
         house_id=house.id if house is not None else "",
         start=date, number=len(polity.reign_ids) + 1,
         regent_id=regent.id if regent is not None else "",
         regency_until=regency_until, legitimacy=legitimacy, title=ruler_title,
+        relation=getattr(choice, "relation", ""),
+        alignment=heir.alignment, skills=dict(heir.skills),
+        traits=list(heir.traits), opening=rulers_mod.snapshot(world, polity),
     )
 
     ensure_family(ctx, heir, year, polity=polity)
+    if regent is not None:
+        regent_title = race.regent_titles[1] if (regent.sex == "f"
+                                                 and len(race.regent_titles) > 1) \
+            else (race.regent_titles[0] if race.regent_titles else "регент")
+        if regent_title not in regent.titles:
+            regent.titles.insert(0, regent_title)
+    mark_heir(ctx, polity, race, year)
 
     if announce:
         if changed_dynasty and house is not None:
@@ -199,7 +281,8 @@ def enthrone(ctx, polity, heir, date: Date, year: int, choice,
             kind = "dynasty_change"
         else:
             title, text = texts.accession(rng, polity, heir, choice, capital, race,
-                                          first=(reign.number == 1))
+                                          first=(reign.number == 1),
+                                          character=texts.character_line(rng, heir))
             importance = 2
         world.add_event(
             date=date, era_index=world.era_index_at(year), kind=kind,
@@ -219,6 +302,71 @@ def enthrone(ctx, polity, heir, date: Date, year: int, choice,
             actors=[regent.id, heir.id], subjects=[polity.id],
             race_id=polity.race_id,
         )
+
+
+# Законы, при которых наследник известен заранее. При выборной власти
+# и праве сильного «наследного принца» не бывает — и титула тоже.
+SETTLED_LAWS = (races_mod.MALE_PRIMOGENITURE, races_mod.ABSOLUTE_PRIMOGENITURE,
+                races_mod.SENIORITY, races_mod.MATRILINEAL)
+
+
+def mark_heir(ctx, polity, race, year: int) -> None:
+    """Отмечает наследника престола титулом королевской семьи.
+
+    Наследный принц — не украшение: это тот, кого при дворе все знают
+    в лицо, и в летописи он должен зваться так же, как его звали там.
+    """
+    world = ctx.world
+    if not race.heir_titles:
+        return
+    law = polity.succession or race.succession_for(polity.form)
+    house = world.houses.get(polity.house_id)
+    if house is None:
+        return
+    titles = set(race.heir_titles)
+
+    heir = None
+    if law in SETTLED_LAWS:
+        ruler = world.figures.get(polity.ruler_id)
+        rng = ctx.rng("heir", polity.id, year)
+        choice = dynasty.choose_heir(world, rng, polity, ruler, race, law, year)
+        heir = choice.figure if choice is not None else None
+
+    for member in world.house_members(house, alive_in_year=year):
+        wanted = (heir is not None and member.id == heir.id
+                  and member.id != polity.ruler_id)
+        title = race.heir_titles[1] if (member.sex == "f"
+                                        and len(race.heir_titles) > 1) \
+            else race.heir_titles[0]
+        if wanted:
+            for old_title in list(member.titles):
+                if old_title in titles and old_title != title:
+                    member.titles.remove(old_title)
+            if title not in member.titles:
+                member.titles.insert(0, title)
+        else:
+            for old_title in list(member.titles):
+                if old_title in titles:
+                    member.titles.remove(old_title)
+
+
+def _endow(ctx, polity, heir, house, year: int) -> None:
+    """Каким уродился государь: нрав, умения, черты.
+
+    Род и государственная вера тянут в свою сторону, но не решают: у
+    доброго дома бывает чудовищный сын. Один раз за жизнь — вернувшийся
+    на престол остаётся собой.
+    """
+    if heir.skills:
+        return
+    world = ctx.world
+    race = races_mod.get_race(heir.race_id)
+    faith = world.faiths.get(polity.faith_id)
+    rng = ctx.rng("nature", heir.id)
+    rulers_mod.endow(rng, heir, race,
+                     house_alignment=int(getattr(house, "alignment", 0) or 0),
+                     faith_alignment=int(faith.alignment) if faith is not None else 0,
+                     dark_tilt=ctx.dark_tilt)
 
 
 def _regnal_number(world, polity, heir) -> int:
@@ -287,9 +435,12 @@ def ensure_family(ctx, figure, year: int, polity=None, announce: bool = True) ->
         return
     figure.spouse_id = spouse.id
     spouse.spouse_id = figure.id
+    wedding = ctx.date_in(rng, max(marriage_year, 1))
+    figure.married = wedding
+    spouse.married = wedding
 
     if announce and polity is not None:
-        date = ctx.date_in(rng, max(marriage_year, 1))
+        date = wedding
         spouse_house = world.houses.get(spouse.house_id)
         title, text = texts.marriage(rng, polity, figure, spouse, spouse_house)
         world.add_event(
@@ -437,6 +588,13 @@ def upkeep(ctx, year: int, period: int) -> None:
         ready.sort(key=lambda f: (-f.birth.ordinal, f.id))      # младшие первыми
         ensure_family(ctx, ready[0], year, polity=None, announce=False)
 
+    # Наследник престола со временем меняется: дети рождаются и умирают.
+    for polity_id in list(world.active_polities):
+        polity = world.polities[polity_id]
+        race = races_mod.get_race(polity.race_id)
+        if race.heir_titles:
+            mark_heir(ctx, polity, race, year)
+
 
 # ---------------------------------------------------------------------------
 # Регентство
@@ -495,6 +653,8 @@ def _instability(ctx, world, polity, year: int) -> float:
             if ruler.age_at(year) > race.lifespan[0] * 0.85:
                 value += 0.35
     value += 0.08 * max(0, len(polity.house_ids) - 1)
+    # Государь, умеющий держать двор, спит спокойно; неумеха — нет.
+    value *= rulers_mod.court_grip(world, polity)
     # Долгоживущие народы правят веками: если считать угрозу по годам,
     # на одно эльфийское правление пришлось бы больше заговоров, чем на
     # десять человеческих. Приводим опасность к длине поколения.
@@ -546,8 +706,9 @@ def _abdicate(ctx, polity, ruler, year: int, rng) -> None:
     world = ctx.world
     reign = world.current_reign(polity)
     date = ctx.date_in(rng, year, reign.start if reign is not None else None)
-    _close_reign(world, reign, date, "отречение")
-    title, text = texts.abdication(rng, polity, ruler)
+    close_reign(ctx, reign, date, "отречение")
+    title, text = texts.abdication(rng, polity, ruler,
+                                   verdict=_verdict_text(rng, reign))
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="abdication",
         title=title, text=text, importance=3, actors=[ruler.id],
@@ -597,7 +758,11 @@ def _pick_challenger(ctx, world, polity, ruler, race, year: int, kind: str, rng)
                 continue
             if head.age_at(year) < race.adulthood:
                 continue
+            # К венцу тянется не самый славный род, а самый честолюбивый
+            # и самый обиженный: слава тут лишь одно из трёх слагаемых.
             pairs.append(((head, house), max(0.25, house.prestige)
+                          * (0.5 + house.ambition)
+                          * (0.6 + house.discontent * 2.0)
                           * rng.uniform(0.6, 1.5)))
 
     if not pairs:
@@ -627,7 +792,8 @@ def _resolve_coup(ctx, polity, ruler, race, year: int, rng) -> None:
         success += 0.05
 
     if not rng.chance(max(0.15, min(0.9, success))):
-        world.schedule_death(challenger, date, "казнён за мятеж")
+        world.schedule_death(challenger, date, narrative.fate(
+            ("казнён за мятеж", "казнена за мятеж"), challenger.sex))
         if house is not None:
             house.prestige = max(0.15, house.prestige - 1.5)
         title, text = texts.plot_failed(rng, polity, challenger, ruler, house)
@@ -642,14 +808,18 @@ def _resolve_coup(ctx, polity, ruler, race, year: int, rng) -> None:
     violent = rng.chance(0.62)
     reason = {"palace": "дворцовый переворот", "usurpation": "узурпация",
               "challenge": "поединок за власть", "deposition": "низложение"}[kind]
-    _close_reign(world, reign, date, reason)
+    close_reign(ctx, reign, date, reason)
     if violent:
-        world.schedule_death(ruler, date, "погиб(ла) при перевороте")
+        world.schedule_death(ruler, date, narrative.fate(
+            ("погиб при перевороте", "погибла при перевороте"), ruler.sex))
     else:
-        ruler.notes.append("свергнут(а) в %d году" % year)
+        ruler.notes.append(narrative.fate(("свергнут в %d году",
+                                           "свергнута в %d году"),
+                                          ruler.sex) % year)
 
     title, text = texts.coup_success(rng, kind, polity, challenger, ruler, house,
-                                     capital, violent)
+                                     capital, violent,
+                                     verdict=_verdict_text(rng, reign))
     old_house = world.houses.get(polity.house_id)
     polity.ruler_id = ""
     world.add_event(

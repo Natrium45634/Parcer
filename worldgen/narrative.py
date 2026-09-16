@@ -99,6 +99,15 @@ def cap(text: str) -> str:
     return "".join(chars)
 
 
+def fate(pair, sex: str) -> str:
+    """Причина смерти в нужном роде: («убит», «убита»).
+
+    Причину видно и в летописи, и в родословных таблицах, поэтому
+    заглушки вроде «погиб(ла)» тут не годятся.
+    """
+    return pair[1] if (sex == "f" and len(pair) > 1) else pair[0]
+
+
 def where(rng, region) -> str:
     """«в горном краю по имени Кхаз-Морад» — без ошибок в падежах."""
     if region is None:

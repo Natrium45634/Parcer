@@ -15,6 +15,7 @@ from . import peoples
 from . import succession
 from .. import narrative
 from .. import races as races_mod
+from .. import rulers as rulers_mod
 from ..models import ACTIVE, GONE, GREAT, MINOR, RUINED, SETTLED
 
 SETTLE_MIN_POPULATION = 380
@@ -414,6 +415,10 @@ def upkeep(ctx, year: int, period: int) -> None:
         elif settlement.polity_id:
             capacity *= 1.35
         capacity *= 0.75 + 0.14 * era_index
+        if polity is not None:
+            # Хозяйская хватка государя кормит города или не кормит их:
+            # отсюда и берутся «при нём страна поднялась» и наоборот.
+            capacity *= rulers_mod.stewardship(world, polity)
 
         population = settlement.population
         population += (population * ctx.growth(race.growth, settlement.region_id)
