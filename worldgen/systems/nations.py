@@ -26,15 +26,13 @@ from .. import narrative
 from .. import narrative_nations as texts
 from .. import races as races_mod
 from .. import rulers as rulers_mod
-from ..models import ACTIVE, GREAT, RUINED
+from ..models import ACTIVE, GREAT
 from ..world import RURAL_FACTOR
 from . import houses as houses_mod
 from . import succession
 
-WAR_RATE = 0.009            # годовая вероятность войны за землю
 REVOLT_RATE = 0.9           # множитель к накопленной обиде
 DECREE_CHANCE = 0.22        # шанс, что новый правитель меняет закон
-MIN_WAR_CITIES = 2          # с чем не воюют: слишком мало городов
 ASSIMILATE_CHANCE = 0.55
 # Между сменами титульного народа должно пройти хотя бы несколько веков:
 # иначе престол начинает ходить туда-обратно каждые двести лет.
@@ -42,40 +40,17 @@ TITULAR_COOLDOWN = 500
 
 
 # ---------------------------------------------------------------------------
-# Годовой такт: войны за землю
+# Годовой такт
 # ---------------------------------------------------------------------------
 
 def tick(ctx, year: int) -> None:
-    _maybe_war(ctx, year)
+    """Войны за землю переехали в systems/war.py — здесь их больше нет.
 
-
-def _maybe_war(ctx, year: int) -> None:
-    """Сильная держава берёт у соседа города."""
-    world = ctx.world
-    if len(world.active_polities) < 2:
-        return
-    rng = ctx.rng("nations", "war", year)
-    if not rng.chance(ctx.rate(WAR_RATE)):
-        return
-
-    pairs = []
-    for polity_id in world.active_polities:
-        polity = world.polities[polity_id]
-        cities = _live_cities(world, polity)
-        if len(cities) < MIN_WAR_CITIES:
-            continue
-        pairs.append((polity, float(polity.population) ** 0.6))
-    if len(pairs) < 2:
-        return
-
-    attacker = rng.weighted(pairs)
-    victim = _pick_victim(world, rng, attacker)
-    if victim is None:
-        return
-
-    taken = _seize(ctx, rng, attacker, victim, year)
-    if not taken:
-        return
+    Прежде завоевание было одним броском: сильный забирал города и на
+    этом всё кончалось. Теперь у войны есть причина, длина, сражения и
+    мир, а этот модуль занят тем, что происходит внутри державы.
+    """
+    return
 
 
 def _live_cities(world, polity) -> list:
@@ -84,99 +59,13 @@ def _live_cities(world, polity) -> list:
             and world.settlements[sid].status == ACTIVE]
 
 
-def _pick_victim(world, rng, attacker):
-    """Сосед послабее: воюют с теми, до кого дотягиваются."""
-    reach = set(attacker.region_ids)
-    for region_id in list(attacker.region_ids):
-        region = world.regions.get(region_id)
-        if region is not None:
-            reach.update(region.neighbors)
+def pick_general(ctx, rng, polity, race, year: int):
+    """Полководец похода: живой воин державы или новое имя.
 
-    pairs = []
-    for polity_id in world.active_polities:
-        if polity_id == attacker.id:
-            continue
-        other = world.polities[polity_id]
-        if not reach & set(other.region_ids):
-            continue
-        if len(_live_cities(world, other)) < 1:
-            continue
-        # Воюют не со всяким соседом, а с тем, кого рассчитывают одолеть.
-        # Воинское умение государей входит в расчёт наравне с числом душ:
-        # полководец на престоле берётся и за равного, а неумеха робеет.
-        edge = ((attacker.population + 1.0) / (other.population + 1.0)
-                * rulers_mod.war_edge(world, attacker)
-                / max(0.5, rulers_mod.war_edge(world, other)))
-        if edge < 1.3:
-            continue
-        pairs.append((other, min(6.0, edge)))
-    if not pairs:
-        return None
-    return rng.weighted(pairs)
-
-
-def _seize(ctx, rng, winner, loser, year: int) -> list:
-    """Передаёт часть городов победителю вместе с их жителями."""
-    world = ctx.world
-    cities = _live_cities(world, loser)
-    if not cities:
-        return []
-
-    edge = (winner.population + 1.0) / (loser.population + 1.0)
-    share = min(0.55, 0.15 + 0.12 * min(4.0, edge))
-    count = max(1, int(round(len(cities) * share)))
-    # Побеждённого добивают только при подавляющем перевесе: иначе войны
-    # за век-другой свели бы карту к трём державам.
-    if edge < 3.0:
-        count = min(count, max(1, len(cities) - 1))
-    taken = rng.sample(sorted(cities, key=lambda s: s.id), count)
-
-    race = races_mod.get_race(winner.race_id)
-    general = _general(ctx, rng, winner, race, year)
-    date = ctx.date_in(rng, year)
-
-    if not winner.policy:
-        winner.policy = _fresh_policy(ctx, rng, winner)
-        winner.policy_since = year
-
-    moved = []
-    for settlement in taken:
-        if settlement.id in loser.settlement_ids:
-            loser.settlement_ids.remove(settlement.id)
-        settlement.polity_id = winner.id
-        settlement.is_capital = False
-        winner.settlement_ids.append(settlement.id)
-        if settlement.region_id not in winner.region_ids:
-            winner.region_ids.append(settlement.region_id)
-        moved.append(settlement)
-        # Искореняющая держава не принимает чужих: она их стирает.
-        if winner.policy == pol.PURGE and rng.chance(0.45):
-            world.end_settlement(settlement, date, "вычищен завоевателями",
-                                 RUINED)
-
-    # Побеждённой стране может не остаться ничего.
-    if not _live_cities(world, loser):
-        world.end_polity(loser, date, "завоёвана державой %s" % winner.name)
-    elif loser.capital_id in [s.id for s in taken]:
-        rest = _live_cities(world, loser)
-        rest[0].is_capital = True
-        loser.capital_id = rest[0].id
-
-    world.refresh_populations()
-    title, text = texts.conquest(rng, winner, loser, general, moved,
-                                 winner.policy)
-    event = world.add_event(
-        date=date, era_index=world.era_index_at(year), kind="conquest",
-        title=title, text=text, importance=4, actors=[general.id],
-        subjects=[winner.id, loser.id], region_id=moved[0].region_id,
-        race_id=winner.race_id)
-    winner.conquests.append(event.id)
-    general.deeds.append(event.id)
-    return moved
-
-
-def _general(ctx, rng, polity, race, year: int):
-    """Полководец похода: живой воин державы или новое имя."""
+    Сначала смотрят на знать: у великого дома всегда найдётся младший
+    сын, которому нужна слава. Если знати нет — поднимают человека со
+    стороны, и он может основать собственный род.
+    """
     world = ctx.world
     houses = [world.houses[hid] for hid in polity.house_ids
               if hid in world.houses and world.houses[hid].status == ACTIVE]

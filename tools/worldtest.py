@@ -41,6 +41,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from worldgen import aristocracy as arist                        # noqa: E402
 from worldgen import nations as pol                              # noqa: E402
 from worldgen import rulers                                      # noqa: E402
+from worldgen import warfare                                     # noqa: E402
+from worldgen import warfare as wf                               # noqa: E402
 from worldgen.catastrophe import KIND_NAMES, SEVERITY_NAMES      # noqa: E402
 from worldgen.engine import Settings, generate                   # noqa: E402
 from worldgen.pantheon import (ALIGNMENT_NAMES, DOMAINS_BY_KEY,  # noqa: E402
@@ -218,6 +220,23 @@ def snapshot(world, year: int, out) -> None:
                 "; вождь %s" % leader.name if leader is not None else ""))
     else:
         out("Идущих бедствий нет.")
+
+    live_wars = [world.wars[wid] for wid in world.active_wars]
+    if live_wars:
+        out("ИДУЩИЕ ВОЙНЫ (%d):" % len(live_wars))
+        for war in sorted(live_wars, key=lambda w: -w.scale)[:5]:
+            attacker = world.polities.get(war.attacker_id)
+            defender = world.polities.get(war.defender_id)
+            out("   • %s — %s против %s; с %d г., повод: %s, цель: %s; "
+                "сражений %d, погибло %d" % (
+                    war.name,
+                    attacker.full_name if attacker else "?",
+                    defender.full_name if defender else "?",
+                    war.start.year, warfare.cause_label(war.cause),
+                    warfare.AIM_NAMES.get(war.aim, war.aim),
+                    len(war.battle_ids), war.deaths))
+    else:
+        out("Войн сейчас не идёт.")
 
     running = [world.expeditions[x] for x in world.active_expeditions]
     if running:
@@ -443,7 +462,44 @@ def audit(world) -> list:
         bad("знатных родов без нрава и девиза: %d из %d"
             % (len(faceless_houses), len(world.houses)))
 
-    # 10. Повторы текста — главное, из-за чего мир перестаёт читаться живым.
+    # 10. Войны: длина, исходы, разнообразие поводов, честность счёта.
+    wars = [w for w in world.wars.values() if w.end is not None]
+    if wars:
+        causes = Counter(w.cause for w in wars)
+        if len(causes) < 6:
+            note("поводов к войне всего %d — мир воюет по одной причине"
+                 % len(causes))
+        top_cause, top_count = causes.most_common(1)[0]
+        if top_count > len(wars) * 0.4:
+            note("повод «%s» стоит за %.0f%% войн"
+                 % (warfare.cause_label(top_cause),
+                    top_count * 100.0 / len(wars)))
+        outcomes = Counter(w.outcome for w in wars)
+        top_outcome, outcome_count = outcomes.most_common(1)[0]
+        if outcome_count > len(wars) * 0.7:
+            note("исход «%s» у %.0f%% войн — войны кончаются одинаково"
+                 % (top_outcome, outcome_count * 100.0 / len(wars)))
+        # Война, в которой не успели сойтись, — это либо оборванная
+        # война, либо та, чей противник погиб раньше от чужой руки.
+        silent = [w for w in wars if not w.battle_ids
+                  and w.outcome not in (wf.INTERRUPTED, wf.ANNIHILATION)]
+        if silent:
+            bad("войн без единого сражения: %d из %d" % (len(silent), len(wars)))
+        peaceless = [w for w in wars if not w.peace_name
+                     and w.outcome != wf.ANNIHILATION]
+        if peaceless:
+            bad("войн, кончившихся без мира и без гибели державы: %d"
+                % len(peaceless))
+        longest = max(wars, key=lambda w: w.years)
+        if longest.years < 8:
+            note("самая долгая война длилась %d лет — затяжных войн в мире нет"
+                 % longest.years)
+        # Счёт потерь должен сходиться с числом сражений.
+        odd = [w for w in wars if w.battle_ids and w.deaths <= 0]
+        if odd:
+            bad("войн со сражениями, но без потерь: %d" % len(odd))
+
+    # 11. Повторы текста — главное, из-за чего мир перестаёт читаться живым.
     sentences = Counter()
     for event in world.events:
         for piece in re.split(r"(?<=[.!?])\s+", event.text):

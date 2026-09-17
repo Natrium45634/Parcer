@@ -12,8 +12,8 @@ import io
 import json
 
 from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, EraSpan,
-                     Event, Expedition, Faith, Figure, Folk, House, Polity,
-                     Region, Reign, Relic, Settlement, Temple, TradeRoute,
+                     Event, Expedition, Faith, Feud, Figure, Folk, House, Polity,
+                     Region, Reign, Relic, Settlement, Temple, TradeRoute, War,
                      Tribe)
 from .timeline import Date
 from .world import World
@@ -99,6 +99,8 @@ def world_to_dict(world: World) -> dict:
                    for item in world.routes.values()],
         "battles": [_compact(Battle, item.to_dict())
                     for item in world.battles.values()],
+        "wars": [_compact(War, item.to_dict()) for item in world.wars.values()],
+        "feuds": [_compact(Feud, item.to_dict()) for item in world.feuds.values()],
         "dark_ages": world.dark_ages,
         "deities": [_compact(Deity, item.to_dict()) for item in world.deities.values()],
         "faiths": [_compact(Faith, item.to_dict()) for item in world.faiths.values()],
@@ -170,6 +172,14 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("battles", ()):
         battle = Battle(**_clean(Battle, item))
         world.battles[battle.id] = battle
+    for item in data.get("wars", ()):
+        war = War(**_clean(War, item))
+        world.wars[war.id] = war
+        if war.status == ONGOING:
+            world.active_wars.append(war.id)
+    for item in data.get("feuds", ()):
+        feud = Feud(**_clean(Feud, item))
+        world.feuds[feud.id] = feud
     world.dark_ages = list(data.get("dark_ages") or ())
     for item in data.get("deities", ()):
         deity = Deity(**_clean(Deity, item))

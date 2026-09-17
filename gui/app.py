@@ -281,6 +281,10 @@ class ChronicleApp(tk.Tk):
              "Погибло", "Исход", "Следов"),
             (230, 150, 130, 110, 70, 100, 100, 190, 70), self._on_calamity_open,
             filler=lambda: self._fill_calamities())
+        self.wars_text = self._add_text_tab(
+            "Войны",
+            filler=lambda: self._set_text(self.wars_text,
+                                          chronicle.render_wars(self.world)))
         self.dynasty_text = self._add_text_tab(
             "Правители",
             filler=lambda: self._set_text(self.dynasty_text,

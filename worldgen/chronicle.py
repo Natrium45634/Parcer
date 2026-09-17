@@ -482,6 +482,79 @@ def render_trade(world) -> str:
     return "\n".join(rows)
 
 
+def render_wars(world) -> str:
+    """Справочник войн: за что, кто с кем, сколько лет и чем кончилось."""
+    from . import warfare
+
+    rows = ["ВОЙНЫ И РАСПРИ", ""]
+
+    feuds = sorted(world.feuds.values(),
+                   key=lambda f: (f.start.ordinal if f.start else 0))
+    if feuds:
+        rows.append("  ВЕКОВЫЕ РАСПРИ")
+        for feud in feuds:
+            sides = []
+            for polity_id in feud.polity_ids:
+                polity = world.polities.get(polity_id)
+                sides.append(polity.full_name if polity else "?")
+            span = "%s—%s" % (feud.start.year if feud.start else "?",
+                              feud.end.year if feud.end else "…")
+            rows.append("    %-26s %-12s войн %2d, погибло %8d   %s"
+                        % (feud.name, span, len(feud.war_ids), feud.deaths,
+                           " против ".join(sides)))
+        rows.append("")
+
+    wars = sorted(world.wars.values(), key=lambda w: w.start.ordinal)
+    if not wars:
+        rows.append("  Войн в этой истории не было.")
+        return "\n".join(rows)
+
+    header = "  %-8s %-34s %-9s %5s %9s  %s" % (
+        "Год", "Война", "Масштаб", "Лет", "Погибло", "Чем кончилась")
+    rows.append(header)
+    rows.append("  " + "-" * (len(header) - 2))
+    for war in wars:
+        attacker = world.polities.get(war.attacker_id)
+        defender = world.polities.get(war.defender_id)
+        rows.append("  %-8d %-34s %-9s %5s %9d  %s" % (
+            war.start.year, war.name[:34],
+            "%d из 5" % war.scale,
+            war.years if war.end else "идёт",
+            war.deaths, war.outcome or "идёт"))
+        rows.append("        %s → %s" % (
+            attacker.full_name if attacker else "?",
+            defender.full_name if defender else "?"))
+        line = "        повод: %s; цель: %s" % (
+            warfare.cause_label(war.cause),
+            warfare.AIM_NAMES.get(war.aim, war.aim))
+        battles = sum(1 for bid in war.battle_ids
+                      if bid in world.battles
+                      and world.battles[bid].kind == "битва")
+        storms = len(war.battle_ids) - battles
+        if battles or storms:
+            line += "; сражений %d, взятых городов %d" % (battles, storms)
+        if war.taken_ids:
+            line += "; земель отошло %d" % len(war.taken_ids)
+        if war.razed:
+            line += "; срыто городов %d" % war.razed
+        rows.append(line)
+        if war.peace_name:
+            rows.append("        мир: %s" % war.peace_name)
+        elif war.end is not None:
+            rows.append("        мира не заключали")
+    rows.append("")
+    finished = [w for w in wars if w.end is not None]
+    rows.append("  Всего войн: %d, погибших в них: %d" % (
+        len(wars), sum(w.deaths for w in wars)))
+    if finished:
+        longest = max(finished, key=lambda w: w.years)
+        bloodiest = max(finished, key=lambda w: w.deaths)
+        rows.append("  Самая долгая: %s (%d лет)" % (longest.name, longest.years))
+        rows.append("  Самая кровавая: %s (%d погибших)"
+                    % (bloodiest.name, bloodiest.deaths))
+    return "\n".join(rows)
+
+
 def render_pantheon(world) -> str:
     """Боги мира: имена, сферы, мировоззрение, праздники."""
     from . import pantheon as pan
@@ -825,6 +898,7 @@ def full_text(world) -> str:
         render_folks(world),
         render_trade(world),
         render_expeditions(world),
+        render_wars(world),
         render_dynasties(world),
         render_peoples(world),
         render_houses(world),

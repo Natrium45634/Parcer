@@ -509,6 +509,8 @@ def snapshot(world, polity) -> dict:
         "population": int(polity.population),
         "cities": cities,
         "regions": len(polity.region_ids),
+        "wars_won": int(getattr(polity, "wars_won", 0)),
+        "wars_lost": int(getattr(polity, "wars_lost", 0)),
         "other_population": max(0, int(world.world_population()) - int(polity.population)),
         "other_cities": max(0, len(world.active_settlements) - cities),
     }
@@ -539,6 +541,14 @@ def judge(before: dict, after: dict, years: int) -> tuple:
     cities = max(0.05, min(4.0, _ratio(before, after, "cities") / par_cities))
     lands = max(0.05, min(4.0, _ratio(before, after, "regions")))
     score = people * 0.55 + cities * 0.30 + lands * 0.15
+
+    # Войны судят отдельно от роста: держава могла не прибавить ни города,
+    # но выстоять в трёх войнах — и это тоже итог правления.
+    won = max(0, int(after.get("wars_won", 0)) - int(before.get("wars_won", 0)))
+    lost = max(0, int(after.get("wars_lost", 0)) - int(before.get("wars_lost", 0)))
+    # Доля роста не бывает отрицательной: поражения могут свести её к нулю,
+    # но не ниже. (Заодно это избавляет от «×-0,00» в таблицах.)
+    score = max(0.0, score + 0.11 * won - 0.13 * lost)
 
     # За короткое правление не спрашивают как за долгое; а с того, кто
     # держал венец полвека, спрашивают вдвое: у него было время.

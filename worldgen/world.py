@@ -13,8 +13,8 @@ import heapq
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Battle, Calamity, Camp, Deity, Event, Expedition, Faith,
-                     Figure, Folk, House, Polity, Region, Reign, Relic,
-                     Settlement, Temple, TradeRoute, Tribe)
+                     Feud, Figure, Folk, House, Polity, Region, Reign, Relic,
+                     Settlement, Temple, TradeRoute, Tribe, War)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
@@ -70,6 +70,9 @@ class World:
         self.folks = {}
         self.routes = {}
         self.active_routes = []
+        self.wars = {}
+        self.active_wars = []
+        self.feuds = {}
         self.notes = {}                # свободные заметки для будущих блоков
         self.map_source = ""           # файл карты, если мир построен по ней
         self.geography = {}            # имена океанов, материков, хребтов
@@ -264,7 +267,61 @@ class World:
         calamity = self.calamities.get(battle.calamity_id)
         if calamity is not None:
             calamity.battle_ids.append(battle.id)
+        war = self.wars.get(battle.war_id)
+        if war is not None:
+            war.battle_ids.append(battle.id)
         return battle
+
+    # --- войны ---------------------------------------------------------
+
+    def add_war(self, **kwargs) -> War:
+        war = War(id=self.next_id("W"), **kwargs)
+        self.wars[war.id] = war
+        self.active_wars.append(war.id)
+        for polity_id in (war.attacker_id, war.defender_id):
+            polity = self.polities.get(polity_id)
+            if polity is not None and war.id not in polity.war_ids:
+                polity.war_ids.append(war.id)
+        return war
+
+    def end_war(self, war, date: Date, outcome: str, peace_name: str = "") -> None:
+        if war.status != ONGOING:
+            return
+        war.status = ENDED
+        war.end = date
+        war.outcome = outcome
+        war.peace_name = peace_name
+        if war.id in self.active_wars:
+            self.active_wars.remove(war.id)
+        feud = self.feuds.get(war.feud_id)
+        if feud is not None:
+            feud.end = date
+            feud.deaths += war.deaths
+
+    def add_feud(self, **kwargs) -> Feud:
+        feud = Feud(id=self.next_id("F"), **kwargs)
+        self.feuds[feud.id] = feud
+        return feud
+
+    def wars_of(self, polity, only_active: bool = False) -> list:
+        rows = []
+        for war_id in polity.war_ids:
+            war = self.wars.get(war_id)
+            if war is None:
+                continue
+            if only_active and war.status != ONGOING:
+                continue
+            rows.append(war)
+        return rows
+
+    def war_between(self, first_id: str, second_id: str):
+        """Идущая война между этой парой, если она есть."""
+        pair = {first_id, second_id}
+        for war_id in self.active_wars:
+            war = self.wars[war_id]
+            if {war.attacker_id, war.defender_id} == pair:
+                return war
+        return None
 
     def end_calamity(self, calamity, date: Date, resolution: str) -> None:
         if calamity.status != ONGOING:

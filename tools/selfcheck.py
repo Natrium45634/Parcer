@@ -269,6 +269,89 @@ def check_nobility(world, seed: str) -> list:
     return problems
 
 
+def check_wars(world, seed: str) -> list:
+    """Проверяет связность войн: стороны, сражения, мир, добыча."""
+    problems = []
+
+    for war in world.wars.values():
+        if war.attacker_id == war.defender_id:
+            problems.append("сид «%s»: война «%s» ведётся сама с собой"
+                            % (seed, war.name))
+            break
+        if war.attacker_id not in world.polities \
+                or war.defender_id not in world.polities:
+            problems.append("сид «%s»: у войны «%s» потеряна сторона"
+                            % (seed, war.name))
+            break
+        if war.end is not None and war.end.ordinal < war.start.ordinal:
+            problems.append("сид «%s»: война «%s» кончилась раньше, чем началась"
+                            % (seed, war.name))
+            break
+        if war.deaths < 0 or war.attacker_losses < 0 or war.defender_losses < 0:
+            problems.append("сид «%s»: у войны «%s» отрицательные потери"
+                            % (seed, war.name))
+            break
+        for battle_id in war.battle_ids:
+            if battle_id not in world.battles:
+                problems.append("сид «%s»: у войны «%s» потеряно сражение"
+                                % (seed, war.name))
+                break
+        if problems:
+            break
+        if war.status == "длится" and war.id not in world.active_wars:
+            problems.append("сид «%s»: идущая война «%s» не в списке идущих"
+                            % (seed, war.name))
+            break
+        if war.status != "длится" and war.id in world.active_wars:
+            problems.append("сид «%s»: законченная война «%s» числится идущей"
+                            % (seed, war.name))
+            break
+
+    # Взятые города должны принадлежать победителю или быть разорены.
+    for war in world.wars.values():
+        if war.outcome != "победа нападавших":
+            continue
+        for settlement_id in war.taken_ids:
+            settlement = world.settlements.get(settlement_id)
+            if settlement is None:
+                problems.append("сид «%s»: война «%s» взяла несуществующий город"
+                                % (seed, war.name))
+                break
+        if problems:
+            break
+
+    for feud in world.feuds.values():
+        if len(feud.polity_ids) != 2:
+            problems.append("сид «%s»: у распри «%s» не две стороны"
+                            % (seed, feud.name))
+            break
+        if feud.end is not None and feud.start is not None \
+                and feud.end.ordinal < feud.start.ordinal:
+            problems.append("сид «%s»: распря «%s» кончилась раньше начала"
+                            % (seed, feud.name))
+            break
+        for war_id in feud.war_ids:
+            if war_id not in world.wars:
+                problems.append("сид «%s»: у распри «%s» потеряна война"
+                                % (seed, feud.name))
+                break
+        if problems:
+            break
+
+    # Дань и покорность должны указывать на живые державы.
+    for polity in world.polities.values():
+        for key in ("tribute_to", "overlord_id"):
+            other_id = getattr(polity, key)
+            if other_id and other_id not in world.polities:
+                problems.append("сид «%s»: страна %s платит несуществующей державе"
+                                % (seed, polity.name))
+                break
+        if problems:
+            break
+
+    return problems
+
+
 def check_calamities(world, seed: str) -> list:
     """Проверяет связность бедствий, их следов и сражений."""
     problems = []
@@ -304,6 +387,8 @@ def check_calamities(world, seed: str) -> list:
             break
 
     for battle in world.battles.values():
+        if battle.war_id:
+            continue          # сражения держав принадлежат войне, а не беде
         if battle.calamity_id not in world.calamities:
             problems.append("сид «%s»: сражение «%s» без своего бедствия"
                             % (seed, battle.name))
@@ -428,6 +513,7 @@ def main() -> int:
             failures.append("сид «%s»: события идут не по порядку" % seed)
 
         failures.extend(check_nobility(first, seed))
+        failures.extend(check_wars(first, seed))
         failures.extend(check_calamities(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
@@ -463,6 +549,7 @@ def main() -> int:
                 failures.append("карта, сид «%s»: мир изменился после сохранения" % seed)
 
             failures.extend(check_nobility(first, "карта/" + seed))
+            failures.extend(check_wars(first, "карта/" + seed))
             failures.extend(check_calamities(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))

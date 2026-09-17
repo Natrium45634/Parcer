@@ -391,11 +391,22 @@ def tick_camps(ctx, year: int) -> None:
 # Рост и упадок поселений, стран и лагерей
 # ---------------------------------------------------------------------------
 
+def _tributaries(world) -> dict:
+    """Сколько данников у каждой державы — считается раз за такт."""
+    counts = {}
+    for polity_id in world.active_polities:
+        polity = world.polities[polity_id]
+        lord = polity.tribute_to or polity.overlord_id
+        if lord:
+            counts[lord] = counts.get(lord, 0) + 1
+    return counts
+
 def upkeep(ctx, year: int, period: int) -> None:
     world = ctx.world
     spec = ctx.era_spec(year)
     rng = ctx.rng("settlement_upkeep", year)
     era_index = world.era_index_at(year)
+    tributaries = _tributaries(world)
 
     for settlement_id in list(world.active_settlements):
         settlement = world.settlements[settlement_id]
@@ -419,6 +430,11 @@ def upkeep(ctx, year: int, period: int) -> None:
             # Хозяйская хватка государя кормит города или не кормит их:
             # отсюда и берутся «при нём страна поднялась» и наоборот.
             capacity *= rulers_mod.stewardship(world, polity)
+            # Дань уходит хлебом и людьми: данник растёт хуже, сюзерен —
+            # лучше. Без этого дань была бы строкой в договоре и только.
+            if polity.tribute_to:
+                capacity *= 0.90
+            capacity *= 1.0 + 0.03 * min(4, tributaries.get(polity.id, 0))
 
         population = settlement.population
         population += (population * ctx.growth(race.growth, settlement.region_id)

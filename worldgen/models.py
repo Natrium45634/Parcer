@@ -289,6 +289,16 @@ class Polity:
     hunger: float = 0.0        # насколько державе нечего есть, 0…1
     last_famine: int = 0       # год последнего голода
 
+    # --- война (блок 9) ---
+    war_ids: list = field(default_factory=list)      # все войны страны
+    tribute_to: str = ""       # кому платит дань
+    tribute_until: int = 0     # до какого года
+    overlord_id: str = ""      # чьё старшинство признано
+    weariness: float = 0.0     # усталость от войн, 0…1
+    last_war: int = 0          # год окончания последней войны
+    wars_won: int = 0
+    wars_lost: int = 0
+
     @property
     def multiethnic(self) -> bool:
         return len([race for race, souls in self.peoples.items() if souls > 0]) > 1
@@ -611,7 +621,7 @@ class Battle:
     id: str
     name: str
     date: Date
-    calamity_id: str
+    calamity_id: str = ""
     region_id: str = ""
     attacker_id: str = ""              # вождь нападающих
     defender_ids: list = field(default_factory=list)
@@ -620,10 +630,96 @@ class Battle:
     fallen_ids: list = field(default_factory=list)
     deaths: int = 0
     decisive: bool = False
+    # --- сражения держав (блок 9) ---
+    war_id: str = ""
+    kind: str = "битва"                # битва / осада / штурм / набег
+    settlement_id: str = ""            # если дрались за город
+    attacker_polity: str = ""
+    defender_polity: str = ""
+    attacker_men: int = 0
+    defender_men: int = 0
+    captured_ids: list = field(default_factory=list)   # взятые в плен
 
     def to_dict(self) -> dict:
         data = asdict(self)
         data["date"] = _date_out(self.date)
+        return data
+
+
+@dataclass
+class War:
+    """Война держав: за что, как шла и чем кончилась."""
+
+    id: str
+    name: str
+    start: Date
+    attacker_id: str
+    defender_id: str
+    cause: str                 # ключ повода из warfare.py
+    aim: str                   # чего хотел нападающий
+    end: Date = None
+    status: str = ONGOING
+    scale: int = 1             # 1 — стычка, 5 — война империй
+    outcome: str = ""
+    peace_name: str = ""       # «Мир в городе Роэнберг»
+    feud_id: str = ""          # если война входит в вековую распрю
+    planned_years: int = 1     # сколько ей отмерено, если ничто не оборвёт
+    battle_ids: list = field(default_factory=list)
+    attacker_generals: list = field(default_factory=list)
+    defender_generals: list = field(default_factory=list)
+    attacker_men: int = 0      # под знамёнами на начало
+    defender_men: int = 0
+    attacker_losses: int = 0
+    defender_losses: int = 0
+    momentum: float = 0.0      # -1 берут верх оборонявшиеся, +1 нападавшие
+    exhaustion: float = 0.0    # насколько обе стороны выдохлись
+    taken_ids: list = field(default_factory=list)     # перешедшие города
+    razed: int = 0
+    sieges: dict = field(default_factory=dict)        # город -> лет в осаде
+    fallen_ids: list = field(default_factory=list)    # погибшие имена
+    captured_ids: list = field(default_factory=list)  # пленённые
+    notes: list = field(default_factory=list)
+
+    @property
+    def years(self) -> int:
+        if self.end is None:
+            return 0
+        return max(0, self.end.year - self.start.year)
+
+    @property
+    def deaths(self) -> int:
+        return self.attacker_losses + self.defender_losses
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["start"] = _date_out(self.start)
+        data["end"] = _date_out(self.end)
+        return data
+
+
+@dataclass
+class Feud:
+    """Вековая распря: цепь войн между одной и той же парой держав."""
+
+    id: str
+    name: str
+    polity_ids: list = field(default_factory=list)    # пара враждующих
+    war_ids: list = field(default_factory=list)
+    start: Date = None
+    end: Date = None
+    status: str = ONGOING
+    deaths: int = 0
+
+    @property
+    def years(self) -> int:
+        if self.end is None or self.start is None:
+            return 0
+        return max(0, self.end.year - self.start.year)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["start"] = _date_out(self.start)
+        data["end"] = _date_out(self.end)
         return data
 
 

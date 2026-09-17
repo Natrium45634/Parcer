@@ -23,7 +23,7 @@ from .eras import build_eras
 from .rng import seed_to_int
 from .systems import (aristocracy, calamity, era_events, exploration, founding,
                       geography, houses, lives, nations, notables, peoples,
-                      religion, succession, trade)
+                      religion, succession, trade, war)
 from .timeline import Date
 from .world import World
 from . import narrative
@@ -109,6 +109,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         succession.tick(ctx, year)
         exploration.tick(ctx, year)
         nations.tick(ctx, year)
+        war.tick(ctx, year)
         notables.tick(ctx, year)
         calamity.tick(ctx, year)
         religion.tick(ctx, year)
@@ -122,6 +123,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             aristocracy.upkeep(ctx, year, UPKEEP_PERIOD)
             succession.upkeep(ctx, year, UPKEEP_PERIOD)
             nations.upkeep(ctx, year, UPKEEP_PERIOD)
+            war.upkeep(ctx, year, UPKEEP_PERIOD)
             exploration.upkeep(ctx, year, UPKEEP_PERIOD)
             trade.upkeep(ctx, year, UPKEEP_PERIOD)
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)

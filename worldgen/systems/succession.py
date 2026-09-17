@@ -99,7 +99,7 @@ def close_reign(ctx, reign, date: Date, reason: str) -> None:
     grade, score = rulers_mod.judge(opening, closing,
                                     max(0, date.year - reign.start.year))
     reign.verdict = grade
-    reign.score = round(score, 3)
+    reign.score = round(max(0.0, score), 3)
     _name_by_deeds(ctx, polity, reign, date)
 
 
