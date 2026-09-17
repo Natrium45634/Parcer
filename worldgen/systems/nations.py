@@ -59,6 +59,71 @@ def _live_cities(world, polity) -> list:
             and world.settlements[sid].status == ACTIVE]
 
 
+def ensure_titular(ctx, polity, year: int) -> bool:
+    """Народ государя должен жить в его державе.
+
+    Война может отнять у страны все города её титульного народа и
+    оставить ей одни завоёванные. Тогда престол переходит к тем, кто в
+    ней остался: держава без собственного народа — это не держава,
+    а ошибка счёта.
+    """
+    world = ctx.world
+    world.refresh_populations()
+    if polity.status != ACTIVE or not polity.peoples:
+        return False
+    if polity.peoples.get(polity.race_id, 0) > 0:
+        return False
+
+    rows = [(souls, race_id) for race_id, souls in polity.peoples.items()
+            if souls > 0 and race_id in races_mod.RACES_BY_ID
+            and races_mod.RACES_BY_ID[race_id].builds_states]
+    if not rows:
+        return False
+    rows.sort(reverse=True)
+    race = races_mod.RACES_BY_ID[rows[0][1]]
+    old_race = races_mod.RACES_BY_ID.get(polity.race_id)
+
+    rng = ctx.rng("titular_fix", polity.id, year)
+    # Новое правление не может открыться раньше нынешнего: дату берём
+    # не с начала года, а не раньше восшествия прежнего государя.
+    running = world.current_reign(polity)
+    date = ctx.date_in(rng, year,
+                       running.start if running is not None else None)
+    capital = world.settlements.get(polity.capital_id)
+    if capital is None or capital.status != ACTIVE:
+        cities = _live_cities(world, polity)
+        capital = cities[0] if cities else None
+        if capital is not None:
+            capital.is_capital = True
+            polity.capital_id = capital.id
+    polity.race_id = race.id
+    polity.titular_since = year
+    polity.succession = race.succession_for(polity.form)
+
+    region_id = capital.region_id if capital is not None else (
+        polity.region_ids[0] if polity.region_ids else "")
+    sex = "f" if rng.chance(0.45) else "m"
+    heir = ctx.make_figure(
+        rng, race, year, role="правитель", region_id=region_id,
+        title=ctx.ruler_title(polity, race, sex), sex=sex, epithet_chance=0.6)
+    houses_mod.found_house(ctx, heir, year, date, seat=capital, rank=GREAT,
+                           polity=polity, importance=2)
+    reign = world.current_reign(polity)
+    if reign is not None and reign.end is None:
+        succession.close_reign(ctx, reign, date, "державы своего народа не стало")
+    succession.install_founder(ctx, polity, heir, capital, date, year)
+
+    title, text = texts.titular_shift(rng, polity, old_race or race, race, heir)
+    world.add_event(
+        date=date, era_index=world.era_index_at(year), kind="titular_shift",
+        title=title, text=text, importance=4, actors=[heir.id],
+        subjects=[polity.id], region_id=region_id, race_id=race.id)
+    world.notes.setdefault("смены титульного народа", []).append(
+        "%d: %s -> %s в стране %s (после войны)"
+        % (year, old_race.name if old_race else "?", race.name, polity.name))
+    return True
+
+
 def pick_general(ctx, rng, polity, race, year: int):
     """Полководец похода: живой воин державы или новое имя.
 

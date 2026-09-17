@@ -289,6 +289,11 @@ class Polity:
     hunger: float = 0.0        # насколько державе нечего есть, 0…1
     last_famine: int = 0       # год последнего голода
 
+    # --- политика (блок 10) ---
+    relations: dict = field(default_factory=dict)    # держава -> отношение −1…1
+    pact_ids: list = field(default_factory=list)     # договоры
+    league_id: str = ""                              # союз, если состоит
+
     # --- война (блок 9) ---
     war_ids: list = field(default_factory=list)      # все войны страны
     tribute_to: str = ""       # кому платит дань
@@ -667,6 +672,17 @@ class War:
     battle_ids: list = field(default_factory=list)
     attacker_generals: list = field(default_factory=list)
     defender_generals: list = field(default_factory=list)
+    attacker_allies: list = field(default_factory=list)   # кто пришёл на помощь
+    defender_allies: list = field(default_factory=list)
+    league_ids: list = field(default_factory=list)        # союзы, втянутые в войну
+    # --- море (блок 10) ---
+    at_sea: bool = False       # война идёт через воду, а не через межу
+    attacker_ships: int = 0
+    defender_ships: int = 0
+    attacker_ships_lost: int = 0
+    defender_ships_lost: int = 0
+    blockades: dict = field(default_factory=dict)         # гавань -> лет в блокаде
+    landings: int = 0          # сколько раз высаживались за морем
     attacker_men: int = 0      # под знамёнами на начало
     defender_men: int = 0
     attacker_losses: int = 0
@@ -694,6 +710,136 @@ class War:
         data = asdict(self)
         data["start"] = _date_out(self.start)
         data["end"] = _date_out(self.end)
+        return data
+
+
+@dataclass
+class Fortress:
+    """Крепость: стоит веками и переходит из рук в руки.
+
+    Города гибнут и зарастают, а крепость на перевале или у брода стоит
+    там же, где стояла, — меняется только знамя над ней.
+    """
+
+    id: str
+    name: str
+    region_id: str
+    built: Date
+    founder_id: str = ""       # кто заложил
+    polity_id: str = ""        # чьё знамя над ней сейчас
+    builder_polity: str = ""   # кто её строил
+    kind: str = "крепость"     # крепость / застава / твердыня / бастион
+    strength: int = 3          # 1 — частокол, 5 — неприступная твердыня
+    hex_index: int = -1
+    status: str = ACTIVE       # активно / разрушено / заброшено
+    ended: Date = None
+    end_reason: str = ""
+    holders: list = field(default_factory=list)   # [(год, id державы)]
+    sieges: int = 0
+    times_taken: int = 0
+    notes: list = field(default_factory=list)
+
+    @property
+    def full_name(self) -> str:
+        return "%s %s" % (self.kind, self.name)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["built"] = _date_out(self.built)
+        data["ended"] = _date_out(self.ended)
+        data["full_name"] = self.full_name
+        return data
+
+
+@dataclass
+class Company:
+    """Вольная рота: те, кто живёт войной и между войнами тоже."""
+
+    id: str
+    name: str
+    race_id: str
+    founded: Date
+    captain_id: str = ""
+    men: int = 0
+    quality: float = 1.0
+    region_id: str = ""
+    employer_id: str = ""      # кто нанял сейчас
+    contract_until: int = 0
+    wars: int = 0
+    raids: int = 0             # сколько раз грабили, оставшись без найма
+    status: str = ACTIVE
+    ended: Date = None
+    end_reason: str = ""
+    notes: list = field(default_factory=list)
+
+    @property
+    def full_name(self) -> str:
+        return "Вольная рота «%s»" % self.name
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["founded"] = _date_out(self.founded)
+        data["ended"] = _date_out(self.ended)
+        data["full_name"] = self.full_name
+        return data
+
+
+@dataclass
+class Pact:
+    """Договор двух держав: от ненападения до союза."""
+
+    id: str
+    kind: str                  # ненападение / торговый / брачный / союз
+    first_id: str
+    second_id: str
+    signed: Date
+    ended: Date = None
+    status: str = ACTIVE
+    end_reason: str = ""
+    league_id: str = ""
+    reasons: list = field(default_factory=list)    # почему сошлись
+    wars_together: int = 0     # сколько раз воевали плечом к плечу
+    betrayals: int = 0         # и сколько раз не пришли на зов
+    notes: list = field(default_factory=list)
+
+    def other(self, polity_id: str) -> str:
+        return self.second_id if polity_id == self.first_id else self.first_id
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["signed"] = _date_out(self.signed)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
+class League:
+    """Союз нескольких держав: оборонительный, священный, торговый."""
+
+    id: str
+    name: str
+    kind: str
+    founded: Date
+    member_ids: list = field(default_factory=list)
+    leader_id: str = ""
+    pact_ids: list = field(default_factory=list)
+    war_ids: list = field(default_factory=list)
+    target_id: str = ""        # против кого сложился, если против кого-то
+    status: str = ACTIVE
+    ended: Date = None
+    end_reason: str = ""
+    notes: list = field(default_factory=list)
+
+    @property
+    def years(self) -> int:
+        if self.ended is None or self.founded is None:
+            return 0
+        return max(0, self.ended.year - self.founded.year)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["founded"] = _date_out(self.founded)
+        data["ended"] = _date_out(self.ended)
         return data
 
 

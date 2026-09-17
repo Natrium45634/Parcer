@@ -352,6 +352,98 @@ def check_wars(world, seed: str) -> list:
     return problems
 
 
+def check_politics(world, seed: str) -> list:
+    """Проверяет связность политики: договоры, союзы, крепости, роты."""
+    problems = []
+
+    for pact in world.pacts.values():
+        if pact.first_id == pact.second_id:
+            problems.append("сид «%s»: договор заключён сам с собой" % seed)
+            break
+        if pact.first_id not in world.polities \
+                or pact.second_id not in world.polities:
+            problems.append("сид «%s»: у договора потеряна сторона" % seed)
+            break
+        if pact.ended is not None and pact.ended.ordinal < pact.signed.ordinal:
+            problems.append("сид «%s»: договор расторгнут раньше, чем заключён"
+                            % seed)
+            break
+        if pact.status == "активно" and pact.id not in world.active_pacts:
+            problems.append("сид «%s»: действующий договор не в списке" % seed)
+            break
+
+    # Между одной парой держав не может быть двух действующих договоров.
+    seen = set()
+    for pact_id in world.active_pacts:
+        pact = world.pacts[pact_id]
+        key = tuple(sorted((pact.first_id, pact.second_id)))
+        if key in seen:
+            problems.append("сид «%s»: у пары держав два договора разом" % seed)
+            break
+        seen.add(key)
+
+    for league in world.leagues.values():
+        if league.ended is not None and league.founded is not None \
+                and league.ended.ordinal < league.founded.ordinal:
+            problems.append("сид «%s»: союз «%s» распался раньше, чем сложился"
+                            % (seed, league.name))
+            break
+        if league.status == "активно":
+            if len(league.member_ids) < 2:
+                problems.append("сид «%s»: в союзе «%s» некому состоять"
+                                % (seed, league.name))
+                break
+            if league.leader_id and league.leader_id not in league.member_ids:
+                problems.append("сид «%s»: во главе союза «%s» тот, кто в нём "
+                                "не состоит" % (seed, league.name))
+                break
+
+    for fortress in world.fortresses.values():
+        if fortress.region_id not in world.regions:
+            problems.append("сид «%s»: крепость %s стоит в несуществующей земле"
+                            % (seed, fortress.name))
+            break
+        if fortress.polity_id and fortress.polity_id not in world.polities:
+            problems.append("сид «%s»: крепость %s держит несуществующая держава"
+                            % (seed, fortress.name))
+            break
+        if fortress.ended is not None \
+                and fortress.ended.ordinal < fortress.built.ordinal:
+            problems.append("сид «%s»: крепость %s разрушена раньше постройки"
+                            % (seed, fortress.name))
+            break
+
+    for company in world.companies.values():
+        if company.men <= 0:
+            problems.append("сид «%s»: в роте «%s» нет людей"
+                            % (seed, company.name))
+            break
+        if company.employer_id and company.employer_id not in world.polities:
+            problems.append("сид «%s»: роту «%s» нанял никто"
+                            % (seed, company.name))
+            break
+
+    # Союзники войны должны быть настоящими державами и не воевать сами с собой.
+    for war in world.wars.values():
+        both = set(war.attacker_allies) & set(war.defender_allies)
+        if both:
+            problems.append("сид «%s»: в войне «%s» союзник на обеих сторонах"
+                            % (seed, war.name))
+            break
+        for ally_id in war.attacker_allies + war.defender_allies:
+            if ally_id not in world.polities:
+                problems.append("сид «%s»: в войне «%s» союзник-призрак"
+                                % (seed, war.name))
+                break
+        if war.attacker_id in war.defender_allies \
+                or war.defender_id in war.attacker_allies:
+            problems.append("сид «%s»: в войне «%s» сторона союзничает сама с "
+                            "собой" % (seed, war.name))
+            break
+
+    return problems
+
+
 def check_calamities(world, seed: str) -> list:
     """Проверяет связность бедствий, их следов и сражений."""
     problems = []
@@ -514,6 +606,7 @@ def main() -> int:
 
         failures.extend(check_nobility(first, seed))
         failures.extend(check_wars(first, seed))
+        failures.extend(check_politics(first, seed))
         failures.extend(check_calamities(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
@@ -550,6 +643,7 @@ def main() -> int:
 
             failures.extend(check_nobility(first, "карта/" + seed))
             failures.extend(check_wars(first, "карта/" + seed))
+            failures.extend(check_politics(first, "карта/" + seed))
             failures.extend(check_calamities(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))

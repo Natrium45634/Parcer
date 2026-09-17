@@ -212,6 +212,25 @@ CAUSES = (
           ("Вражда тянется со времён общего бедствия, и причину уже забыли.",
            "Обиду помнят с той поры, когда обе державы были племенами.",
            "Старые счёты припомнили полностью и с процентами.")),
+    # --- море --------------------------------------------------------------
+    Casus("sealanes", "хозяйство", TRIBUTE, 1.15,
+          ("Война за морские пути", "Война за проливы", "Морская война"),
+          ("Морскую дорогу перекрыли чужие корабли, и купцы взвыли.",
+           "Пролив, которым ходят все, объявлен чужим владением.",
+           "Пошлину за проход через пролив подняли вчетверо.",
+           "Кто держит пролив, тот держит и хлеб, и соль, и войско.")),
+    Casus("piracy", "хозяйство", PLUNDER, 1.2,
+          ("Война против морского разбоя", "Война за чистое море",
+           "Война с пиратами"),
+          ("Корабли пропадают третий год, и все знают, в чьи гавани уходит добыча.",
+           "Разбой на море перестали скрывать даже приличия ради.",
+           "Купеческий караван вырезали целиком, и виновных не выдали.")),
+    Casus("isles", "земля", LAND, 1.05,
+          ("Война за острова", "Заморская война",
+           "Война за город %(city)s"),
+          ("Острова за проливом лежат ничьи только на словах.",
+           "Заморские земли решено взять, пока их не взяли другие.",
+           "Флот построили раньше, чем придумали, куда его вести.")),
     # --- реванш ------------------------------------------------------------
     Casus("revenge", "престол", LAND, 1.4,
           ("Война за реванш", "Война отместки", "Вторая война за %(region)s"),
@@ -251,6 +270,8 @@ CAUSE_LABELS = {
     "curse": "проклятие", "undeath": "поднятые мёртвые", "dragon": "драконий клад",
     "ancient": "древняя вражда", "greed": "жажда добычи",
     "yoke": "дань и чужое старшинство", "revenge": "память о поражении",
+    "sealanes": "морские пути", "piracy": "морской разбой",
+    "isles": "заморские земли",
 }
 
 
@@ -342,6 +363,20 @@ def reasons(ctx, attacker, defender, year: int) -> list:
         add("salt", 1.5)
     if attacker.routes or defender.routes:
         add("tolls", 1.2)
+
+    # --- море ---
+    our_ports, their_ports = ports(world, attacker), ports(world, defender)
+    if our_ports and their_ports:
+        sea_routes = sum(1 for route_id in attacker.routes
+                         if route_id in world.routes
+                         and world.routes[route_id].by_sea)
+        add("sealanes", 1.4 + 0.5 * sea_routes)
+        add("piracy", 0.9 + 0.4 * sea_routes)
+    if their_ports and any(getattr(world.regions.get(rid), "island", False)
+                           or getattr(world.regions.get(rid), "terrain", "")
+                           == "острова"
+                           for rid in defender.region_ids):
+        add("isles", 1.6 if our_ports else 0.3)
     if defender.population > attacker.population * 0.8 \
             and _good_share(defender, goods_mod.GEMS) > 1.3:
         add("gems", 1.1)
@@ -648,3 +683,136 @@ def terms(aim: str, margin: float) -> dict:
         out["cities"] = 5 if strong else 2
         out["raze"] = strong
     return out
+
+
+# ---------------------------------------------------------------------------
+# Море
+# ---------------------------------------------------------------------------
+
+# Народы, для которых море — дорога, и те, для кого оно край света.
+SEA_TRAITS = {
+    "мореходы": 0.55, "рыболовы": 0.25, "собиратели прибоя": 0.30,
+    "хранители отмелей": 0.30, "ломатели раковин": 0.20,
+    "собиратели ветров": 0.25, "небесные дозорные": 0.10,
+    "торговцы": 0.15, "караванщики": -0.10, "камнерезы": -0.25,
+    "рудознатцы": -0.30, "рудокопы-воришки": -0.30, "камнееды": -0.35,
+    "хлебопашцы": -0.15, "певцы леса": -0.20, "хранители рун": -0.20,
+}
+
+SHIP_PER_SOULS = 3500.0     # сколько душ кормит один боевой корабль
+CREW_PER_SHIP = 45          # и сколько человек он несёт
+
+
+def seafaring(race) -> float:
+    """Насколько народ силён на воде: 1.0 — обычно, 0.3 — сухопутный."""
+    value = 1.0
+    for trait in race.traits:
+        value += SEA_TRAITS.get(trait, 0.0)
+    return max(0.25, min(2.2, value))
+
+
+# Земли, что выходят к воде, даже когда карта об этом не говорит прямо.
+SEA_TERRAINS = ("побережье", "острова")
+
+
+def is_shore(region) -> bool:
+    if region is None:
+        return False
+    return bool(region.coastal or region.island
+                or region.terrain in SEA_TERRAINS or region.sea)
+
+
+def ports(world, polity) -> list:
+    """Города на берегу — из них и растёт флот."""
+    out = []
+    for settlement_id in polity.settlement_ids:
+        settlement = world.settlements.get(settlement_id)
+        if settlement is None or settlement.status != ACTIVE:
+            continue
+        if is_shore(world.regions.get(settlement.region_id)):
+            out.append(settlement)
+    return out
+
+
+def fleet(world, polity, race, era_index: int = 2) -> int:
+    """Сколько боевых кораблей держава может вывести в море.
+
+    Флот растёт не из населения вообще, а из портов: держава в глубине
+    материка не построит и лодки, сколько бы душ в ней ни жило.
+    """
+    harbours = ports(world, polity)
+    if not harbours:
+        return 0
+    souls = sum(settlement.population for settlement in harbours)
+    ships = souls / SHIP_PER_SOULS * seafaring(race)
+    ships *= 0.75 + 0.12 * max(0, era_index)
+    if polity.hunger:
+        ships *= max(0.4, 1.0 - polity.hunger)
+    return max(1, int(ships))
+
+
+def sea_power(ships: int, race, admiral=None) -> float:
+    """Сила флота: корабли, выучка команд и умение того, кто их ведёт."""
+    value = seafaring(race) * (0.85 + 0.06 * _general_skill(admiral))
+    return (max(1, ships) ** 0.95) * value
+
+
+def sea_battle(rng, attack_power: float, defend_power: float,
+               home_waters: bool = False, storm: bool = False) -> tuple:
+    """Морской бой. На воде случай весит ещё больше, чем на суше.
+
+    Ветер, течение и внезапный шквал переворачивают морские сражения
+    чаще, чем туман — сухопутные.
+    """
+    ratio = max(0.05, attack_power) / max(0.05, defend_power)
+    if home_waters:
+        ratio /= 1.20            # свои отмели, свои лоцманы
+    if storm:
+        # Буря не разбирает, кто сильнее: она просто мешает обоим, но
+        # больше — тому, у кого кораблей больше.
+        ratio = 1.0 + (ratio - 1.0) * 0.35
+    luck = rng.uniform(1.0 / SEA_LUCK, SEA_LUCK)
+    edge = ratio * luck
+    margin = abs(edge - 1.0) / (abs(edge - 1.0) + 1.0)
+    return edge >= 1.0, margin
+
+
+SEA_LUCK = 2.7               # разброс морской удачи: шире сухопутного
+
+
+def sea_losses(rng, winner_ships: int, loser_ships: int, margin: float,
+               storm: bool = False) -> tuple:
+    """Потери кораблей. На море разгром означает дно, а не отступление."""
+    loser_share = 0.12 + 0.45 * margin
+    winner_share = 0.06 * (1.0 - margin) + 0.02
+    if storm:
+        loser_share += 0.10
+        winner_share += 0.08
+    return (max(0, int(winner_ships * winner_share * rng.uniform(0.5, 1.5))),
+            max(1, int(loser_ships * loser_share * rng.uniform(0.7, 1.3))))
+
+
+def can_reach_by_sea(world, first, second) -> bool:
+    """Есть ли у обеих держав порты и общая вода между ними."""
+    first_ports = ports(world, first)
+    second_ports = ports(world, second)
+    if not first_ports or not second_ports:
+        return False
+    waters = set()
+    for settlement in first_ports:
+        region = world.regions.get(settlement.region_id)
+        if region is not None:
+            if region.sea:
+                waters.add(region.sea)
+            waters.update(region.sea_links)
+    for settlement in second_ports:
+        region = world.regions.get(settlement.region_id)
+        if region is None:
+            continue
+        if region.id in waters:
+            return True
+        if region.sea and region.sea in waters:
+            return True
+    # На процедурной карте морей по именам нет — считаем, что берег общий:
+    # два приморских народа рано или поздно встретятся на воде.
+    return not waters

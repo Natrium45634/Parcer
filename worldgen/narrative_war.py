@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from . import warfare
-from .morph import genitive_noun
+from .morph import dative_noun, genitive_noun
 from .narrative import cap
 from .timeline import years_text
 
@@ -249,6 +249,57 @@ def manoeuvre_text(rng, war, year: int):
             "%s %s" % (cap(rng.choice(MANOEUVRES)), rng.choice(MANOEUVRE_TAILS)))
 
 
+ARMS_LINES = (
+    "Строй держат %(arms)s.",
+    "Дело решают %(arms)s.",
+    "В первом ряду — %(arms)s.",
+    "Главная сила войска — %(arms)s.",
+)
+
+TERRAIN_HELPS = (
+    "Земля в этот день была на стороне %(who_gen)s: %(why)s.",
+    "Место боя подошло %(who_dat)s куда лучше, чем противнику: %(why)s.",
+    "Выбор поля решил половину дела: %(why)s.",
+)
+
+TERRAIN_WHY = {
+    "степь": "в открытой степи конница делает что хочет",
+    "равнина": "на ровном поле строй не ломается",
+    "лес": "в лесу стреляют из-за каждого ствола",
+    "джунгли": "в зарослях строй бесполезен, а засада — нет",
+    "болото": "в топи тонет и конь, и латник",
+    "горы": "в теснине числом не возьмёшь",
+    "холмы": "высоту заняли раньше",
+    "пустыня": "в песках решает вода, а не копья",
+    "тундра": "в мёрзлой пустоши выживает тот, кто к ней привык",
+    "побережье": "прижатый к воде дерётся отчаяннее",
+    "острова": "на островах дерутся малыми отрядами",
+    "подземелье": "под землёй свет и воздух дороже оружия",
+}
+
+
+def arms_line(rng, first_race, second_race, first, second, terrain: str) -> str:
+    """Чем дрались и кому помогла земля — одной-двумя строками."""
+    from . import troops as troops_mod
+
+    parts = []
+    if rng.chance(0.55):
+        race = first_race if rng.chance(0.5) else second_race
+        arms = troops_mod.describe(race)
+        if arms:
+            parts.append(rng.choice(ARMS_LINES) % {"arms": arms})
+    side = troops_mod.advantage(first_race, second_race, terrain)
+    why = TERRAIN_WHY.get(terrain)
+    if side and why and rng.chance(0.6):
+        winner = first if side == "first" else second
+        parts.append(rng.choice(TERRAIN_HELPS) % {
+            "who_gen": polity_gen(winner),
+            "who_dat": "%s %s" % (dative_noun(winner.form).lower(), winner.name),
+            "why": why,
+        })
+    return " ".join(cap(item) for item in parts)
+
+
 # ---------------------------------------------------------------------------
 # Осады
 # ---------------------------------------------------------------------------
@@ -314,6 +365,145 @@ def siege_text(rng, battle, settlement, stage: str, years: int):
             rng.choice(SIEGE_FALL), rng.choice(SACK_NOTES))
         title = "Падение города: %s" % settlement.name
     return (title, cap(body))
+
+
+# ---------------------------------------------------------------------------
+# Море
+# ---------------------------------------------------------------------------
+
+SEA_BATTLE_NAMES = (
+    "Морская битва у города %(city)s",
+    "Бой у берегов земли по имени %(region)s",
+    "Сражение в виду гавани города %(city)s",
+    "Морская сеча у мыса земли по имени %(region)s",
+    "Бой на рейде города %(city)s",
+    "Сражение в проливе у земли по имени %(region)s",
+)
+
+
+def sea_battle_name(rng, region, settlement=None) -> str:
+    data = {"city": settlement.name if settlement is not None else "неведомый",
+            "region": region.name if region is not None else "Открытая Вода"}
+    pool = SEA_BATTLE_NAMES if settlement is not None else SEA_BATTLE_NAMES[1::2]
+    return rng.choice(pool) % data
+
+
+SEA_OPENINGS = (
+    "Флоты сходятся при попутном ветре.",
+    "Паруса замечают на рассвете, к полудню уже дерутся.",
+    "Строй ломается сразу: на воде он держится хуже, чем на суше.",
+    "Бой начинается со стрел и кончается абордажем.",
+    "Ветер меняется трижды за день и трижды меняет исход.",
+    "Мелководье решает больше, чем число кораблей.",
+    "Брандеры пускают первыми, и половина дела сделана до сшибки.",
+    "Вёсла ломают тараном, и дальше всё решают крючья.",
+)
+
+SEA_STORM = (
+    "Шквал разводит флоты прежде, чем они успевают сойтись, и топит "
+    "больше, чем сделало бы сражение.",
+    "Буря бьёт обоих: победителя в этот день нет, есть уцелевшие.",
+    "Ночной шторм разбрасывает корабли по всему морю.",
+)
+
+SEA_RESULTS = (
+    "%(winner)s побеждает: %(loser_ships)d кораблей идут ко дну.",
+    "%(winner)s остаётся хозяином воды, а победа достаётся почти даром.",
+    "Чужой флот уходит, не приняв второго боя.",
+    "Море остаётся за победителем, %(loser_name)s теряет %(loser_ships)d "
+    "кораблей.",
+    "Из флота в %(loser_all)d кораблей у побеждённых остаётся половина.",
+    "Победа стоит %(winner_ships)d кораблей — и считается дешёвой.",
+)
+
+SEA_AFTER = (
+    "Тонущих подбирают только свои.",
+    "Обломки выносит на берег ещё месяц.",
+    "Пленных гребцов делят как добычу.",
+    "Победитель входит в чужую гавань без единого выстрела.",
+    "Весть о битве меняет цены на соль по всему побережью.",
+    "Уцелевшие корабли чинят всю зиму.",
+)
+
+
+def sea_battle_text(rng, battle, winner, loser, winner_ships: int,
+                    loser_ships: int, loser_all: int, storm: bool):
+    data = {
+        "winner": cap(polity_nom(winner)), "loser_name": loser.name,
+        "winner_ships": winner_ships, "loser_ships": loser_ships,
+        "loser_all": max(1, loser_all),
+    }
+    if storm:
+        body = rng.choice(SEA_STORM)
+    else:
+        # «Победа стоит нуля кораблей» звучит глупо: такие обороты
+        # оставляем тем боям, где потери и впрямь были.
+        pool = [item for item in SEA_RESULTS
+                if ("%(winner_ships)d" not in item or winner_ships > 0)
+                and ("%(loser_ships)d" not in item or loser_ships > 0)]
+        body = rng.choice(pool or SEA_RESULTS[:1]) % data
+    return (battle.name,
+            "%s %s %s" % (cap(rng.choice(SEA_OPENINGS)), body,
+                          rng.choice(SEA_AFTER)))
+
+
+BLOCKADE_START = (
+    "Флот запирает гавань города по имени %(city)s: ни войти, ни выйти.",
+    "Перед гаванью города по имени %(city)s встают чужие паруса, и торговля "
+    "встаёт вместе с ними.",
+    "Блокада порта начинается буднично: два корабля поперёк входа.",
+)
+
+BLOCKADE_HOLD = (
+    "Гавань заперта второй год. В городе едят рыбу и ждут.",
+    "Прорваться пробуют дважды; оба раза возвращаются не все.",
+    "Блокада держится, цены в городе растут втрое.",
+)
+
+BLOCKADE_END = (
+    "Блокаду снимают: флот ушёл к другим берегам.",
+    "Осенние штормы разгоняют блокаду вернее вылазки.",
+    "Гавань освобождает подошедший флот союзников.",
+)
+
+
+def blockade_text(rng, settlement, stage: str, years: int):
+    data = {"city": settlement.name}
+    if stage == "начало":
+        return ("Блокада гавани: %s" % settlement.name,
+                cap(rng.choice(BLOCKADE_START) % data))
+    if stage == "держится":
+        return ("Блокада продолжается: %s" % settlement.name,
+                "%s %s" % (cap(rng.choice(BLOCKADE_HOLD)),
+                           "Гавань заперта %s." % years_text(max(1, years))))
+    return ("Блокада снята: %s" % settlement.name,
+            "%s %s" % (cap(rng.choice(BLOCKADE_END)),
+                       "Она держалась %s." % years_text(max(1, years))))
+
+
+LANDING_TEXTS = (
+    "Войско высаживают за морем, у города по имени %(city)s. Кони идут "
+    "вплавь, и половина не доходит.",
+    "Десант сходит на берег в виду города по имени %(city)s прежде, чем "
+    "его успевают заметить.",
+    "Высадку ведут ночью, у самых стен города по имени %(city)s.",
+    "Корабли выбрасывают на песок у города по имени %(city)s: обратно "
+    "плыть никто не собирается.",
+)
+
+LANDING_AFTER = (
+    "Первый день на чужом берегу решает всё.",
+    "Обоза нет: кормиться будут тем, что найдут.",
+    "Местные уходят в холмы, не приняв боя.",
+    "Гавань берут с моря и с суши разом.",
+)
+
+
+def landing_text(rng, settlement):
+    return ("Высадка за морем: %s" % settlement.name,
+            "%s %s" % (cap(rng.choice(LANDING_TEXTS)
+                           % {"city": settlement.name}),
+                       rng.choice(LANDING_AFTER)))
 
 
 # ---------------------------------------------------------------------------

@@ -296,6 +296,10 @@ def enthrone(ctx, polity, heir, date: Date, year: int, choice,
             race_id=polity.race_id,
         )
 
+    # Новый государь пересматривает клятвы прежнего.
+    from . import diplomacy as diplomacy_mod
+    diplomacy_mod.review_pacts(ctx, polity, year)
+
     if regent is not None:
         title, text = texts.regency_start(rng, polity, heir, regent, regency_until)
         if "регент" not in regent.roles:

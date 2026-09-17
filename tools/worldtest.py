@@ -147,6 +147,41 @@ def nobility_line(world, polity, year: int) -> str:
     return "%s | верхушка: %s" % (ladder or "ступени не разведены", top)
 
 
+def politics_line(world, polity, year: int) -> str:
+    """Договоры, союз и лучшие с худшими соседи."""
+    pacts = world.pacts_of(polity)
+    parts = []
+    if pacts:
+        counts = Counter(pact.kind for pact in pacts)
+        parts.append("договоры: " + ", ".join(
+            "%s %d" % (kind, count) for kind, count in sorted(counts.items())))
+    league = world.leagues.get(polity.league_id)
+    if league is not None:
+        parts.append("в союзе «%s» (%s, держав %d)"
+                     % (league.name, league.kind, len(league.member_ids)))
+    rows = [(value, other_id) for other_id, value
+            in (polity.relations or {}).items()
+            if other_id in world.polities
+            and world.polities[other_id].status == ACTIVE]
+    if rows:
+        rows.sort(reverse=True)
+        best = world.polities[rows[0][1]]
+        worst = world.polities[rows[-1][1]]
+        parts.append("ближе всех %s (%+.2f), дальше всех %s (%+.2f)"
+                     % (best.name, rows[0][0], worst.name, rows[-1][0]))
+    if polity.tribute_to:
+        lord = world.polities.get(polity.tribute_to)
+        parts.append("платит дань державе %s" % (lord.name if lord else "?"))
+    forts = world.fortresses_of(polity)
+    if forts:
+        parts.append("крепостей %d" % len(forts))
+    ships = warfare.fleet(world, polity, RACES_BY_ID[polity.race_id],
+                          world.era_index_at(year))
+    if ships:
+        parts.append("флот до %d кораблей" % ships)
+    return "; ".join(parts) if parts else "ни с кем не связана"
+
+
 def faith_line(world, faith_id: str) -> str:
     if not faith_id or faith_id not in world.faiths:
         return "государственной веры нет"
@@ -274,6 +309,7 @@ def snapshot(world, year: int, out) -> None:
             for r in polity.region_ids if r in world.regions))
         out("   правитель: %s" % ruler_line(world, polity, year))
         out("   знать: %s" % nobility_line(world, polity, year))
+        out("   политика: %s" % politics_line(world, polity, year))
         out("   наследование: %s" % SUCCESSION_NAMES.get(polity.succession,
                                                          polity.succession))
         if polity.peoples:
@@ -499,7 +535,42 @@ def audit(world) -> list:
         if odd:
             bad("войн со сражениями, но без потерь: %d" % len(odd))
 
-    # 11. Повторы текста — главное, из-за чего мир перестаёт читаться живым.
+    # 11. Политика: договоры, союзы, крепости, роты, море.
+    if len(world.polities) >= 6:
+        if not world.pacts:
+            note("за всю историю не заключено ни одного договора")
+        else:
+            kinds = Counter(pact.kind for pact in world.pacts.values())
+            if len(kinds) < 3:
+                note("договоры бывают лишь %d видов — политика однообразна"
+                     % len(kinds))
+            if not world.leagues:
+                note("союзов держав не сложилось ни разу")
+        forts = list(world.fortresses.values())
+        if forts:
+            moved = [item for item in forts if item.times_taken]
+            if not moved:
+                note("ни одна крепость за всю историю не сменила знамени")
+            ancient = max(forts, key=lambda f: (
+                (f.ended.year if f.ended else world.total_years) - f.built.year))
+            span = (ancient.ended.year if ancient.ended else world.total_years) \
+                - ancient.built.year
+            if span < 200:
+                note("крепости не стоят и двух веков — они должны переживать "
+                     "своих строителей")
+        elif len(world.polities) >= 10:
+            note("крепостей не построено ни одной")
+
+    for pact in world.pacts.values():
+        if pact.first_id == pact.second_id:
+            bad("договор заключён сам с собой")
+            break
+    for war in world.wars.values():
+        if set(war.attacker_allies) & set(war.defender_allies):
+            bad("в войне «%s» союзник на обеих сторонах" % war.name)
+            break
+
+    # 12. Повторы текста — главное, из-за чего мир перестаёт читаться живым.
     sentences = Counter()
     for event in world.events:
         for piece in re.split(r"(?<=[.!?])\s+", event.text):

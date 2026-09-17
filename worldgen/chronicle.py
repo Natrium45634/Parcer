@@ -369,9 +369,20 @@ def render_peoples(world) -> str:
             rows.append("      %s" % line)
     rows.append("")
 
+    from . import races as races_mod
+    from . import troops as troops_mod
+    from . import warfare
+
     for polity in sorted(living, key=lambda p: -p.population):
+        race = races_mod.get_race(polity.race_id)
         rows.append("  %s" % polity.full_name)
         rows.append("      %s" % (pol.describe(polity, world) or "нет сведений"))
+        harbours = warfare.ports(world, polity)
+        arms = "      войско: %s" % troops_mod.describe(race)
+        if harbours:
+            arms += "; портов %d, флот до %d кораблей" % (
+                len(harbours), warfare.fleet(world, polity, race, 4))
+        rows.append(arms)
         if polity.policy:
             rows.append("      закон о народах: %s"
                         % pol.POLICY_DESCRIPTIONS.get(polity.policy, polity.policy))
@@ -479,6 +490,162 @@ def render_trade(world) -> str:
             rows.append("      сытость: %s"
                         % ("впроголодь" if polity.hunger < 0.45 else "голодает"))
         rows.append("")
+    return "\n".join(rows)
+
+
+def render_soldiery(world) -> str:
+    """Крепости и вольные роты: то, что остаётся от войны между войнами."""
+    from .models import ACTIVE as ACTIVE_STATE
+
+    rows = ["КРЕПОСТИ И ВОЛЬНЫЕ РОТЫ", ""]
+
+    forts = sorted(world.fortresses.values(), key=lambda f: f.built.ordinal)
+    if forts:
+        header = "  %-30s %-20s %8s %-24s %6s %s" % (
+            "Крепость", "Земля", "Заложена", "Чьё знамя", "Взятий", "Состояние")
+        rows.append(header)
+        rows.append("  " + "-" * (len(header) - 2))
+        for fortress in forts:
+            region = world.regions.get(fortress.region_id)
+            holder = world.polities.get(fortress.polity_id)
+            state = fortress.status
+            if fortress.ended is not None:
+                state = "%s (%d)" % (fortress.status, fortress.ended.year)
+            rows.append("  %-30s %-20s %8d %-24s %6d %s" % (
+                fortress.full_name[:30],
+                (region.name if region else "—")[:20], fortress.built.year,
+                (holder.full_name if holder else "без знамени")[:24],
+                fortress.times_taken, state))
+            if len(fortress.holders) > 1:
+                names = []
+                for moment in fortress.holders[:8]:
+                    owner = world.polities.get(moment[1]) if moment[1] else None
+                    names.append("%d: %s" % (moment[0],
+                                             owner.name if owner else "никто"))
+                rows.append("        знамёна — %s" % "; ".join(names))
+        rows.append("")
+        standing = [item for item in forts if item.status == ACTIVE_STATE]
+        if standing:
+            oldest = min(standing, key=lambda f: f.built.ordinal)
+            rows.append("  Стоит крепостей: %d; старейшая — %s, заложена в %d году."
+                        % (len(standing), oldest.full_name, oldest.built.year))
+        rows.append("")
+
+    companies = sorted(world.companies.values(),
+                       key=lambda c: c.founded.ordinal)
+    if not companies:
+        rows.append("  Вольных рот в этом мире не заводилось.")
+        return "\n".join(rows)
+
+    rows.append("  ВОЛЬНЫЕ РОТЫ")
+    header = "  %-26s %8s %7s %8s %7s %s" % (
+        "Рота", "Собрана", "Копий", "Нанимали", "Грабежей", "Судьба")
+    rows.append(header)
+    rows.append("  " + "-" * (len(header) - 2))
+    for company in companies:
+        captain = world.figures.get(company.captain_id)
+        fate = company.end_reason or (
+            "служит державе" if company.employer_id else "ищет нанимателя")
+        rows.append("  %-26s %8d %7d %8d %7d %s" % (
+            company.name[:26], company.founded.year, company.men,
+            company.wars, company.raids, fate))
+        if captain is not None:
+            rows.append("        капитан: %s" % captain.name)
+    rows.append("")
+    rows.append("  Всего рот: %d, разбоев за ними: %d"
+                % (len(companies), sum(c.raids for c in companies)))
+    return "\n".join(rows)
+
+
+def render_politics(world) -> str:
+    """Справочник политики: союзы держав, договоры и отношения."""
+    from . import diplomacy as dip
+    from .models import ACTIVE
+
+    rows = ["ПОЛИТИКА: СОЮЗЫ, ДОГОВОРЫ И ОТНОШЕНИЯ", ""]
+
+    leagues = sorted(world.leagues.values(),
+                     key=lambda item: item.founded.ordinal)
+    if leagues:
+        rows.append("  СОЮЗЫ ДЕРЖАВ")
+        for league in leagues:
+            leader = world.polities.get(league.leader_id)
+            span = "%d—%s" % (league.founded.year,
+                              league.ended.year if league.ended else "…")
+            rows.append("    %-38s %-16s %-12s держав %d, войн %d"
+                        % (league.name[:38], league.kind, span,
+                           len(league.member_ids), len(league.war_ids)))
+            names = []
+            for polity_id in league.member_ids:
+                polity = world.polities.get(polity_id)
+                names.append(polity.full_name if polity else "?")
+            rows.append("        во главе: %s; в союзе: %s"
+                        % (leader.full_name if leader else "—",
+                           ", ".join(names)))
+            if league.end_reason:
+                rows.append("        распался: %s" % league.end_reason)
+        rows.append("")
+
+    pacts = sorted(world.pacts.values(), key=lambda item: item.signed.ordinal)
+    if not pacts:
+        rows.append("  Держав, способных договариваться, в этом мире не нашлось.")
+        return "\n".join(rows)
+
+    header = "  %-8s %-24s %-44s %-8s %s" % (
+        "Год", "Договор", "Стороны", "Лет", "Чем кончился")
+    rows.append(header)
+    rows.append("  " + "-" * (len(header) - 2))
+    for pact in pacts:
+        first = world.polities.get(pact.first_id)
+        second = world.polities.get(pact.second_id)
+        years = (pact.ended.year - pact.signed.year) if pact.ended else \
+            (world.total_years - pact.signed.year)
+        rows.append("  %-8d %-24s %-44s %-8d %s" % (
+            pact.signed.year, dip.PACT_NAMES.get(pact.kind, pact.kind)[:24],
+            ("%s — %s" % (first.full_name if first else "?",
+                          second.full_name if second else "?"))[:44],
+            max(0, years), pact.end_reason or "действует"))
+        extra = []
+        if pact.reasons:
+            extra.append("свело: %s" % ", ".join(pact.reasons))
+        if pact.wars_together:
+            extra.append("воевали вместе %d раз" % pact.wars_together)
+        if pact.betrayals:
+            extra.append("клятву нарушали %d раз" % pact.betrayals)
+        if extra:
+            rows.append("        %s" % "; ".join(extra))
+    rows.append("")
+
+    # Кто кого на конец истории любит и ненавидит.
+    pairs = []
+    seen = set()
+    for polity_id in world.active_polities:
+        polity = world.polities[polity_id]
+        for other_id, value in (polity.relations or {}).items():
+            other = world.polities.get(other_id)
+            if other is None or other.status != ACTIVE:
+                continue
+            key = tuple(sorted((polity_id, other_id)))
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append((value, polity, other))
+    if pairs:
+        pairs.sort(key=lambda row: -row[0])
+        rows.append("  ОТНОШЕНИЯ НА КОНЕЦ ИСТОРИИ")
+        for value, first, second in pairs[:6]:
+            rows.append("    %+.2f  %-14s %s — %s"
+                        % (value, dip.relation_word(value), first.full_name,
+                           second.full_name))
+        if len(pairs) > 6:
+            rows.append("    …")
+            for value, first, second in pairs[-6:]:
+                rows.append("    %+.2f  %-14s %s — %s"
+                            % (value, dip.relation_word(value),
+                               first.full_name, second.full_name))
+    rows.append("")
+    rows.append("  Всего договоров: %d, из них действует: %d; союзов: %d"
+                % (len(pacts), len(world.active_pacts), len(world.leagues)))
     return "\n".join(rows)
 
 
@@ -898,7 +1065,9 @@ def full_text(world) -> str:
         render_folks(world),
         render_trade(world),
         render_expeditions(world),
+        render_politics(world),
         render_wars(world),
+        render_soldiery(world),
         render_dynasties(world),
         render_peoples(world),
         render_houses(world),

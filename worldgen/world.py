@@ -13,8 +13,9 @@ import heapq
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Battle, Calamity, Camp, Deity, Event, Expedition, Faith,
-                     Feud, Figure, Folk, House, Polity, Region, Reign, Relic,
-                     Settlement, Temple, TradeRoute, Tribe, War)
+                     Company, Feud, Figure, Folk, Fortress, House, League, Pact,
+                     Polity, Region, Reign, Relic, Settlement, Temple,
+                     TradeRoute, Tribe, War)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
@@ -73,6 +74,14 @@ class World:
         self.wars = {}
         self.active_wars = []
         self.feuds = {}
+        self.pacts = {}
+        self.active_pacts = []
+        self.fortresses = {}
+        self.active_fortresses = []
+        self.companies = {}
+        self.active_companies = []
+        self.leagues = {}
+        self.active_leagues = []
         self.notes = {}                # свободные заметки для будущих блоков
         self.map_source = ""           # файл карты, если мир построен по ней
         self.geography = {}            # имена океанов, материков, хребтов
@@ -297,6 +306,106 @@ class World:
         if feud is not None:
             feud.end = date
             feud.deaths += war.deaths
+
+    # --- крепости и вольные роты ----------------------------------------
+
+    def add_fortress(self, **kwargs) -> Fortress:
+        fortress = Fortress(id=self.next_id("K"), **kwargs)
+        self.fortresses[fortress.id] = fortress
+        self.active_fortresses.append(fortress.id)
+        if fortress.polity_id:
+            fortress.holders.append([fortress.built.year, fortress.polity_id])
+        return fortress
+
+    def end_fortress(self, fortress, date: Date, reason: str,
+                     status: str = "разрушено") -> None:
+        if fortress.status != ACTIVE:
+            return
+        fortress.status = status
+        fortress.ended = date
+        fortress.end_reason = reason
+        if fortress.id in self.active_fortresses:
+            self.active_fortresses.remove(fortress.id)
+
+    def fortresses_of(self, polity) -> list:
+        return [self.fortresses[fid] for fid in self.active_fortresses
+                if self.fortresses[fid].polity_id == polity.id]
+
+    def add_company(self, **kwargs) -> Company:
+        company = Company(id=self.next_id("C"), **kwargs)
+        self.companies[company.id] = company
+        self.active_companies.append(company.id)
+        return company
+
+    def end_company(self, company, date: Date, reason: str) -> None:
+        if company.status != ACTIVE:
+            return
+        company.status = ENDED
+        company.ended = date
+        company.end_reason = reason
+        if company.id in self.active_companies:
+            self.active_companies.remove(company.id)
+
+    # --- политика -------------------------------------------------------
+
+    def add_pact(self, **kwargs) -> Pact:
+        pact = Pact(id=self.next_id("P"), **kwargs)
+        self.pacts[pact.id] = pact
+        self.active_pacts.append(pact.id)
+        for polity_id in (pact.first_id, pact.second_id):
+            polity = self.polities.get(polity_id)
+            if polity is not None and pact.id not in polity.pact_ids:
+                polity.pact_ids.append(pact.id)
+        return pact
+
+    def end_pact(self, pact, date: Date, reason: str) -> None:
+        if pact.status != ACTIVE:
+            return
+        pact.status = ENDED
+        pact.ended = date
+        pact.end_reason = reason
+        if pact.id in self.active_pacts:
+            self.active_pacts.remove(pact.id)
+
+    def pacts_of(self, polity, only_active: bool = True) -> list:
+        rows = []
+        for pact_id in polity.pact_ids:
+            pact = self.pacts.get(pact_id)
+            if pact is None or (only_active and pact.status != ACTIVE):
+                continue
+            rows.append(pact)
+        return rows
+
+    def pact_between(self, first_id: str, second_id: str):
+        pair = {first_id, second_id}
+        for pact_id in self.active_pacts:
+            pact = self.pacts[pact_id]
+            if {pact.first_id, pact.second_id} == pair:
+                return pact
+        return None
+
+    def add_league(self, **kwargs) -> League:
+        league = League(id=self.next_id("U"), **kwargs)
+        self.leagues[league.id] = league
+        self.active_leagues.append(league.id)
+        for polity_id in league.member_ids:
+            polity = self.polities.get(polity_id)
+            if polity is not None:
+                polity.league_id = league.id
+        return league
+
+    def end_league(self, league, date: Date, reason: str) -> None:
+        if league.status != ACTIVE:
+            return
+        league.status = ENDED
+        league.ended = date
+        league.end_reason = reason
+        if league.id in self.active_leagues:
+            self.active_leagues.remove(league.id)
+        for polity_id in league.member_ids:
+            polity = self.polities.get(polity_id)
+            if polity is not None and polity.league_id == league.id:
+                polity.league_id = ""
 
     def add_feud(self, **kwargs) -> Feud:
         feud = Feud(id=self.next_id("F"), **kwargs)

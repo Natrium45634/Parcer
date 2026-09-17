@@ -281,10 +281,18 @@ class ChronicleApp(tk.Tk):
              "Погибло", "Исход", "Следов"),
             (230, 150, 130, 110, 70, 100, 100, 190, 70), self._on_calamity_open,
             filler=lambda: self._fill_calamities())
+        self.politics_text = self._add_text_tab(
+            "Политика",
+            filler=lambda: self._set_text(self.politics_text,
+                                          chronicle.render_politics(self.world)))
         self.wars_text = self._add_text_tab(
             "Войны",
             filler=lambda: self._set_text(self.wars_text,
                                           chronicle.render_wars(self.world)))
+        self.soldiery_text = self._add_text_tab(
+            "Крепости и роты",
+            filler=lambda: self._set_text(self.soldiery_text,
+                                          chronicle.render_soldiery(self.world)))
         self.dynasty_text = self._add_text_tab(
             "Правители",
             filler=lambda: self._set_text(self.dynasty_text,

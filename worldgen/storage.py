@@ -12,9 +12,9 @@ import io
 import json
 
 from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, EraSpan,
-                     Event, Expedition, Faith, Feud, Figure, Folk, House, Polity,
-                     Region, Reign, Relic, Settlement, Temple, TradeRoute, War,
-                     Tribe)
+                     Company, Event, Expedition, Faith, Feud, Figure, Folk,
+                     Fortress, House, League, Pact, Polity, Region, Reign, Relic,
+                     Settlement, Temple, TradeRoute, War, Tribe)
 from .timeline import Date
 from .world import World
 
@@ -23,7 +23,7 @@ FORMAT_VERSION = 1
 
 _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
                 "created", "awakened", "revealed", "born", "opened",
-                "closed", "married"}
+                "closed", "married", "signed", "built"}
 
 
 def _defaults(cls) -> dict:
@@ -101,6 +101,13 @@ def world_to_dict(world: World) -> dict:
                     for item in world.battles.values()],
         "wars": [_compact(War, item.to_dict()) for item in world.wars.values()],
         "feuds": [_compact(Feud, item.to_dict()) for item in world.feuds.values()],
+        "pacts": [_compact(Pact, item.to_dict()) for item in world.pacts.values()],
+        "fortresses": [_compact(Fortress, item.to_dict())
+                       for item in world.fortresses.values()],
+        "companies": [_compact(Company, item.to_dict())
+                      for item in world.companies.values()],
+        "leagues": [_compact(League, item.to_dict())
+                    for item in world.leagues.values()],
         "dark_ages": world.dark_ages,
         "deities": [_compact(Deity, item.to_dict()) for item in world.deities.values()],
         "faiths": [_compact(Faith, item.to_dict()) for item in world.faiths.values()],
@@ -180,6 +187,26 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("feuds", ()):
         feud = Feud(**_clean(Feud, item))
         world.feuds[feud.id] = feud
+    for item in data.get("fortresses", ()):
+        fortress = Fortress(**_clean(Fortress, item))
+        world.fortresses[fortress.id] = fortress
+        if fortress.status == ACTIVE:
+            world.active_fortresses.append(fortress.id)
+    for item in data.get("companies", ()):
+        company = Company(**_clean(Company, item))
+        world.companies[company.id] = company
+        if company.status == ACTIVE:
+            world.active_companies.append(company.id)
+    for item in data.get("pacts", ()):
+        pact = Pact(**_clean(Pact, item))
+        world.pacts[pact.id] = pact
+        if pact.status == ACTIVE:
+            world.active_pacts.append(pact.id)
+    for item in data.get("leagues", ()):
+        league = League(**_clean(League, item))
+        world.leagues[league.id] = league
+        if league.status == ACTIVE:
+            world.active_leagues.append(league.id)
     world.dark_ages = list(data.get("dark_ages") or ())
     for item in data.get("deities", ()):
         deity = Deity(**_clean(Deity, item))
