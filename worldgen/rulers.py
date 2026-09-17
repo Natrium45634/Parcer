@@ -293,10 +293,10 @@ def court_grip(world, polity) -> float:
     у праведника находятся обиженные, у чудовища — доведённые.
     """
     ruler = ruler_of(world, polity)
-    value = 1.0 - (skill_of(ruler, "двор") - NEUTRAL) / float(NEUTRAL) * 0.45
+    value = 1.0 - (skill_of(ruler, "двор") - NEUTRAL) / float(NEUTRAL) * 0.35
     if ruler is not None:
-        value *= 1.0 + 0.07 * abs(int(getattr(ruler, "alignment", 0) or 0))
-    return max(0.3, value)
+        value *= 1.0 + 0.06 * abs(int(getattr(ruler, "alignment", 0) or 0))
+    return max(0.45, min(1.3, value))
 
 
 def zeal(world, polity) -> float:

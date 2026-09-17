@@ -395,7 +395,9 @@ def _maybe_shift_titular(ctx, polity, rng, year: int, minorities) -> bool:
     if not rng.chance(0.25):
         return False
 
-    date = ctx.date_in(rng, year)
+    running = world.current_reign(polity)
+    date = ctx.date_in(rng, year,
+                       running.start if running is not None else None)
     capital = world.settlements.get(polity.capital_id)
     region_id = capital.region_id if capital is not None else (
         polity.region_ids[0] if polity.region_ids else "")
@@ -409,8 +411,7 @@ def _maybe_shift_titular(ctx, polity, rng, year: int, minorities) -> bool:
 
     reign = world.current_reign(polity)
     if reign is not None and reign.end is None:
-        reign.end = date
-        reign.end_reason = "престол перешёл к большинству"
+        succession.close_reign(ctx, reign, date, "престол перешёл к большинству")
     houses_mod.found_house(ctx, heir, year, date, seat=capital, rank=GREAT,
                            polity=polity, importance=2)
     succession.install_founder(ctx, polity, heir, capital, date, year)
@@ -454,7 +455,11 @@ def _maybe_revolt(ctx, polity, rng, year: int, minorities) -> None:
         polity.grievance[race_id] = 0.0
         return
 
-    date = ctx.date_in(rng, year)
+    # Восстание не может случиться раньше, чем началось нынешнее правление:
+    # иначе новое правление открывается задом наперёд.
+    running = world.current_reign(polity)
+    date = ctx.date_in(rng, year,
+                       running.start if running is not None else None)
     sex = "f" if rng.chance(0.4) else "m"
     leader = ctx.make_figure(
         rng, race, year, role="вождь восстания", region_id=cities[0].region_id,

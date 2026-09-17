@@ -637,6 +637,7 @@ def render_houses(world) -> str:
     """Справочник знатных родов: кто, чей, какого достоинства и нрава."""
     from . import narrative_aristocracy as texts
     from . import races as races_mod
+    from .models import ACTIVE, MINOR
 
     rows = ["ЗНАТНЫЕ РОДА", ""]
     header = "  %-24s %-16s %8s %-12s %-18s %-22s %6s %s" % (
@@ -654,6 +655,13 @@ def render_houses(world) -> str:
             house.full_name, races_mod.get_race(house.race_id).name,
             house.founded.year, house.rank, (house.style or "—")[:18],
             (seat.name if seat else "—")[:22], house.alive_count, state))
+        # Подробность — только о тех, кто что-то значил: за десять тысяч
+        # лет угасших малых родов набираются тысячи, и строка нрава на
+        # каждого превращает справочник в стену текста.
+        notable = (house.status == ACTIVE or house.rank != MINOR
+                   or house.thrones or house.charters)
+        if not notable:
+            continue
         note = texts.house_character(house)
         if house.motto:
             note += " · девиз %s" % house.motto

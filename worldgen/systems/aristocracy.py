@@ -2,16 +2,20 @@
 """Знать как политическая сила.
 
 Раз в десятилетие держава смотрит на свою аристократию, а аристократия —
-на державу. Происходит три вещи.
+на державу. Происходит четыре вещи.
 
-1. **Лестница.** Чем крупнее и старше страна, тем больше в ней ступеней
+1. **Лен.** Город, у которого нет своего рода, корона отдаёт в лен — и
+   знати прибавляется вместе с землями. Покорённому городу дают знать из
+   его же народа: так в многонародной державе появляются чужие фамилии
+   в общем совете.
+2. **Лестница.** Чем крупнее и старше страна, тем больше в ней ступеней
    знатности. Молодое княжество знает две, тысячелетняя империя — шесть.
    Дома расставляются по ним по силе: наверху единицы, внизу большинство.
    Переход на высшую ступень — событие для летописи.
-2. **Счёт обид.** Богатый, честолюбивый и чуждый государю по нраву род
+3. **Счёт обид.** Богатый, честолюбивый и чуждый государю по нраву род
    копит недовольство. Государь, умеющий держать двор, гасит его; слабый
    и вздорный — растит.
-3. **Дело.** Накопив довольно, знать переходит к действию: требует
+4. **Дело.** Накопив довольно, знать переходит к действию: требует
    вольностей, поднимает междоусобицу за венец или уводит свою вотчину
    из состава державы вовсе.
 """
@@ -32,7 +36,9 @@ from ..timeline import years_text
 FRONDA_RATE = 0.30          # шанс за десятилетие для достаточно злого рода
 WAR_RATE = 0.16
 SECESSION_RATE = 0.12
+SECESSION_LEVEL = 0.9       # с какого недовольства род думает об отложении
 MIN_CITIES_TO_SPLIT = 4     # державу в три города знать не делит
+FIEF_RATE = 0.40            # шанс за десятилетие пожаловать город в лен
 
 
 # ---------------------------------------------------------------------------
@@ -54,8 +60,43 @@ def upkeep(ctx, year: int, period: int) -> None:
         if not houses:
             continue
         rng = ctx.rng("aristocracy", polity.id, year)
+        _grant_fief(ctx, polity, houses, year, period, rng)
+        houses = [world.houses[house_id] for house_id in polity.house_ids
+                  if house_id in world.houses
+                  and world.houses[house_id].status == ACTIVE]
         _ranks(ctx, polity, race, houses, year, rng)
         _politics(ctx, polity, race, houses, year, period, rng)
+
+
+def _grant_fief(ctx, polity, houses, year: int, period: int, rng) -> None:
+    """Город без своего рода корона отдаёт в лен — и знати прибавляется.
+
+    Держава, растущая завоеваниями, иначе остаётся с одним-единственным
+    домом на двадцать городов: править есть кем, служить — некому. А
+    покорённому городу дают его собственную знать, из его же народа: так
+    в многонародной державе появляются чужие фамилии в общем совете.
+    """
+    world = ctx.world
+    seated = {house.seat_id for house in houses if house.seat_id}
+    free = [city for city in _live_cities(world, polity)
+            if city.id not in seated and not city.is_capital]
+    if not free or len(houses) >= len(_live_cities(world, polity)):
+        return
+    if not rng.chance(FIEF_RATE * (period / 10.0)):
+        return
+
+    seat = rng.weighted([(city, float(max(60, city.population))) for city in free])
+    seat_race = races_mod.get_race(seat.race_id)
+    if not seat_race.has_nobility:
+        return
+    date = ctx.date_in(rng, year)
+    sex = "f" if rng.chance(0.42) else "m"
+    founder = ctx.make_figure(
+        rng, seat_race, year, role="новая знать", region_id=seat.region_id,
+        sex=sex, home_id=seat.id, epithet_chance=0.3)
+    houses_mod.found_house(ctx, founder, year, date, seat=seat, rank=MINOR,
+                           polity=polity, announce=rng.chance(0.3),
+                           importance=1)
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +197,8 @@ def _politics(ctx, polity, race, houses, year: int, period: int, rng) -> None:
     # либо идёт за венцом. Потому фронда и разбирается последней —
     # иначе она год за годом спускала бы пар тем, кому пора воевать.
     if house.discontent >= arist.WAR_LEVEL:
-        if len(_live_cities(world, polity)) >= MIN_CITIES_TO_SPLIT \
+        if house.discontent >= SECESSION_LEVEL \
+                and len(_live_cities(world, polity)) >= MIN_CITIES_TO_SPLIT \
                 and rng.chance(SECESSION_RATE * (period / 10.0)) \
                 and _secede(ctx, polity, race, house, year, rng):
             return
@@ -228,6 +270,11 @@ def _civil_war(ctx, polity, race, house, year: int, rng) -> None:
         subjects=[house.id, polity.id], race_id=race.id)
 
     _war_toll(ctx, polity, length, rng)
+    # Война всех утомила: остальные дома притихают на век-другой, чем бы
+    # она ни кончилась. Без этого держава уходит в вечную смуту.
+    for other in world.houses_of_polity(polity):
+        if other.id != house.id:
+            other.discontent = max(0.0, other.discontent * 0.45)
     if crown_wins:
         house.discontent = 0.0
         house.prestige = max(0.15, house.prestige * 0.4)

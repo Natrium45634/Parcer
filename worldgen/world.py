@@ -394,6 +394,8 @@ class World:
         house = self.houses.get(polity.house_id)
         if house is not None and house.rank == "правящий":
             house.rank = "великий"
+            house.rung = -1
+            house.style = ""
         polity.status = status
         polity.ended = date
         polity.end_reason = reason

@@ -755,18 +755,23 @@ class NameForge:
         # Всё занято — добавляем отличающий признак. Людям он идёт вслед
         # («Скирек Младший»), местам — впереди («Новый Вестгард»).
         # Признак согласуется с полом: не «Шерра Третий», а «Шерра Третья».
-        if bucket.startswith("person") or bucket == "deity":
+        person = bucket.startswith("person") or bucket == "deity"
+        if person:
             suffixes = (FEMALE_MARKS if sex == "f" else MALE_MARKS)
             for suffix in suffixes:
                 candidate = "%s %s" % (name, suffix)
                 if candidate not in taken:
                     taken.add(candidate)
                     return candidate
-        for prefix in ("Новый", "Верхний", "Нижний", "Дальний", "Старый", "Второй"):
-            candidate = "%s %s" % (prefix, name)
-            if candidate not in taken:
-                taken.add(candidate)
-                return candidate
+        else:
+            # Признаки места людям не годятся: «Второй Хьёра» — это не
+            # женское имя, а ошибка согласования.
+            for prefix in ("Новый", "Верхний", "Нижний", "Дальний", "Старый",
+                           "Второй"):
+                candidate = "%s %s" % (prefix, name)
+                if candidate not in taken:
+                    taken.add(candidate)
+                    return candidate
         index = 2
         while "%s %d" % (name, index) in taken:
             index += 1

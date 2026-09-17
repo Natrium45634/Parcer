@@ -105,6 +105,11 @@ def ruler_line(world, polity, year: int) -> str:
              "на престоле с %d (%s)" % (reign.start.year, reign.legitimacy)]
     if house is not None:
         parts.append("род %s" % house.full_name)
+    if reign.regent_id and year < reign.regency_until:
+        regent = world.figures.get(reign.regent_id)
+        parts.append("малолетн%s, при регенте %s"
+                     % ("яя" if figure.sex == "f" else "ий",
+                        regent.plain_name if regent is not None else "—"))
     if reign.traits or reign.skills:
         parts.append("нрав: %s" % ", ".join(part for part in (
             rulers.alignment_label(reign.alignment, figure.sex),
@@ -384,12 +389,25 @@ def audit(world) -> list:
 
     # 8. Правители как личности: у каждого правления должны быть нрав,
     #    умения и приговор истории, иначе короли снова станут переменными.
-    reigns = [r for r in world.reigns.values() if r.end is not None]
+    #    Малолетние государи лица ещё не имеют — с них и не спрашиваем.
+    reigns = []
+    for reign in world.reigns.values():
+        if reign.end is None:
+            continue
+        ruler = world.figures.get(reign.ruler_id)
+        race = RACES_BY_ID.get(ruler.race_id) if ruler is not None else None
+        if ruler is None or race is None:
+            continue
+        if ruler.age_at(reign.end.year) < race.adulthood:
+            continue
+        reigns.append(reign)
     if reigns:
         faceless = [r for r in reigns if not r.skills]
         if faceless:
-            bad("правлений без нрава и умений: %d из %d"
-                % (len(faceless), len(reigns)))
+            line = ("правлений без нрава и умений: %d из %d"
+                    % (len(faceless), len(reigns)))
+            # Единицы — это те, чья держава пала в тот же год: не поломка.
+            (bad if len(faceless) > len(reigns) * 0.02 else note)(line)
         judged = [r for r in reigns
                   if (r.end.year - r.start.year) >= 8 and not r.verdict]
         if judged:

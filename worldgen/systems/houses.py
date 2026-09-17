@@ -91,6 +91,10 @@ def make_royal(ctx, house, polity, year: int, date, announce: bool = True) -> No
     previous = world.houses.get(polity.house_id)
     if previous is not None and previous.id != house.id and previous.rank == ROYAL:
         previous.rank = GREAT
+        # Свергнутый дом теряет и королевский титул: иначе в списке знати
+        # рядом с герцогами годами стоит «император» без державы.
+        previous.rung = -1
+        previous.style = ""
     house.rank = ROYAL
     house.thrones += 1
     house.prestige += 2.5
@@ -129,6 +133,10 @@ def note_death(ctx, figure, date, year: int) -> None:
 
     rng = ctx.rng("house_end", year, house.id)
     world.end_house(house, date, "не осталось наследников", EXTINCT)
+    # Угасший род больше не числится знатью страны: иначе за тысячу лет
+    # в списке накапливаются сотни мёртвых имён, и держава считается
+    # тем беспокойнее, чем больше в ней покойников.
+    detach(world, house, world.polities.get(house.polity_id))
     # Малые роды угасают постоянно — о них летопись молчит.
     if house.rank == MINOR and house.thrones == 0 and not rng.chance(0.12):
         return

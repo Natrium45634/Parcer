@@ -86,6 +86,10 @@ def close_reign(ctx, reign, date: Date, reason: str) -> None:
     polity = world.polities.get(reign.polity_id)
     if polity is None:
         return
+    # Тот, кто сел на престол ребёнком, а умер взрослым, должен получить
+    # лицо хотя бы к концу правления: десятилетний такт мог его не застать.
+    if not reign.skills:
+        grown_up(ctx, polity, date.year)
     world.refresh_populations()
     closing = rulers_mod.snapshot(world, polity)
     if polity.status != ACTIVE:
@@ -356,17 +360,43 @@ def _endow(ctx, polity, heir, house, year: int) -> None:
     Род и государственная вера тянут в свою сторону, но не решают: у
     доброго дома бывает чудовищный сын. Один раз за жизнь — вернувшийся
     на престол остаётся собой.
+
+    За малолетнего государя не отвечают: каков он, узнают, когда он
+    вырастет. Иначе в летописи заводится двенадцатилетний король,
+    «бесчеловечный и рано поседевший».
     """
     if heir.skills:
         return
     world = ctx.world
     race = races_mod.get_race(heir.race_id)
+    if heir.age_at(year) < race.adulthood:
+        return
     faith = world.faiths.get(polity.faith_id)
     rng = ctx.rng("nature", heir.id)
     rulers_mod.endow(rng, heir, race,
                      house_alignment=int(getattr(house, "alignment", 0) or 0),
                      faith_alignment=int(faith.alignment) if faith is not None else 0,
                      dark_tilt=ctx.dark_tilt)
+    _sync_reign(world, polity, heir)
+
+
+def _sync_reign(world, polity, ruler) -> None:
+    """Переносит нрав государя в запись о его правлении."""
+    reign = world.current_reign(polity)
+    if reign is None or reign.ruler_id != ruler.id or reign.skills:
+        return
+    reign.alignment = ruler.alignment
+    reign.skills = dict(ruler.skills)
+    reign.traits = list(ruler.traits)
+
+
+def grown_up(ctx, polity, year: int) -> None:
+    """Государь, доросший до совершеннолетия, обретает лицо."""
+    world = ctx.world
+    ruler = world.figures.get(polity.ruler_id)
+    if ruler is None or ruler.skills or not ruler.alive_at(year):
+        return
+    _endow(ctx, polity, ruler, world.houses.get(ruler.house_id), year)
 
 
 def _regnal_number(world, polity, heir) -> int:
@@ -589,9 +619,11 @@ def upkeep(ctx, year: int, period: int) -> None:
         ensure_family(ctx, ready[0], year, polity=None, announce=False)
 
     # Наследник престола со временем меняется: дети рождаются и умирают.
+    # Заодно взрослеют те, кто сел на престол ребёнком.
     for polity_id in list(world.active_polities):
         polity = world.polities[polity_id]
         race = races_mod.get_race(polity.race_id)
+        grown_up(ctx, polity, year)
         if race.heir_titles:
             mark_heir(ctx, polity, race, year)
 
@@ -616,7 +648,9 @@ def _tick_regency(ctx, year: int) -> None:
         if ruler is None or not ruler.alive_at(year):
             continue
         date = ctx.date_in(rng, year)
-        title, text = texts.regency_end(rng, polity, ruler, regent)
+        grown_up(ctx, polity, year)
+        title, text = texts.regency_end(rng, polity, ruler, regent,
+                                        character=texts.character_line(rng, ruler))
         world.add_event(
             date=date, era_index=world.era_index_at(year), kind="regency_end",
             title=title, text=text, importance=2, actors=[ruler.id],
@@ -645,14 +679,17 @@ def _instability(ctx, world, polity, year: int) -> float:
         if reign.regent_id:
             value += 0.9
         if reign.legitimacy == "узурпация" and not settled:
-            value += 0.7
-        if reign_age < race.adulthood * 0.5:
-            value *= 0.45            # только сел на престол — двор ещё присматривается
+            value += 0.45
+        if reign_age < race.adulthood:
+            # Только сел на престол — двор присматривается. Сила хватки
+            # растёт от года к году: иначе один переворот тянет за собой
+            # второй, второй третий, и держава сто поколений живёт смутой.
+            value *= 0.15 + 0.85 * (reign_age / float(max(1, race.adulthood)))
         ruler = world.figures.get(reign.ruler_id)
         if ruler is not None:
             if ruler.age_at(year) > race.lifespan[0] * 0.85:
                 value += 0.35
-    value += 0.08 * max(0, len(polity.house_ids) - 1)
+    value += 0.08 * max(0, len(world.houses_of_polity(polity)) - 1)
     # Государь, умеющий держать двор, спит спокойно; неумеха — нет.
     value *= rulers_mod.court_grip(world, polity)
     # Долгоживущие народы правят веками: если считать угрозу по годам,
