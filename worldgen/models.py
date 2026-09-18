@@ -297,6 +297,8 @@ class Polity:
     pact_ids: list = field(default_factory=list)     # договоры
     league_id: str = ""                              # союз, если состоит
 
+    union_id: str = ""                               # династическая уния
+
     # --- обиды (блок 11) ---
     # держава -> {повод: год}. Кровь посла, пойманный соглядатай, яд при
     # дворе: то, что помнят поимённо и припоминают при объявлении войны.
@@ -745,6 +747,44 @@ class Tongue:
     def to_dict(self) -> dict:
         data = asdict(self)
         data["born"] = _date_out(self.born)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
+class Union:
+    """Династическая уния: две короны на одной голове.
+
+    Появляется, когда престол пустеет, а право на него есть у чужого
+    государя — по брачному договору дедов. Держится, пока обе короны
+    достаются одному наследнику, и кончается либо расхождением корон,
+    либо тем, что младшая держава сливается со старшей навсегда.
+    """
+
+    id: str
+    first_id: str              # держава, чей государь получил вторую корону
+    second_id: str             # унаследованный престол
+    monarch_id: str
+    started: Date
+    monarchs: list = field(default_factory=list)   # кто носил обе короны
+    status: str = ACTIVE
+    ended: Date = None
+    end_reason: str = ""
+    merged: bool = False       # кончилась ли слиянием держав
+    notes: list = field(default_factory=list)
+
+    @property
+    def years(self) -> int:
+        if self.ended is None or self.started is None:
+            return 0
+        return max(0, self.ended.year - self.started.year)
+
+    def other(self, polity_id: str) -> str:
+        return self.second_id if polity_id == self.first_id else self.first_id
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["started"] = _date_out(self.started)
         data["ended"] = _date_out(self.ended)
         return data
 

@@ -200,6 +200,8 @@ def _pick_target(ctx, world, attacker, year: int, rng):
             continue            # со связанными словом не воюют
         if attacker.league_id and attacker.league_id == other.league_id:
             continue            # и с товарищем по союзу тоже
+        if attacker.union_id and attacker.union_id == other.union_id:
+            continue            # держава не воюет сама с собой
         if (attacker.tribute_to == other.id or attacker.overlord_id == other.id) \
                 and attacker.population < other.population * 0.8:
             continue            # иго сбрасывают, когда есть чем

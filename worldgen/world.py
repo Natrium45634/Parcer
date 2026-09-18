@@ -16,7 +16,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Faith,
                      Company, Feud, Figure, Folk, Fortress, House, League, Pact,
                      Polity, Region, Reign, Relic, Settlement, Temple, Tongue,
-                     TradeRoute, Tribe, War)
+                     TradeRoute, Tribe, Union, War)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
@@ -80,6 +80,8 @@ class World:
         self.tongues = {}
         self.living_tongues = []
         self.embassies = {}
+        self.unions = {}
+        self.active_unions = []
         self.fortresses = {}
         self.active_fortresses = []
         self.companies = {}
@@ -357,6 +359,40 @@ class World:
         if not other_id or polity is None:
             return
         polity.grudges.setdefault(other_id, {})[key] = int(year)
+
+    # --- династические унии ---------------------------------------------
+
+    def add_union(self, **kwargs) -> Union:
+        union = Union(id=self.next_id("N"), **kwargs)
+        self.unions[union.id] = union
+        self.active_unions.append(union.id)
+        for polity_id in (union.first_id, union.second_id):
+            polity = self.polities.get(polity_id)
+            if polity is not None:
+                polity.union_id = union.id
+        return union
+
+    def end_union(self, union, date: Date, reason: str,
+                  merged: bool = False) -> None:
+        if union.status != ACTIVE:
+            return
+        union.status = ENDED
+        union.ended = date
+        union.end_reason = reason
+        union.merged = merged
+        if union.id in self.active_unions:
+            self.active_unions.remove(union.id)
+        for polity_id in (union.first_id, union.second_id):
+            polity = self.polities.get(polity_id)
+            if polity is not None and polity.union_id == union.id:
+                polity.union_id = ""
+
+    def union_between(self, first_id: str, second_id: str):
+        for union_id in self.active_unions:
+            union = self.unions[union_id]
+            if {union.first_id, union.second_id} == {first_id, second_id}:
+                return union
+        return None
 
     # --- крепости и вольные роты ----------------------------------------
 

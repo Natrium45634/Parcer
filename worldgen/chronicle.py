@@ -684,6 +684,29 @@ def render_politics(world) -> str:
                 rows.append("        распался: %s" % league.end_reason)
         rows.append("")
 
+    unions = sorted(world.unions.values(),
+                    key=lambda item: item.started.ordinal)
+    if unions:
+        rows.append("  ДИНАСТИЧЕСКИЕ УНИИ")
+        for union in unions:
+            first = world.polities.get(union.first_id)
+            second = world.polities.get(union.second_id)
+            span = "%d—%s" % (union.started.year,
+                              union.ended.year if union.ended else "…")
+            rows.append("    %-46s %-12s государей %d"
+                        % (("%s и %s" % (first.full_name if first else "?",
+                                         second.full_name if second else "?"))[:46],
+                           span, len(union.monarchs)))
+            names = []
+            for figure_id in union.monarchs:
+                figure = world.figures.get(figure_id)
+                if figure is not None:
+                    names.append(figure.name)
+            if names:
+                rows.append("        обе короны носили: %s" % ", ".join(names))
+            rows.append("        %s" % (union.end_reason or "длится доныне"))
+        rows.append("")
+
     pacts = sorted(world.pacts.values(), key=lambda item: item.signed.ordinal)
     if not pacts:
         rows.append("  Держав, способных договариваться, в этом мире не нашлось.")

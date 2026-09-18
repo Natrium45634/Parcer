@@ -528,7 +528,7 @@ def check_tongues(world, seed: str) -> list:
 
 
 def check_embassies(world, seed: str) -> list:
-    """Проверяет связность посольств и записанных обид."""
+    """Проверяет связность посольств, уний и записанных обид."""
     problems = []
     for record in world.embassies.values():
         if record.sender_id == record.host_id:
@@ -549,6 +549,32 @@ def check_embassies(world, seed: str) -> list:
         if record.pact_id and record.pact_id not in world.pacts:
             problems.append("сид «%s»: договор посольства не найден" % seed)
             break
+
+    for union in world.unions.values():
+        if union.first_id == union.second_id:
+            problems.append("сид «%s»: держава в унии сама с собой" % seed)
+            break
+        for key in (union.first_id, union.second_id):
+            if key not in world.polities:
+                problems.append("сид «%s»: у унии потеряна держава" % seed)
+                break
+        if union.ended is not None \
+                and union.ended.ordinal < union.started.ordinal:
+            problems.append("сид «%s»: уния распалась раньше, чем сложилась"
+                            % seed)
+            break
+        if union.status == ACTIVE:
+            first = world.polities.get(union.first_id)
+            second = world.polities.get(union.second_id)
+            if first is None or second is None:
+                continue
+            if first.ruler_id != second.ruler_id:
+                problems.append("сид «%s»: в действующей унии два государя"
+                                % seed)
+                break
+            if first.union_id != union.id or second.union_id != union.id:
+                problems.append("сид «%s»: держава не помнит своей унии" % seed)
+                break
 
     for polity in world.polities.values():
         for other_id, items in (polity.grudges or {}).items():

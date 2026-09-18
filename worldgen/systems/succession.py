@@ -156,7 +156,20 @@ def _succeed(ctx, polity, year: int, after: Date, rng) -> None:
     date = ctx.date_in(rng, year, after)
     choice = dynasty.choose_heir(world, rng, polity, ruler, race, law, year)
 
+    # Держава в унии: обе короны нередко достаются одному наследнику —
+    # тогда уния переживает смерть государя и идёт дальше.
+    keeper = _union_heir(world, polity, race, year)
+    if keeper is not None and rng.chance(UNION_KEEP):
+        choice = dynasty.HeirChoice(keeper, "по общей короне",
+                                    other_house=keeper.house_id != polity.house_id,
+                                    law=polity.succession)
+
     if choice is None:
+        # Наследника нет дома — но может найтись за межой: чужой государь,
+        # чей дом породнился с этим престолом брачным договором. Тогда
+        # державы не воюют за корону, а получают общего государя.
+        if _union_claim(ctx, polity, race, year, date, rng):
+            return
         choice = _new_dynasty(ctx, polity, race, year, date, rng)
     if choice is None:
         if not polity.interregnum:
@@ -173,6 +186,58 @@ def _succeed(ctx, polity, year: int, after: Date, rng) -> None:
     enthrone(ctx, polity, choice.figure, date, year, choice,
              legitimacy="избрание" if choice.law == races_mod.ELECTIVE else "законное",
              old_house=old_house, rng=rng)
+
+
+UNION_KEEP = 0.55           # с какой охотой уния переживает смену государя
+
+
+def _union_heir(world, polity, race, year: int):
+    """Государь державы-напарницы по унии, если корона может достаться ему.
+
+    Наследуют не «унию», а престол: годится только тот, кто и так одной
+    крови со здешним домом, — иначе знать выберет своего.
+    """
+    union = world.unions.get(polity.union_id)
+    if union is None or union.status != ACTIVE:
+        return None
+    other = world.polities.get(union.other(polity.id))
+    if other is None or other.status != ACTIVE:
+        return None
+    king = world.figures.get(other.ruler_id)
+    if king is None or not king.alive_at(year) or king.id == polity.ruler_id:
+        return None
+    if king.age_at(year) < race.adulthood:
+        return None
+    if not king.house_id or king.house_id != polity.house_id:
+        return None
+    return king
+
+
+def _union_claim(ctx, polity, race, year: int, date, rng) -> bool:
+    """Пустой престол достаётся чужому государю по брачному праву.
+
+    Возвращает True, если корону приняли: правление при этом уже открыто
+    и искать наследника дальше незачем.
+    """
+    from . import unions as unions_mod
+
+    claim = unions_mod.claim(ctx, polity, race, year)
+    if claim is None:
+        return False
+    other, king = claim
+    home = king.home_id
+    old_house = ctx.world.houses.get(polity.house_id)
+    enthrone(ctx, polity, king, date, year,
+             dynasty.HeirChoice(king, "чужой государь по брачному праву",
+                                other_house=True, law=polity.succession,
+                                note="корона досталась государю соседней "
+                                     "державы"),
+             legitimacy="по брачному праву", old_house=old_house, rng=rng,
+             announce=False)
+    # Государь остаётся жить там, где жил: столицу он не меняет.
+    king.home_id = home or king.home_id
+    unions_mod.form(ctx, other, polity, king, year, date, rng)
+    return True
 
 
 def _new_dynasty(ctx, polity, race, year: int, date, rng):

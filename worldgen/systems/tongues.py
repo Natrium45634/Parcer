@@ -129,7 +129,9 @@ def _maybe_split(ctx, year: int, period: int, rng) -> None:
             name=tng.folk_tongue_name(rng, folk), race_id=folk.race_id,
             born=date, parent_id=parent.id,
             laws=tng.pick_laws(rng, parent.laws),
-            script=parent.script, script_from=parent.id)
+            script=parent.script,
+            script_year=parent.script_year if parent.script else 0,
+            script_from=parent.id if parent.script else "")
         if folk.id in parent.folk_ids:
             parent.folk_ids.remove(folk.id)
         attach(world, tongue, folk)

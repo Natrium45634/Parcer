@@ -658,6 +658,26 @@ def audit(world) -> list:
     elif len(world.polities) >= 10 and world.total_years >= 2000:
         note("дворы этого мира друг к другу не ездили ни разу")
 
+    # 15. Династические унии.
+    if world.unions:
+        merged = sum(1 for item in world.unions.values() if item.merged)
+        longest = max(item.years or (world.total_years - item.started.year)
+                      for item in world.unions.values())
+        found.append(("=", "династических уний: %d, слияний держав %d, "
+                      "самая долгая %d лет"
+                      % (len(world.unions), merged, longest)))
+        for union in world.unions.values():
+            if union.first_id == union.second_id:
+                bad("держава в унии сама с собой")
+                break
+            first = world.polities.get(union.first_id)
+            second = world.polities.get(union.second_id)
+            if first is not None and second is not None \
+                    and first.race_id != second.race_id:
+                note("уния между державами разных народов: %s и %s"
+                     % (first.name, second.name))
+                break
+
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:
         biggest = max((world.polities[p].population
