@@ -15,7 +15,8 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Battle, Calamity, Camp, Deity, Embassy, Event, Expedition,
                      Faith,
                      Company, Feud, Figure, Folk, Fortress, House, League, Pact,
-                     Polity, Region, Reign, Relic, Settlement, Temple, Tongue,
+                     Plot, Polity, Region, Reign, Relic, Settlement, Temple,
+                     Tongue,
                      TradeRoute, Tribe, Union, War)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
@@ -81,6 +82,7 @@ class World:
         self.living_tongues = []
         self.embassies = {}
         self.unions = {}
+        self.plots = {}
         self.active_unions = []
         self.fortresses = {}
         self.active_fortresses = []
@@ -359,6 +361,17 @@ class World:
         if not other_id or polity is None:
             return
         polity.grudges.setdefault(other_id, {})[key] = int(year)
+
+    # --- тайные дела -----------------------------------------------------
+
+    def add_plot(self, **kwargs) -> Plot:
+        plot = Plot(id=self.next_id("Q"), **kwargs)
+        self.plots[plot.id] = plot
+        return plot
+
+    def plots_of(self, polity) -> list:
+        return [item for item in self.plots.values()
+                if polity.id in (item.sender_id, item.target_id)]
 
     # --- династические унии ---------------------------------------------
 

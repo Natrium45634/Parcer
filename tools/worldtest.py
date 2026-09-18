@@ -658,7 +658,24 @@ def audit(world) -> list:
     elif len(world.polities) >= 10 and world.total_years >= 2000:
         note("дворы этого мира друг к другу не ездили ни разу")
 
-    # 15. Династические унии.
+    # 15. Тайная политика.
+    if world.plots:
+        kinds = Counter(item.kind for item in world.plots.values())
+        results = Counter(item.outcome for item in world.plots.values())
+        found.append(("=", "тайных дел: %d (родов %d), удалось %d, "
+                      "раскрыто %d"
+                      % (len(world.plots), len(kinds),
+                         results.get("удалось", 0), results.get("раскрыто", 0))))
+        if len(kinds) <= 2 and len(world.plots) > 20:
+            note("тайные дела все на один лад: %d рода" % len(kinds))
+        if not results.get("раскрыто") and len(world.plots) > 40:
+            note("ни один соглядатай за всю историю не попался")
+        for plot in world.plots.values():
+            if plot.sender_id == plot.target_id:
+                bad("тайное дело затеяно против самого себя")
+                break
+
+    # 16. Династические унии.
     if world.unions:
         merged = sum(1 for item in world.unions.values() if item.merged)
         longest = max(item.years or (world.total_years - item.started.year)

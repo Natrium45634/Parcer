@@ -33,7 +33,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from worldgen import chronicle, storage, warfare              # noqa: E402
+from worldgen import chronicle, espionage, storage, warfare   # noqa: E402
 from worldgen.engine import Settings, generate                # noqa: E402
 from worldgen.models import ACTIVE                             # noqa: E402
 from worldgen.races import BEASTFOLK, EVIL, get_race          # noqa: E402
@@ -548,6 +548,24 @@ def check_embassies(world, seed: str) -> list:
             break
         if record.pact_id and record.pact_id not in world.pacts:
             problems.append("сид «%s»: договор посольства не найден" % seed)
+            break
+
+    for plot in world.plots.values():
+        if plot.sender_id == plot.target_id:
+            problems.append("сид «%s»: тайное дело затеяно против себя" % seed)
+            break
+        if plot.agent_id and plot.agent_id not in world.figures:
+            problems.append("сид «%s»: тайное дело без исполнителя" % seed)
+            break
+        if plot.victim_id and plot.victim_id not in world.figures:
+            problems.append("сид «%s»: у тайного дела жертва-призрак" % seed)
+            break
+        if plot.kind not in espionage.DEEDS_BY_KEY:
+            problems.append("сид «%s»: тайное дело неизвестного рода (%s)"
+                            % (seed, plot.kind))
+            break
+        if plot.war_id and plot.war_id not in world.wars:
+            problems.append("сид «%s»: тайное дело в несуществующей войне" % seed)
             break
 
     for union in world.unions.values():

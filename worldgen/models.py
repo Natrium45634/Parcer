@@ -298,6 +298,7 @@ class Polity:
     league_id: str = ""                              # союз, если состоит
 
     union_id: str = ""                               # династическая уния
+    intrigue: float = 0.0      # оплаченная соседом смута при дворе, 0…1
 
     # --- обиды (блок 11) ---
     # держава -> {повод: год}. Кровь посла, пойманный соглядатай, яд при
@@ -748,6 +749,27 @@ class Tongue:
         data = asdict(self)
         data["born"] = _date_out(self.born)
         data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
+class Plot:
+    """Тайное дело: кто, против кого, чьими руками и чем кончилось."""
+
+    id: str
+    kind: str                  # подкуп / яд / заговор / смута / подлог …
+    sender_id: str
+    target_id: str
+    agent_id: str              # исполнитель
+    date: Date
+    outcome: str = ""          # удалось / сорвалось / раскрыто
+    victim_id: str = ""        # кого подкупили или отравили
+    war_id: str = ""           # война, ради которой всё затевалось
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["date"] = _date_out(self.date)
         return data
 
 

@@ -26,7 +26,10 @@ from __future__ import annotations
 from . import houses as houses_mod
 from . import nations as nations_mod
 from . import soldiery
+from . import spies
+from .. import espionage
 from .. import narrative_soldiery as fort_texts
+from .. import narrative_spies as spy_texts
 from .. import diplomacy as dip
 from .. import narrative
 from .. import narrative_diplomacy as dip_texts
@@ -677,6 +680,16 @@ def _battle(ctx, war, attacker, defender, year: int, rng) -> None:
         a_power *= soldiery.guard_of(world, attacker, region.id)
         d_power *= soldiery.guard_of(world, defender, region.id)
 
+    # Серебро, заплаченное до битвы, отрабатывается в битве: купленный
+    # воевода медлит, а выведанные замыслы стоят полка.
+    a_sold = spies.leverage(ctx, war, attacker)
+    d_sold = spies.leverage(ctx, war, defender)
+    a_power *= 1.0 - a_sold
+    d_power *= 1.0 - d_sold
+    if a_sold or d_sold:
+        spies.spend(ctx, war, attacker)
+        spies.spend(ctx, war, defender)
+
     attacker_wins, margin = warfare.battle_odds(
         rng, a_power, d_power, home_ground=(host.id == defender.id),
         attack_general=a_general, defend_general=d_general)
@@ -716,6 +729,8 @@ def _battle(ctx, war, attacker, defender, year: int, rng) -> None:
     arms = texts.arms_line(rng, a_race, d_race, attacker, defender, terrain)
     if arms:
         text = "%s %s" % (text, arms)
+    if max(a_sold, d_sold) >= espionage.BRIBE_EDGE:
+        text = "%s %s" % (text, spy_texts.bribed_line(rng))
     extra = _battle_fates(ctx, war, battle, attacker, defender, a_general,
                           d_general, attacker_wins, big, year, rng)
     if extra:

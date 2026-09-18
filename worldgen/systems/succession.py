@@ -759,6 +759,8 @@ def _instability(ctx, world, polity, year: int) -> float:
             if ruler.age_at(year) > race.lifespan[0] * 0.85:
                 value += 0.35
     value += 0.08 * max(0, len(world.houses_of_polity(polity)) - 1)
+    # Чужое серебро при дворе: заговор, за который кто-то заплатил из-за межи.
+    value *= 1.0 + 1.6 * max(0.0, polity.intrigue)
     # Государь, умеющий держать двор, спит спокойно; неумеха — нет.
     value *= rulers_mod.court_grip(world, polity)
     # Долгоживущие народы правят веками: если считать угрозу по годам,

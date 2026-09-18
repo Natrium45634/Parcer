@@ -286,7 +286,7 @@ class ChronicleApp(tk.Tk):
             filler=lambda: self._set_text(self.politics_text,
                                           chronicle.render_politics(self.world)))
         self.embassy_text = self._add_text_tab(
-            "Посольства", lambda: self._set_text(
+            "Посольства и тайны", lambda: self._set_text(
                 self.embassy_text, chronicle.render_embassies(self.world)))
         self.wars_text = self._add_text_tab(
             "Войны",

@@ -771,10 +771,10 @@ def render_politics(world) -> str:
 
 
 def render_embassies(world) -> str:
-    """Посольства: кто к кому ездил, с чем и чем это кончилось."""
+    """Посольства и тайные дела: кто к кому ездил, с чем и чем это кончилось."""
     from . import embassy as emb
 
-    rows = ["ПОСОЛЬСТВА И ПЕРЕГОВОРЫ", ""]
+    rows = ["ПОСОЛЬСТВА, ПЕРЕГОВОРЫ И ТАЙНЫЕ ДЕЛА", ""]
     if not world.embassies:
         rows.append("  Дворы этого мира друг к другу не ездили.")
         return "\n".join(rows)
@@ -819,6 +819,40 @@ def render_embassies(world) -> str:
                             % (envoy.name,
                                "; в дар — %s" % record.gift if record.gift
                                else ""))
+        rows.append("")
+
+    if world.plots:
+        rows.append("  ТАЙНЫЕ ДЕЛА")
+        kinds, results = {}, {}
+        for plot in world.plots.values():
+            kinds[plot.kind] = kinds.get(plot.kind, 0) + 1
+            results[plot.outcome] = results.get(plot.outcome, 0) + 1
+        rows.append("  Всего дел: %d — %s." % (len(world.plots), ", ".join(
+            "%s %d" % (key, count) for key, count in
+            sorted(kinds.items(), key=lambda pair: (-pair[1], pair[0])))))
+        rows.append("  Из них удалось %d, сорвалось %d, раскрыто %d."
+                    % (results.get("удалось", 0), results.get("сорвалось", 0),
+                       results.get("раскрыто", 0)))
+        # Показываем то, что видно в истории: яд, подкуп и подложные права.
+        loud = [plot for plot in world.plots.values()
+                if plot.outcome == "удалось"
+                and plot.kind in ("яд", "подкуп", "подлог")]
+        loud.sort(key=lambda item: item.date.ordinal)
+        for plot in loud[:14]:
+            sender = world.polities.get(plot.sender_id)
+            target = world.polities.get(plot.target_id)
+            agent = world.figures.get(plot.agent_id)
+            victim = world.figures.get(plot.victim_id)
+            rows.append("    %d — %s против %s: %s"
+                        % (plot.date.year,
+                           sender.full_name if sender else "?",
+                           target.full_name if target else "?", plot.kind))
+            line = "        исполнитель: %s" % (agent.name if agent else "—")
+            if victim is not None:
+                line += "; жертва: %s" % victim.name
+            rows.append(line)
+        if len(loud) > 14:
+            rows.append("    …всего громких дел: %d" % len(loud))
         rows.append("")
 
     # Обиды, у которых есть виновник: их припоминают при объявлении войны.

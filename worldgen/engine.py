@@ -24,7 +24,7 @@ from .rng import seed_to_int
 from .systems import (aristocracy, calamity, diplomacy, embassy, era_events,
                       exploration, founding, geography, houses, lives, nations,
                       notables, peoples, religion, soldiery, succession,
-                      tongues, trade, unions, war)
+                      spies, tongues, trade, unions, war)
 from .timeline import Date
 from .world import World
 from . import narrative
@@ -127,6 +127,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             diplomacy.upkeep(ctx, year, UPKEEP_PERIOD)
             embassy.upkeep(ctx, year, UPKEEP_PERIOD)
             unions.upkeep(ctx, year, UPKEEP_PERIOD)
+            spies.upkeep(ctx, year, UPKEEP_PERIOD)
             war.upkeep(ctx, year, UPKEEP_PERIOD)
             soldiery.upkeep(ctx, year, UPKEEP_PERIOD)
             tongues.upkeep(ctx, year, UPKEEP_PERIOD)

@@ -15,7 +15,7 @@ from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, Embassy,
                      EraSpan,
                      Company, Event, Expedition, Faith, Feud, Figure, Folk,
                      Fortress, House, League, Pact, Polity, Region, Reign, Relic,
-                     Settlement, Temple, Tongue, TradeRoute, Union, War,
+                     Plot, Settlement, Temple, Tongue, TradeRoute, Union, War,
                      Tribe)
 from .timeline import Date
 from .world import World
@@ -111,6 +111,8 @@ def world_to_dict(world: World) -> dict:
                       for item in world.embassies.values()],
         "unions": [_compact(Union, item.to_dict())
                    for item in world.unions.values()],
+        "plots": [_compact(Plot, item.to_dict())
+                  for item in world.plots.values()],
         "fortresses": [_compact(Fortress, item.to_dict())
                        for item in world.fortresses.values()],
         "companies": [_compact(Company, item.to_dict())
@@ -211,6 +213,9 @@ def dict_to_world(data: dict) -> World:
         world.companies[company.id] = company
         if company.status == ACTIVE:
             world.active_companies.append(company.id)
+    for item in data.get("plots", ()):
+        plot = Plot(**_clean(Plot, item))
+        world.plots[plot.id] = plot
     for item in data.get("unions", ()):
         union = Union(**_clean(Union, item))
         world.unions[union.id] = union
