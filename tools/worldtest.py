@@ -192,6 +192,20 @@ def politics_line(world, polity, year: int) -> str:
     return "; ".join(parts) if parts else "ни с кем не связана"
 
 
+def tongue_line(world, polity) -> str:
+    """Язык двора: как он зовётся, чем пишет и сколько на нём говорят."""
+    tongue = world.tongues.get(polity.tongue_id)
+    if tongue is None:
+        return "—"
+    parts = ["«%s»" % tongue.name]
+    if tongue.laws:
+        parts.append("законы: %s" % ", ".join(tongue.laws[:3]))
+    if tongue.script:
+        parts.append("письмо: %s" % tongue.script)
+    parts.append("говорящих: %d" % tongue.speakers)
+    return "; ".join(parts)
+
+
 def faith_line(world, faith_id: str) -> str:
     if not faith_id or faith_id not in world.faiths:
         return "государственной веры нет"
@@ -328,6 +342,17 @@ def snapshot(world, year: int, out) -> None:
             out("   закон о народах: %s" % pol.POLICY_NAMES.get(polity.policy,
                                                                 polity.policy))
         out("   вера: %s" % faith_line(world, polity.faith_id))
+        out("   язык двора: %s" % tongue_line(world, polity))
+        guilds = world.guilds_of(polity)
+        if guilds:
+            out("   гильдии: %s" % "; ".join(
+                "%s (%s, казна %d)" % (item.name, item.kind, int(item.wealth))
+                for item in guilds))
+        union = world.unions.get(polity.union_id)
+        if union is not None:
+            other = world.polities.get(union.other(polity.id))
+            out("   уния с державой: %s (с %d года)"
+                % (other.full_name if other else "?", union.started.year))
         out("ОСТАЛЬНЫЕ ДЕРЖАВЫ (всего %d):" % len(active))
         for population, cities, polity in active[1:7]:
             faith = world.faiths.get(polity.faith_id)

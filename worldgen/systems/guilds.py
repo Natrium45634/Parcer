@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from . import nations as nations_mod
 from . import soldiery
 from . import succession as succession_mod
 from . import war as war_system
@@ -311,6 +312,11 @@ def _republic(ctx, guild, polity, seat, year: int, rng) -> None:
     guild.wealth = round(guild.wealth * 0.55, 2)   # вольность стоит дорого
     succession_mod.install_founder(ctx, republic, head, seat, date, year)
     world.refresh_populations()
+    # Город, ушедший в вольность, мог быть последним городом своего
+    # народа в прежней державе: тогда её престол переходит к тем, кто в
+    # ней остался. Держава без собственного народа — ошибка счёта.
+    nations_mod.ensure_titular(ctx, polity, year)
+    nations_mod.ensure_titular(ctx, republic, year)
 
     title, text = texts.republic(rng, guild, seat, republic, head)
     world.add_event(

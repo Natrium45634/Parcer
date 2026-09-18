@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 from . import houses as houses_mod
+from . import nations as nations_mod
 from . import succession
 from .. import aristocracy as arist
 from .. import narrative
@@ -375,4 +376,8 @@ def _secede(ctx, polity, race, house, year: int, rng) -> bool:
         region_id=seat.region_id, race_id=race.id)
     if not _live_cities(world, polity):
         world.end_polity(polity, date, "растащена вотчинами")
+    else:
+        # Отделившаяся вотчина могла унести последний город титульного
+        # народа: тогда престол переходит к тем, кто остался.
+        nations_mod.ensure_titular(ctx, polity, year)
     return True
