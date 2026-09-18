@@ -31,11 +31,11 @@ FOUND_RATE = 0.10           # шанс, что богатый город зав�
 MIN_CITY = 2200             # и с какого размера города об этом вообще речь
 MIN_ERA = 2                 # раньше эпохи Мифов торг слишком мелок
 MAX_PER_POLITY = 2
-CHARTER_RATE = 0.28
+CHARTER_RATE = 0.18
 HIRE_RATE = 0.35
 PEACE_RATE = 0.22
-PRESS_RATE = 0.25
-SEIZE_RATE = 0.10
+PRESS_RATE = 0.09
+SEIZE_RATE = 0.035
 REPUBLIC_RATE = 0.14
 
 
@@ -150,7 +150,7 @@ def _act(ctx, guild, polity, seat, year: int, period: int, rng) -> None:
     greed = SEIZE_RATE * scale * (1.0 + 1.6 * max(0.0,
                                                   rulers.harshness(world,
                                                                    polity)))
-    if guild.wealth > 400 and rng.chance(min(0.4, greed)):
+    if guild.wealth > 900 and rng.chance(min(0.3, greed)):
         _seize(ctx, guild, polity, year, rng)
         return
 

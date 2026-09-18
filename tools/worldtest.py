@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from worldgen import aristocracy as arist                        # noqa: E402
 from worldgen import nations as pol                              # noqa: E402
 from worldgen import rulers                                      # noqa: E402
+from worldgen import narrative_war                               # noqa: E402
 from worldgen import warfare                                     # noqa: E402
 from worldgen import warfare as wf                               # noqa: E402
 from worldgen.catastrophe import KIND_NAMES, SEVERITY_NAMES      # noqa: E402
@@ -658,7 +659,19 @@ def audit(world) -> list:
     elif len(world.polities) >= 10 and world.total_years >= 2000:
         note("дворы этого мира друг к другу не ездили ни разу")
 
-    # 15. Гильдии и вольные города.
+    # 15. Море и осады: сошлись ли флот и войско у одной гавани.
+    kinds = Counter(event.kind for event in world.events)
+    sieges = kinds.get("siege_start", 0)
+    blockades = kinds.get("blockade_start", 0)
+    if sieges or blockades:
+        sealed = sum(1 for event in world.events
+                     if any(line in event.text
+                            for line in narrative_war.SEALED_LINES))
+        found.append(("=", "осад: %d, морских блокад: %d, из них город "
+                      "заперт с моря и с суши: %d"
+                      % (sieges, blockades, sealed)))
+
+    # 16. Гильдии и вольные города.
     if world.guilds:
         kinds = Counter(item.kind for item in world.guilds.values())
         republics = sum(1 for item in world.guilds.values() if item.republic_id)
@@ -675,7 +688,7 @@ def audit(world) -> list:
     elif len(world.polities) >= 12 and world.total_years >= 3000:
         note("купцы этого мира в силу не вошли ни разу")
 
-    # 16. Тайная политика.
+    # 17. Тайная политика.
     if world.plots:
         kinds = Counter(item.kind for item in world.plots.values())
         results = Counter(item.outcome for item in world.plots.values())
@@ -692,7 +705,7 @@ def audit(world) -> list:
                 bad("тайное дело затеяно против самого себя")
                 break
 
-    # 17. Династические унии.
+    # 18. Династические унии.
     if world.unions:
         merged = sum(1 for item in world.unions.values() if item.merged)
         longest = max(item.years or (world.total_years - item.started.year)

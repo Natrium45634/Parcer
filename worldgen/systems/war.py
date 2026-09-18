@@ -847,6 +847,24 @@ def _open_siege(ctx, war, attacker, defender, year: int, rng) -> None:
               if city.id not in war.sieges]
     if not cities:
         return
+    # Если гавань врага уже заперта своим же флотом, войско идёт именно
+    # туда: город без подвоза берут вдвое быстрее, и это знает всякий
+    # воевода.
+    sealed_ports = [city for city in cities if _sealed(war, city.id, besieger)]
+    if sealed_ports and rng.chance(0.85):
+        settlement = rng.choice(sorted(sealed_ports, key=lambda c: c.id))
+        war.sieges[settlement.id] = {
+            "years": 0, "besieger": besieger.id, "target": target.id,
+        }
+        date = ctx.date_in(rng, year)
+        title, text = texts.siege_text(rng, besieger, settlement, "начало", 0)
+        world.add_event(
+            date=date, era_index=world.era_index_at(year), kind="siege_start",
+            title=title, text="%s %s" % (text, texts.sealed_line(rng)),
+            importance=2,
+            subjects=[war.id, settlement.id, besieger.id, target.id],
+            region_id=settlement.region_id, race_id=besieger.race_id)
+        return
     # Последний город добивают только в войне на искоренение или когда
     # исход уже решён: иначе держава за державой исчезают с карты, а
     # мира заключать становится не с кем.
@@ -856,7 +874,9 @@ def _open_siege(ctx, war, attacker, defender, year: int, rng) -> None:
     # Берутся за то, что ближе и жирнее: столицу осаждают последней.
     settlement = rng.weighted([
         (city, float(max(80, city.population)) ** 0.5
-         * (0.5 if city.is_capital else 1.0)) for city in cities])
+         * (0.5 if city.is_capital else 1.0)
+         * (2.5 if _sealed(war, city.id, besieger) else 1.0))
+        for city in cities])
 
     war.sieges[settlement.id] = {
         "years": 0, "besieger": besieger.id, "target": target.id,
@@ -895,8 +915,11 @@ def _tick_sieges(ctx, war, attacker, defender, year: int, rng) -> None:
         garrison = warfare.host_power(
             max(warfare.LEVY_MIN, int(settlement.population * 0.07)), 1.65)
         starving = state["years"] >= 2 and rng.chance(0.5)
+        # Гавань, запертую тем же врагом, что стоит под стенами, не
+        # спасёт ни один подвоз: такой город падает вдвое быстрее.
+        sealed = _sealed(war, settlement_id, besieger)
         result = warfare.siege_odds(rng, power, garrison, state["years"],
-                                    starving)
+                                    starving, sealed=sealed)
 
         date = ctx.date_in(rng, year)
         if result == "держится":
@@ -906,6 +929,8 @@ def _tick_sieges(ctx, war, attacker, defender, year: int, rng) -> None:
             if state["years"] % 2 == 0 or rng.chance(0.35):
                 title, text = texts.siege_text(rng, None, settlement,
                                                "держится", state["years"])
+                if sealed:
+                    text = "%s %s" % (text, texts.sealed_line(rng))
                 world.add_event(
                     date=date, era_index=world.era_index_at(year),
                     kind="siege_hold", title=title, text=text, importance=1,
@@ -914,6 +939,9 @@ def _tick_sieges(ctx, war, attacker, defender, year: int, rng) -> None:
             continue
 
         war.sieges.pop(settlement_id, None)
+        # Взятый или отбитый город блокадой больше не держат.
+        if result == "пал":
+            war.blockades.pop(settlement_id, None)
         if result == "снята":
             war.momentum = max(-1.0, min(1.0, war.momentum
                                          + (-0.18 if side == "attacker" else 0.18)))
@@ -1412,8 +1440,15 @@ def _open_blockade(ctx, war, besieger, target, year: int, rng) -> None:
                 if item.id not in war.blockades]
     if not harbours:
         return
-    settlement = rng.weighted([(item, float(max(80, item.population)))
-                               for item in harbours])
+    # Гавань осаждённого города запирают прежде прочих: флот и войско
+    # вместе берут город вдвое быстрее, чем порознь.
+    besieged = [item for item in harbours
+                if _besieged_by(war, item.id, besieger)]
+    if besieged and rng.chance(0.85):
+        settlement = rng.choice(sorted(besieged, key=lambda s: s.id))
+    else:
+        settlement = rng.weighted([(item, float(max(80, item.population)))
+                                   for item in harbours])
     war.blockades[settlement.id] = {"years": 0, "by": besieger.id,
                                     "target": target.id}
     date = ctx.date_in(rng, year)
@@ -1423,6 +1458,18 @@ def _open_blockade(ctx, war, besieger, target, year: int, rng) -> None:
         title=title, text=text, importance=2,
         subjects=[war.id, settlement.id, besieger.id, target.id],
         region_id=settlement.region_id, race_id=besieger.race_id)
+
+
+def _sealed(war, settlement_id: str, besieger) -> bool:
+    """Заперта ли гавань этого города тем же, кто стоит под стенами."""
+    state = war.blockades.get(settlement_id)
+    return state is not None and state.get("by") == besieger.id
+
+
+def _besieged_by(war, settlement_id: str, besieger) -> bool:
+    """Осаждён ли этот город с суши тем же, кто подводит флот."""
+    state = war.sieges.get(settlement_id)
+    return state is not None and state.get("besieger") == besieger.id
 
 
 def _tick_blockades(ctx, war, attacker, defender, year: int, rng) -> None:
@@ -1442,7 +1489,11 @@ def _tick_blockades(ctx, war, attacker, defender, year: int, rng) -> None:
                                      + (0.05 if side == "attacker" else -0.05)))
 
         date = ctx.date_in(rng, year)
-        if rng.chance(min(0.5, 0.12 + 0.10 * state["years"])):
+        # Пока под стенами стоит своё же войско, флот от гавани не уйдёт.
+        lift = min(0.5, 0.12 + 0.10 * state["years"])
+        if settlement_id in war.sieges:
+            lift *= 0.3
+        if rng.chance(lift):
             war.blockades.pop(settlement_id, None)
             title, text = texts.blockade_text(rng, settlement, "снята",
                                               state["years"])

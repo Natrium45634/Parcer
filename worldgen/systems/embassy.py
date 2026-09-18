@@ -22,7 +22,7 @@ from .. import narrative_embassy as texts
 from .. import races as races_mod
 from ..models import ACTIVE
 
-EMBASSY_RATE = 0.30         # шанс, что держава за такт снарядит посольство
+EMBASSY_RATE = 0.22         # шанс, что держава за такт снарядит посольство
 WAR_TALK_RATE = 0.45        # и шанс, что воюющая пошлёт его к врагу
 MAX_PER_TICK = 16           # чтобы мир из сотни держав не утонул в посольствах
 GIFT_CHANCE = 0.72
@@ -133,25 +133,33 @@ def _send(ctx, sender, host, year: int, rng) -> None:
     record = world.add_embassy(
         sender_id=sender.id, host_id=host.id, envoy_id=envoy.id, sent=date,
         purpose=purpose.key, gift=gift)
-    title, text = texts.embassy_sent(rng, sender, host, envoy, purpose, gift)
-    world.add_event(
-        date=date, era_index=world.era_index_at(year), kind="embassy",
-        title=title, text=text, importance=1,
-        actors=[envoy.id], subjects=[record.id, sender.id, host.id],
-        region_id=sender.region_ids[0] if sender.region_ids else "",
-        race_id=sender.race_id)
-
     answer = emb.verdict(rng, world, sender, host, purpose, bool(gift),
                          _envoy_skill(envoy))
     record.answer = answer
     back = ctx.date_in(rng, year, date)
     record.returned = back
 
+    sent_title, sent_text = texts.embassy_sent(rng, sender, host, envoy,
+                                               purpose, gift)
     note = _settle(ctx, record, sender, host, envoy, purpose, answer, year,
                    back, rng, fight)
-    title, text = texts.embassy_answer(rng, sender, host, envoy, purpose, answer)
+    title, text = texts.embassy_answer(rng, sender, host, envoy, purpose,
+                                       answer)
     if note:
         text = "%s %s" % (text, note)
+
+    # Обычное посольство — одно событие: выехали, доехали, получили ответ.
+    # Отдельной записи заслуживает только то, ради чего потом воюют.
+    apart = answer == emb.BLOOD or purpose.key in ("мир", "дань", "покорность")
+    if apart:
+        world.add_event(
+            date=date, era_index=world.era_index_at(year), kind="embassy",
+            title=sent_title, text=sent_text, importance=2,
+            actors=[envoy.id], subjects=[record.id, sender.id, host.id],
+            region_id=sender.region_ids[0] if sender.region_ids else "",
+            race_id=sender.race_id)
+    else:
+        text = "%s %s" % (sent_text, text)
     world.add_event(
         date=back, era_index=world.era_index_at(year), kind="embassy_answer",
         title=title, text=text,

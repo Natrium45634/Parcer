@@ -635,13 +635,22 @@ def battle_losses(rng, winner_men: int, loser_men: int, margin: float) -> tuple:
 # Осада
 # ---------------------------------------------------------------------------
 
+# Во сколько раз быстрее падает гавань, запертая и с суши, и с моря.
+SEALED_SPEED = 2.0
+
+
 def siege_odds(rng, besiegers: float, garrison: float, years: int,
-               starving: bool = False) -> str:
+               starving: bool = False, sealed: bool = False) -> str:
     """Чем кончится осадный год: «пал», «держится», «снята».
 
     Город берут не силой, а временем: чем дольше стоят под стенами, тем
     вернее откроются ворота — или тем вернее осаждающие уйдут сами,
     потому что в лагере начался мор.
+
+    Портовый город — особая статья. Пока гавань открыта, осада почти
+    бессмысленна: подвоз идёт морем, и город переживёт осаждающих. Но
+    если та же сторона заперла гавань флотом, город остаётся без
+    подвоза вовсе — и падает вдвое быстрее.
     """
     # Числом город не берут: за стенами перевес значит куда меньше, чем
     # в поле, и потому осада — это прежде всего время.
@@ -649,10 +658,14 @@ def siege_odds(rng, besiegers: float, garrison: float, years: int,
     chance_fall = min(0.55, 0.03 + 0.07 * strength + 0.06 * years)
     if starving:
         chance_fall += 0.14
+    lift = min(0.4, 0.05 + 0.05 * years) / max(0.6, strength)
+    if sealed:
+        chance_fall = min(0.8, chance_fall * SEALED_SPEED)
+        lift *= 0.5          # осаждающих кормит их же флот
     if rng.chance(chance_fall):
         return "пал"
     # Осада разваливается сама: болезни, зима, бескормица.
-    if rng.chance(min(0.4, 0.05 + 0.05 * years) / max(0.6, strength)):
+    if rng.chance(lift):
         return "снята"
     return "держится"
 
