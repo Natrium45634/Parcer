@@ -33,7 +33,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from worldgen import chronicle, storage                       # noqa: E402
+from worldgen import chronicle, storage, warfare              # noqa: E402
 from worldgen.engine import Settings, generate                # noqa: E402
 from worldgen.models import ACTIVE                             # noqa: E402
 from worldgen.races import BEASTFOLK, EVIL, get_race          # noqa: E402
@@ -444,6 +444,130 @@ def check_politics(world, seed: str) -> list:
     return problems
 
 
+def check_tongues(world, seed: str) -> list:
+    """Проверяет связность языков: родство, носителей, письменность."""
+    from worldgen import tongues as tng
+
+    problems = []
+    for tongue in world.tongues.values():
+        if tongue.parent_id and tongue.parent_id not in world.tongues:
+            problems.append("сид «%s»: у языка «%s» потерян родитель"
+                            % (seed, tongue.name))
+            break
+        if tongue.parent_id == tongue.id:
+            problems.append("сид «%s»: язык «%s» происходит сам от себя"
+                            % (seed, tongue.name))
+            break
+        if tongue.ended is not None and tongue.ended.ordinal < tongue.born.ordinal:
+            problems.append("сид «%s»: язык «%s» умолк раньше, чем родился"
+                            % (seed, tongue.name))
+            break
+        if tongue.status == tng.LIVING and tongue.id not in world.living_tongues:
+            problems.append("сид «%s»: живой язык «%s» не в списке живых"
+                            % (seed, tongue.name))
+            break
+        if tongue.status != tng.LIVING and tongue.id in world.living_tongues:
+            problems.append("сид «%s»: умолкший язык «%s» числится живым"
+                            % (seed, tongue.name))
+            break
+        if tongue.script_from and tongue.script_from not in world.tongues:
+            problems.append("сид «%s»: письмо языка «%s» взято ниоткуда"
+                            % (seed, tongue.name))
+            break
+        if tongue.script_from and not tongue.script:
+            problems.append("сид «%s»: у языка «%s» есть источник письма, но "
+                            "нет письма" % (seed, tongue.name))
+            break
+
+    # Круг в родословной языков невозможен.
+    for tongue in world.tongues.values():
+        seen, walk = set(), tongue
+        while walk is not None and walk.parent_id:
+            if walk.id in seen:
+                problems.append("сид «%s»: языки «%s» ходят по кругу"
+                                % (seed, tongue.name))
+                break
+            seen.add(walk.id)
+            walk = world.tongues.get(walk.parent_id)
+        else:
+            continue
+        break
+
+    # Народ и его язык должны знать друг о друге.
+    for folk in world.folks.values():
+        if not folk.tongue_id:
+            continue
+        tongue = world.tongues.get(folk.tongue_id)
+        if tongue is None:
+            problems.append("сид «%s»: народ %s говорит на несуществующем языке"
+                            % (seed, folk.name))
+            break
+        if folk.id not in tongue.folk_ids:
+            problems.append("сид «%s»: народ %s не числится среди говорящих на "
+                            "«%s»" % (seed, folk.name, tongue.name))
+            break
+
+    for polity_id in world.active_polities:
+        polity = world.polities[polity_id]
+        if polity.tongue_id and polity.tongue_id not in world.tongues:
+            problems.append("сид «%s»: у державы %s язык двора неизвестен"
+                            % (seed, polity.name))
+            break
+
+    # Живой язык без единого говорящего — это мёртвый язык.
+    for tongue_id in world.living_tongues:
+        tongue = world.tongues[tongue_id]
+        alive = [fid for fid in tongue.folk_ids
+                 if fid in world.folks and world.folks[fid].population > 0]
+        if not alive and world.total_years - tongue.born.year > 400:
+            problems.append("сид «%s»: на живом языке «%s» никто не говорит"
+                            % (seed, tongue.name))
+            break
+
+    return problems
+
+
+def check_embassies(world, seed: str) -> list:
+    """Проверяет связность посольств и записанных обид."""
+    problems = []
+    for record in world.embassies.values():
+        if record.sender_id == record.host_id:
+            problems.append("сид «%s»: посольство отправлено самим себе" % seed)
+            break
+        for key in (record.sender_id, record.host_id):
+            if key not in world.polities:
+                problems.append("сид «%s»: у посольства потеряна сторона" % seed)
+                break
+        if record.envoy_id and record.envoy_id not in world.figures:
+            problems.append("сид «%s»: посольство без посла" % seed)
+            break
+        if record.returned is not None \
+                and record.returned.ordinal < record.sent.ordinal:
+            problems.append("сид «%s»: посольство вернулось раньше, чем выехало"
+                            % seed)
+            break
+        if record.pact_id and record.pact_id not in world.pacts:
+            problems.append("сид «%s»: договор посольства не найден" % seed)
+            break
+
+    for polity in world.polities.values():
+        for other_id, items in (polity.grudges or {}).items():
+            if other_id == polity.id:
+                problems.append("сид «%s»: держава %s держит обиду на себя"
+                                % (seed, polity.name))
+                break
+            for key, when in items.items():
+                if key not in warfare.CAUSES_BY_KEY:
+                    problems.append("сид «%s»: обида без повода (%s)"
+                                    % (seed, key))
+                    break
+                if when < 1 or when > world.total_years:
+                    problems.append("сид «%s»: обида записана вне истории"
+                                    % seed)
+                    break
+    return problems
+
+
 def check_calamities(world, seed: str) -> list:
     """Проверяет связность бедствий, их следов и сражений."""
     problems = []
@@ -610,6 +734,8 @@ def main() -> int:
         failures.extend(check_calamities(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
+        failures.extend(check_tongues(first, seed))
+        failures.extend(check_embassies(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -647,6 +773,8 @@ def main() -> int:
             failures.extend(check_calamities(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
+            failures.extend(check_tongues(first, "карта/" + seed))
+            failures.extend(check_embassies(first, "карта/" + seed))
             failures.extend(check_map_world(first, None, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "

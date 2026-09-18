@@ -129,8 +129,9 @@ def tick_settling(ctx, year: int) -> None:
     if ctx.map is not None and hex_index < 0:
         hex_index = ctx.map.place(region.id, rng, kind="city")
 
+    speech = ctx.tongue_of(tribe.folk_id)
     settlement = world.add_settlement(
-        name=ctx.forge.settlement(rng, race), kind=_kind_for(rng, race),
+        name=ctx.forge.settlement(rng, race, speech), kind=_kind_for(rng, race),
         race_id=race.id, founded=date, founder_id=leader.id,
         region_id=region.id, population=max(120, int(tribe.population * 0.92)),
         hex_index=hex_index, folk_id=tribe.folk_id,
@@ -218,13 +219,15 @@ def tick_colonies(ctx, year: int) -> None:
                              title=ctx.title_for(race, "founder", sex), sex=sex)
     date = ctx.date_in(rng, year)
     colony_hex = ctx.map.place(region.id, rng, kind="city") if ctx.map else -1
+    colony_folk = _colony_folk(world, source if kind == "free" else None,
+                               polity, race)
     settlement = world.add_settlement(
-        name=ctx.forge.settlement(rng, race), kind=_kind_for(rng, race),
+        name=ctx.forge.settlement(rng, race, ctx.tongue_of(colony_folk)),
+        kind=_kind_for(rng, race),
         race_id=race.id, founded=date, founder_id=leader.id,
         region_id=region.id, population=rng.randint(150, 600),
         polity_id=polity.id if polity else "", hex_index=colony_hex,
-        folk_id=_colony_folk(world, source if kind == "free" else None,
-                             polity, race),
+        folk_id=colony_folk,
     )
     if ctx.map is not None and colony_hex >= 0:
         ctx.map.claim(colony_hex, settlement.id)
@@ -311,7 +314,8 @@ def tick_polities(ctx, year: int) -> None:
 
     date = ctx.date_in(rng, year)
     polity = world.add_polity(
-        name=ctx.forge.polity(rng, race), form=form,
+        name=ctx.forge.polity(rng, race, ctx.tongue_of(capital.folk_id)),
+        form=form,
         race_id=race.id, founded=date, founder_id=leader.id,
         capital_id=capital.id, ruler_id=leader.id,
         region_ids=[], settlement_ids=[],

@@ -440,6 +440,104 @@ def render_folks(world) -> str:
     return "\n".join(rows)
 
 
+def render_tongues(world) -> str:
+    """Языки: семьи, звуковые законы, письменность и те, кто на них говорит."""
+    from . import races as races_mod
+    from . import tongues as tng
+
+    rows = ["ЯЗЫКИ НАРОДОВ", ""]
+    if not world.tongues:
+        rows.append("  В этом мире языки не разошлись.")
+        return "\n".join(rows)
+
+    world.refresh_folks()
+    living = [t for t in world.tongues.values() if t.status == tng.LIVING]
+    sacred = [t for t in world.tongues.values() if t.status == tng.SACRED]
+    dead = [t for t in world.tongues.values() if t.status == tng.DEAD]
+    scripts = sorted({t.script for t in world.tongues.values() if t.script})
+    rows.append("  Всего языков: %d — живых %d, храмовых %d, умолкших %d."
+                % (len(world.tongues), len(living), len(sacred), len(dead)))
+    if scripts:
+        rows.append("  Письменностей изобретено: %d (%s)."
+                    % (len(scripts), ", ".join(scripts)))
+    rows.append("  Одни и те же слова показаны ниже через законы каждого языка.")
+    rows.append("")
+
+    families = {}
+    for tongue in world.tongues.values():
+        families.setdefault(tng.family_of(world, tongue) or tongue.id,
+                            []).append(tongue)
+
+    def family_key(item):
+        root = world.tongues.get(item[0])
+        return (root.born.year if root else 0, item[0])
+
+    for root_id, kin in sorted(families.items(), key=family_key):
+        root = world.tongues.get(root_id)
+        race = races_mod.RACES_BY_ID.get(root.race_id if root else "")
+        rows.append("  СЕМЬЯ: %s%s — наречий %d"
+                    % (root.name if root else "?",
+                       " (%s)" % race.name if race else "", len(kin)))
+        for tongue in sorted(kin, key=lambda t: (t.born.year, t.id)):
+            depth = 0
+            walk, seen = tongue, set()
+            while walk is not None and walk.parent_id and walk.id not in seen:
+                seen.add(walk.id)
+                walk = world.tongues.get(walk.parent_id)
+                depth += 1
+            pad = "      " + "    " * min(depth, 3)
+            state = {tng.LIVING: "", tng.SACRED: " — остался в храме",
+                     tng.DEAD: " — умолк"}.get(tongue.status, "")
+            span = "%d" % tongue.born.year
+            if tongue.ended is not None:
+                span += "—%d" % tongue.ended.year
+            rows.append("%s%s (%s)%s" % (pad, tongue.name, span, state))
+            rows.append("%s    звучит: %s → %s"
+                        % (pad, tng.SAMPLE_NAME, tng.sample(None, tongue.laws)))
+            rows.append("%s    словник: %s" % (pad, ", ".join(
+                "%s — %s" % pair for pair in tng.wordlist(tongue.laws))))
+            if tongue.laws:
+                rows.append("%s    законы: %s" % (pad, ", ".join(
+                    "%s — %s" % (key, tng.LAWS[key][0])
+                    for key in tongue.laws if key in tng.LAWS)))
+            if tongue.script:
+                source = world.tongues.get(tongue.script_from)
+                origin = ""
+                if source is not None and source.id != tongue.id:
+                    origin = ", взято у народа, что говорит на «%s»" % source.name
+                rows.append("%s    письмо: %s%s%s"
+                            % (pad, tongue.script,
+                               " с %d года" % tongue.script_year
+                               if tongue.script_year else "", origin))
+                note = tng.SCRIPT_NOTES.get(tongue.script)
+                if note:
+                    rows.append("%s        %s" % (pad, note))
+            folks = [world.folks[fid] for fid in tongue.folk_ids
+                     if fid in world.folks]
+            speaking = [folk for folk in folks if folk.population > 0]
+            if speaking:
+                rows.append("%s    говорят: %s; душ %d"
+                            % (pad, ", ".join(folk.name for folk in speaking),
+                               tongue.speakers))
+            elif folks:
+                rows.append("%s    говорили: %s"
+                            % (pad, ", ".join(folk.name for folk in folks)))
+            if tongue.borrowed:
+                names = [world.tongues[item].name for item in tongue.borrowed
+                         if item in world.tongues]
+                if names:
+                    rows.append("%s    переняли слова: %s"
+                                % (pad, ", ".join(names[:4])))
+            states = [world.polities[pid].full_name
+                      for pid in world.active_polities
+                      if world.polities[pid].tongue_id == tongue.id]
+            if states:
+                rows.append("%s    язык двора в державах: %s"
+                            % (pad, ", ".join(sorted(states))))
+        rows.append("")
+    return "\n".join(rows)
+
+
 def render_trade(world) -> str:
     """Чем державы богаты, чего им не хватает и кто с кем торгует."""
 
@@ -647,6 +745,92 @@ def render_politics(world) -> str:
     rows.append("  Всего договоров: %d, из них действует: %d; союзов: %d"
                 % (len(pacts), len(world.active_pacts), len(world.leagues)))
     return "\n".join(rows)
+
+
+def render_embassies(world) -> str:
+    """Посольства: кто к кому ездил, с чем и чем это кончилось."""
+    from . import embassy as emb
+
+    rows = ["ПОСОЛЬСТВА И ПЕРЕГОВОРЫ", ""]
+    if not world.embassies:
+        rows.append("  Дворы этого мира друг к другу не ездили.")
+        return "\n".join(rows)
+
+    embassies = sorted(world.embassies.values(),
+                       key=lambda item: item.sent.ordinal)
+    counts = {}
+    for record in embassies:
+        counts[record.answer] = counts.get(record.answer, 0) + 1
+    rows.append("  Всего посольств: %d. Принято %d, отказано %d, выставлено "
+                "%d, убито послов %d."
+                % (len(embassies), counts.get(emb.ACCEPT, 0),
+                   counts.get(emb.REFUSE, 0), counts.get(emb.INSULT, 0),
+                   counts.get(emb.BLOOD, 0)))
+    errands = {}
+    for record in embassies:
+        errands[record.purpose] = errands.get(record.purpose, 0) + 1
+    rows.append("  С чем ездили: %s." % ", ".join(
+        "%s %d" % (key, count) for key, count in
+        sorted(errands.items(), key=lambda pair: (-pair[1], pair[0]))))
+    rows.append("")
+
+    # Целиком список был бы в тысячу строк; в летописи он и так есть.
+    # Здесь — то, что переменило ход дел: кровь, дань и подписанные договоры.
+    notable = [record for record in embassies
+               if record.answer == emb.BLOOD or record.pact_id
+               or record.purpose in ("мир", "дань", "покорность")]
+    if notable:
+        rows.append("  ПОСОЛЬСТВА, ПЕРЕМЕНИВШИЕ ДЕЛА")
+        for record in notable:
+            sender = world.polities.get(record.sender_id)
+            host = world.polities.get(record.host_id)
+            envoy = world.figures.get(record.envoy_id)
+            rows.append("    %d — %s → %s"
+                        % (record.sent.year,
+                           sender.full_name if sender else "?",
+                           host.full_name if host else "?"))
+            rows.append("        наказ: %s; ответ: %s"
+                        % (record.purpose, record.answer))
+            if envoy is not None:
+                rows.append("        посол: %s%s"
+                            % (envoy.name,
+                               "; в дар — %s" % record.gift if record.gift
+                               else ""))
+        rows.append("")
+
+    # Обиды, у которых есть виновник: их припоминают при объявлении войны.
+    grudges = []
+    kinds = {}
+    for polity in world.polities.values():
+        for other_id, items in (polity.grudges or {}).items():
+            other = world.polities.get(other_id)
+            for key, when in items.items():
+                grudges.append((when, polity, other, key))
+                kinds[key] = kinds.get(key, 0) + 1
+    if grudges:
+        rows.append("  ОБИДЫ, КОТОРЫЕ ПОМНЯТ")
+        rows.append("  Всего записано: %d — %s."
+                    % (len(grudges), ", ".join(
+                        "%s %d" % (warfare_label(key), count)
+                        for key, count in sorted(kinds.items(),
+                                                 key=lambda pair: (-pair[1],
+                                                                   pair[0])))))
+        # Кровь посла и яд помнят дольше прочего — их и показываем первыми.
+        weight = {"envoy": 0, "poison": 1, "oath": 2, "spy": 3, "insult": 4}
+        grudges.sort(key=lambda row: (weight.get(row[3], 5), -row[0],
+                                      row[1].id))
+        for when, polity, other, key in grudges[:14]:
+            rows.append("    %d — %s и держава по имени %s: %s"
+                        % (when, polity.full_name,
+                           other.full_name if other else "—",
+                           warfare_label(key)))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def warfare_label(key: str) -> str:
+    from . import warfare
+    return warfare.CAUSE_LABELS.get(key, key)
 
 
 def render_wars(world) -> str:
@@ -1063,9 +1247,11 @@ def full_text(world) -> str:
         render_eras(world),
         render_regions(world),
         render_folks(world),
+        render_tongues(world),
         render_trade(world),
         render_expeditions(world),
         render_politics(world),
+        render_embassies(world),
         render_wars(world),
         render_soldiery(world),
         render_dynasties(world),

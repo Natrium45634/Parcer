@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from . import tongues as tongues_mod
 from .. import folk as folk_mod
 from .. import mapworld
 from .. import narrative
@@ -149,6 +150,10 @@ def _awaken(ctx, race, year: int) -> None:
             name=name, name_kind=kind, race_id=race.id,
             cradle_region=region.id, born=awakening_date,
             traits=folk_mod.folk_traits(rng, region))
+        # Все народы расы сперва говорят на одном праязыке; расходятся
+        # они потом, прожив врозь несколько веков.
+        tongues_mod.attach(world, tongues_mod.proto_for(
+            ctx, race, folk, year, awakening_date, rng), folk)
 
         if index == 0:
             title, text = narrative.race_awakening(rng, race, region)
@@ -182,7 +187,7 @@ def found_tribe(ctx, race, region, year: int, rng, first: bool = False,
     sex = "f" if rng.chance(0.42) else "m"
     title = ctx.title_for(race, "chief", sex)
     leader = ctx.make_figure(rng, race, year, role="вождь", region_id=region.id,
-                             title=title, sex=sex)
+                             title=title, sex=sex, folk=folk)
 
     if not population:
         population = rng.randint(FIRST_TRIBE_MIN, FIRST_TRIBE_MAX)

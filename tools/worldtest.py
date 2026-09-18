@@ -589,6 +589,75 @@ def audit(world) -> list:
         else:
             found.append(("=", line))
 
+    # 13. Языки: разошлись ли они и слышно ли это в именах.
+    if world.tongues:
+        living = [t for t in world.tongues.values() if t.status == "живой"]
+        families = {}
+        for tongue in world.tongues.values():
+            root, seen = tongue, set()
+            while root is not None and root.parent_id and root.id not in seen:
+                seen.add(root.id)
+                root = world.tongues.get(root.parent_id)
+            families.setdefault(root.id if root else tongue.id, 0)
+            families[root.id if root else tongue.id] += 1
+        scripts = {t.script for t in world.tongues.values() if t.script}
+        found.append(("=", "языков: %d (живых %d), семей %d, письменностей %d"
+                      % (len(world.tongues), len(living), len(families),
+                         len(scripts))))
+        if len(world.tongues) <= len(families) and world.total_years >= 3000:
+            note("ни один язык за всю историю не разошёлся на наречия")
+        speechless = [t.name for t in living if not t.laws]
+        if speechless:
+            bad("язык без единого звукового закона: %s" % speechless[0])
+        # Два народа одной расы, говорящие на разных языках, не должны
+        # называть города одинаково — ради этого языки и заводились.
+        by_tongue = {}
+        for settlement in world.settlements.values():
+            folk = world.folks.get(settlement.folk_id)
+            if folk is None or not folk.tongue_id:
+                continue
+            by_tongue.setdefault(folk.tongue_id, set()).add(settlement.name)
+        pairs = [(tid, names) for tid, names in by_tongue.items()
+                 if len(names) >= 3]
+        clashes = 0
+        for i in range(len(pairs)):
+            for j in range(i + 1, len(pairs)):
+                first, second = world.tongues.get(pairs[i][0]), \
+                    world.tongues.get(pairs[j][0])
+                if first is None or second is None:
+                    continue
+                if first.race_id != second.race_id or first.laws == second.laws:
+                    continue
+                if pairs[i][1] & pairs[j][1]:
+                    clashes += 1
+        if clashes:
+            note("города разных наречий одной расы зовутся одинаково: %d пар"
+                 % clashes)
+    elif world.total_years >= 1000:
+        note("в мире не завелось ни одного языка")
+
+    # 14. Посольства: ездят ли и не выродились ли в одно и то же.
+    if world.embassies:
+        answers = Counter(item.answer for item in world.embassies.values())
+        errands = Counter(item.purpose for item in world.embassies.values())
+        found.append(("=", "посольств: %d, наказов различных %d, принято %d, "
+                      "убито послов %d"
+                      % (len(world.embassies), len(errands),
+                         answers.get("принято", 0),
+                         answers.get("посла убили", 0))))
+        if len(errands) <= 2 and len(world.embassies) > 20:
+            note("послы ездят всего с %d наказами" % len(errands))
+        top_errand, top_count = errands.most_common(1)[0]
+        if top_count > len(world.embassies) * 0.6:
+            note("посольства почти все об одном: «%s» — %d из %d"
+                 % (top_errand, top_count, len(world.embassies)))
+        for record in world.embassies.values():
+            if record.sender_id == record.host_id:
+                bad("посольство отправлено самому себе")
+                break
+    elif len(world.polities) >= 10 and world.total_years >= 2000:
+        note("дворы этого мира друг к другу не ездили ни разу")
+
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:
         biggest = max((world.polities[p].population

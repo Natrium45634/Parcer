@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from . import tongues as tongues_mod
+
 from dataclasses import dataclass
 
 from .morph import adjective_for, phrase
@@ -716,6 +718,11 @@ def _capitalize(word: str) -> str:
     return word[:1].upper() + word[1:]
 
 
+def _laws(tongue):
+    """Звуковые законы языка, если он известен."""
+    return tuple(getattr(tongue, "laws", ()) or ()) if tongue is not None else ()
+
+
 def _assemble(rng, starts, middles, ends, middle_chance, apostrophe) -> str:
     parts = [rng.choice(starts)]
     if middles and rng.chance(middle_chance):
@@ -790,13 +797,15 @@ class NameForge:
 
     # --- личные имена ---------------------------------------------------
 
-    def person(self, rng, race, sex: str) -> str:
+    def person(self, rng, race, sex: str, tongue=None) -> str:
         st = self.style_of(race)
         ends = st.female_ends if sex == "f" else st.male_ends
+        laws = _laws(tongue)
 
         def make():
-            return _assemble(rng, st.starts, st.middles, ends,
-                             st.middle_chance, st.apostrophe)
+            return tongues_mod.speak(
+                _assemble(rng, st.starts, st.middles, ends,
+                          st.middle_chance, st.apostrophe), laws)
 
         return self._unique("person:" + race.id, make, rng, sex=sex)
 
@@ -839,13 +848,16 @@ class NameForge:
         noun, gender = rng.choice(st.nouns or (("Оплот", "m"),))
         return phrase(adj, noun, gender)
 
-    def settlement(self, rng, race) -> str:
+    def settlement(self, rng, race, tongue=None) -> str:
         st = self.style_of(race)
+        laws = _laws(tongue)
 
         def make():
+            # Описательные названия («Белый Оплот») — это слова летописи,
+            # а не звучание народа: их звуковые законы не трогают.
             if st.nouns and rng.chance(st.compound_chance):
                 return self._descriptive_place(rng, st)
-            return self._proper_place(rng, st)
+            return tongues_mod.speak(self._proper_place(rng, st), laws)
 
         return self._unique("place", make, rng)
 
@@ -872,25 +884,28 @@ class NameForge:
 
         return self._unique("deity", make, rng, sex=sex)
 
-    def house(self, rng, race) -> str:
+    def house(self, rng, race, tongue=None) -> str:
         """Родовое имя: «Альдеринг», «Камнерез», «Аэлиндор», «Рыжехвост»."""
         st = self.style_of(race)
+        laws = _laws(tongue)
 
         def make():
             if st.compound_heads and st.compound_tails and rng.chance(st.house_compound):
                 return _polish(rng.choice(st.compound_heads) + rng.choice(st.compound_tails))
             ends = st.house_suffixes or st.place_ends or st.male_ends
-            return _assemble(rng, st.place_source(), st.middles, ends,
-                             st.middle_chance * 0.6, st.apostrophe * 0.5)
+            return tongues_mod.speak(
+                _assemble(rng, st.place_source(), st.middles, ends,
+                          st.middle_chance * 0.6, st.apostrophe * 0.5), laws)
 
         return self._unique("house", make, rng)
 
-    def polity(self, rng, race) -> str:
+    def polity(self, rng, race, tongue=None) -> str:
         """Название страны — всегда собственное имя, без описательных пар."""
         st = self.style_of(race)
+        laws = _laws(tongue)
 
         def make():
-            return self._proper_place(rng, st)
+            return tongues_mod.speak(self._proper_place(rng, st), laws)
 
         return self._unique("polity", make, rng)
 

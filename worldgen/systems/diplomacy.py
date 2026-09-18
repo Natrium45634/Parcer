@@ -59,7 +59,7 @@ def upkeep(ctx, year: int, period: int) -> None:
         race = races_mod.get_race(polity.race_id)
         if not race.builds_states or race.is_evil:
             continue
-        for other in _circle(ctx, world, polity, year, owners):
+        for other in circle(ctx, world, polity, year, owners):
             key = tuple(sorted((polity.id, other.id)))
             if key in seen:
                 continue
@@ -69,7 +69,7 @@ def upkeep(ctx, year: int, period: int) -> None:
     _tend_leagues(ctx, year, period, rng)
 
 
-def _circle(ctx, world, polity, year: int, owners=None) -> list:
+def circle(ctx, world, polity, year: int, owners=None) -> list:
     """С кем эта держава вообще имеет дело: соседи, торговые партнёры, родня.
 
     Мир в сто держав — это пять тысяч пар; политика между теми, кто друг
@@ -150,7 +150,7 @@ def _tend(ctx, first, second, year: int, period: int, rng, index=None) -> None:
             league = world.leagues.get(pact.league_id)
             if league is not None and league.status == ACTIVE:
                 pact.league_id = ""
-            _make_pact(ctx, higher, first, second, reasons, year, rng)
+            make_pact(ctx, higher, first, second, reasons, year, rng)
         return
 
     kind = dip.pact_kind_for(value, _last_kind(world, first, second))
@@ -158,7 +158,7 @@ def _tend(ctx, first, second, year: int, period: int, rng, index=None) -> None:
         return
     if world.war_between(first.id, second.id) is not None:
         return
-    _make_pact(ctx, kind, first, second, reasons, year, rng)
+    make_pact(ctx, kind, first, second, reasons, year, rng)
 
 
 def _last_kind(world, first, second) -> str:
@@ -177,7 +177,7 @@ def _last_kind(world, first, second) -> str:
 # Договоры
 # ---------------------------------------------------------------------------
 
-def _make_pact(ctx, kind: str, first, second, reasons, year: int, rng) -> None:
+def make_pact(ctx, kind: str, first, second, reasons, year: int, rng):
     world = ctx.world
     date = ctx.date_in(rng, year)
     pact = world.add_pact(
@@ -201,6 +201,7 @@ def _make_pact(ctx, kind: str, first, second, reasons, year: int, rng) -> None:
         race_id=first.race_id)
     if kind == dip.ALLIANCE:
         _maybe_league(ctx, first, year, rng)
+    return pact
 
 
 def _wed_houses(ctx, first, second, year: int, date, rng) -> None:

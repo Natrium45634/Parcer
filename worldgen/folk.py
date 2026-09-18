@@ -198,13 +198,37 @@ def folk_dat(folk) -> str:
     return _case(folk, 2)
 
 
+# Определение при этнониме склоняется вместе с ним: не «Северные
+# дубравцев», а «Северных дубравцев».
+_ADJ_CASES = (
+    ("ые", "ых", "ым"), ("ие", "их", "им"), ("ьи", "ьих", "ьим"),
+)
+
+
 def _case(folk, slot: int) -> str:
     name = folk.name
     if folk.name_kind == "ethnic":
-        for ending, gen, dat in _PLURAL_CASES:
-            if name.endswith(ending):
-                return name[:-len(ending)] + (gen if slot == 1 else dat)
+        words = name.split(" ")
+        bent = _bend(words[-1], _PLURAL_CASES, slot)
+        if bent is not None:
+            head = []
+            for word in words[:-1]:
+                shifted = _bend(word, _ADJ_CASES, slot)
+                if shifted is None:
+                    head = None
+                    break
+                head.append(shifted)
+            if head is not None:
+                return " ".join(head + [bent])
     return "%s «%s»" % ("народа" if slot == 1 else "народу", name)
+
+
+def _bend(word: str, table, slot: int):
+    """Меняет окончание по таблице; None — если слово нам не по зубам."""
+    for ending, gen, dat in table:
+        if word.endswith(ending):
+            return word[:-len(ending)] + (gen if slot == 1 else dat)
+    return None
 
 
 def folk_traits(rng, region) -> list:

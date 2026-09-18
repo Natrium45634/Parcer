@@ -182,7 +182,7 @@ class GenContext:
                     title: str = "", sex: str = "", epithet_chance: float = 0.62,
                     home_id: str = "", house=None, given_name: str = "",
                     birth_year: int = 0, father=None, mother=None,
-                    birth_order: int = 0, death_year: int = 0):
+                    birth_order: int = 0, death_year: int = 0, folk=None):
         """Создаёт историческую личность и заносит её в базу мира.
 
         Если передан знатный род, личность получает родовое имя (фамилию);
@@ -204,7 +204,10 @@ class GenContext:
                 death_year = year + rng.randint(1, max(2, lifespan // 8))
         death_year = max(death_year, birth_year + 1)
 
-        given = given_name or self.forge.person(rng, race, sex)
+        # Имя человека звучит на языке его народа: два людских народа,
+        # разошедшихся тысячу лет назад, зовут детей по-разному.
+        speech = self.tongue_of(folk) if folk is not None else None
+        given = given_name or self.forge.person(rng, race, sex, speech)
         epithet = self.forge.epithet(rng, race, sex) if rng.chance(epithet_chance) else ""
 
         titles = [title] if title else []
@@ -226,6 +229,20 @@ class GenContext:
         if mother is not None:
             mother.children.append(figure.id)
         return figure
+
+    def tongue_of(self, folk):
+        """Язык народа, если он известен."""
+        if folk is None:
+            return None
+        if isinstance(folk, str):
+            folk = self.world.folks.get(folk)
+        return self.world.tongue_of(folk)
+
+    def tongue_of_polity(self, polity):
+        """Язык двора державы."""
+        if polity is None:
+            return None
+        return self.world.tongues.get(polity.tongue_id)
 
     def title_for(self, race, kind: str, sex: str) -> str:
         """Титул по роли: вождь племени, основатель города, правитель страны."""

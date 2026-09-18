@@ -289,10 +289,18 @@ class Polity:
     hunger: float = 0.0        # насколько державе нечего есть, 0…1
     last_famine: int = 0       # год последнего голода
 
+    # --- язык (блок 11) ---
+    tongue_id: str = ""        # язык двора и грамот
+
     # --- политика (блок 10) ---
     relations: dict = field(default_factory=dict)    # держава -> отношение −1…1
     pact_ids: list = field(default_factory=list)     # договоры
     league_id: str = ""                              # союз, если состоит
+
+    # --- обиды (блок 11) ---
+    # держава -> {повод: год}. Кровь посла, пойманный соглядатай, яд при
+    # дворе: то, что помнят поимённо и припоминают при объявлении войны.
+    grudges: dict = field(default_factory=dict)
 
     # --- война (блок 9) ---
     war_ids: list = field(default_factory=list)      # все войны страны
@@ -714,6 +722,57 @@ class War:
 
 
 @dataclass
+class Tongue:
+    """Язык народа: звучание, письменность, родня и судьба."""
+
+    id: str
+    name: str
+    race_id: str
+    born: Date
+    parent_id: str = ""        # от какого языка отошёл
+    laws: list = field(default_factory=list)      # звуковые законы
+    script: str = ""           # письменность, если изобретена
+    script_year: int = 0
+    script_from: str = ""      # у кого одолжили письмо
+    folk_ids: list = field(default_factory=list)
+    speakers: int = 0
+    borrowed: list = field(default_factory=list)  # языки-источники слов
+    status: str = "живой"      # живой / священный / мёртвый
+    ended: Date = None
+    end_reason: str = ""
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["born"] = _date_out(self.born)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
+class Embassy:
+    """Посольство: кого, к кому, с чем послали и с чем оно вернулось."""
+
+    id: str
+    sender_id: str
+    host_id: str
+    envoy_id: str              # посол
+    sent: Date
+    purpose: str               # ключ наказа: «мир», «союз», «дань» …
+    gift: str = ""
+    answer: str = ""           # принято / отказано / выставили / убили
+    pact_id: str = ""          # договор, если из посольства вышел договор
+    returned: Date = None
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["sent"] = _date_out(self.sent)
+        data["returned"] = _date_out(self.returned)
+        return data
+
+
+@dataclass
 class Fortress:
     """Крепость: стоит веками и переходит из рук в руки.
 
@@ -914,6 +973,7 @@ class Folk:
     tribes: int = 0
     polities: int = 0
     parent_id: str = ""
+    tongue_id: str = ""        # на каком языке говорит (блок 11)
     status: str = ACTIVE
     ended: Date = None
     notes: list = field(default_factory=list)

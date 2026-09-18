@@ -1130,6 +1130,17 @@ def _finish(ctx, war, year: int, outcome: str, note: str = "") -> None:
     _close_feud(ctx, war, year, rng)
 
 
+def sue_for_peace(ctx, war, year: int, note: str = "") -> None:
+    """Мир, выговоренный посольством: война кончается ничем.
+
+    Этим пользуется ``systems/embassy``: удачное посольство разводит
+    войска прежде, чем война доела обе стороны.
+    """
+    if war.end is not None:
+        return
+    _finish(ctx, war, year, warfare.WHITE, note)
+
+
 def _release_captives(ctx, war, year: int, rng) -> None:
     """Пленных возвращают по миру — не всех и не сразу."""
     world = ctx.world

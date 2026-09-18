@@ -11,10 +11,11 @@ import dataclasses
 import io
 import json
 
-from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, EraSpan,
+from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, Embassy,
+                     EraSpan,
                      Company, Event, Expedition, Faith, Feud, Figure, Folk,
                      Fortress, House, League, Pact, Polity, Region, Reign, Relic,
-                     Settlement, Temple, TradeRoute, War, Tribe)
+                     Settlement, Temple, Tongue, TradeRoute, War, Tribe)
 from .timeline import Date
 from .world import World
 
@@ -23,6 +24,7 @@ FORMAT_VERSION = 1
 
 _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
                 "created", "awakened", "revealed", "born", "opened",
+                "sent", "returned",
                 "closed", "married", "signed", "built"}
 
 
@@ -102,6 +104,10 @@ def world_to_dict(world: World) -> dict:
         "wars": [_compact(War, item.to_dict()) for item in world.wars.values()],
         "feuds": [_compact(Feud, item.to_dict()) for item in world.feuds.values()],
         "pacts": [_compact(Pact, item.to_dict()) for item in world.pacts.values()],
+        "tongues": [_compact(Tongue, item.to_dict())
+                    for item in world.tongues.values()],
+        "embassies": [_compact(Embassy, item.to_dict())
+                      for item in world.embassies.values()],
         "fortresses": [_compact(Fortress, item.to_dict())
                        for item in world.fortresses.values()],
         "companies": [_compact(Company, item.to_dict())
@@ -187,6 +193,11 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("feuds", ()):
         feud = Feud(**_clean(Feud, item))
         world.feuds[feud.id] = feud
+    for item in data.get("tongues", ()):
+        tongue = Tongue(**_clean(Tongue, item))
+        world.tongues[tongue.id] = tongue
+        if tongue.status != "мёртвый":
+            world.living_tongues.append(tongue.id)
     for item in data.get("fortresses", ()):
         fortress = Fortress(**_clean(Fortress, item))
         world.fortresses[fortress.id] = fortress
@@ -197,6 +208,9 @@ def dict_to_world(data: dict) -> World:
         world.companies[company.id] = company
         if company.status == ACTIVE:
             world.active_companies.append(company.id)
+    for item in data.get("embassies", ()):
+        embassy = Embassy(**_clean(Embassy, item))
+        world.embassies[embassy.id] = embassy
     for item in data.get("pacts", ()):
         pact = Pact(**_clean(Pact, item))
         world.pacts[pact.id] = pact

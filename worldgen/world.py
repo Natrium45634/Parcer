@@ -12,9 +12,10 @@ import heapq
 
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
-                     Battle, Calamity, Camp, Deity, Event, Expedition, Faith,
+                     Battle, Calamity, Camp, Deity, Embassy, Event, Expedition,
+                     Faith,
                      Company, Feud, Figure, Folk, Fortress, House, League, Pact,
-                     Polity, Region, Reign, Relic, Settlement, Temple,
+                     Polity, Region, Reign, Relic, Settlement, Temple, Tongue,
                      TradeRoute, Tribe, War)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
@@ -76,6 +77,9 @@ class World:
         self.feuds = {}
         self.pacts = {}
         self.active_pacts = []
+        self.tongues = {}
+        self.living_tongues = []
+        self.embassies = {}
         self.fortresses = {}
         self.active_fortresses = []
         self.companies = {}
@@ -306,6 +310,53 @@ class World:
         if feud is not None:
             feud.end = date
             feud.deaths += war.deaths
+
+    # --- языки ----------------------------------------------------------
+
+    def add_tongue(self, **kwargs) -> Tongue:
+        tongue = Tongue(id=self.next_id("Y"), **kwargs)
+        self.tongues[tongue.id] = tongue
+        if tongue.status != "мёртвый":
+            self.living_tongues.append(tongue.id)
+        return tongue
+
+    def end_tongue(self, tongue, date: Date, reason: str,
+                   status: str = "мёртвый") -> None:
+        # Священный язык тоже перестаёт быть живым: дома на нём уже
+        # не говорят, он остаётся только в храме.
+        if tongue.status != "живой":
+            return
+        tongue.status = status
+        tongue.end_reason = reason
+        tongue.ended = date
+        if tongue.id in self.living_tongues:
+            self.living_tongues.remove(tongue.id)
+
+    def tongue_of(self, folk):
+        if folk is None:
+            return None
+        return self.tongues.get(folk.tongue_id)
+
+    # --- посольства и обиды ---------------------------------------------
+
+    def add_embassy(self, **kwargs):
+        embassy = Embassy(id=self.next_id("E"), **kwargs)
+        self.embassies[embassy.id] = embassy
+        return embassy
+
+    def embassies_of(self, polity) -> list:
+        return [item for item in self.embassies.values()
+                if polity.id in (item.sender_id, item.host_id)]
+
+    def add_grudge(self, polity, other_id: str, key: str, year: int) -> None:
+        """Держава запоминает обиду: кровь посла, яд, пойманного соглядатая.
+
+        Обида живёт не вечно, но живёт дольше того, кто её нанёс: списком
+        обид пользуется ``warfare.reasons``, когда ищет повод к войне.
+        """
+        if not other_id or polity is None:
+            return
+        polity.grudges.setdefault(other_id, {})[key] = int(year)
 
     # --- крепости и вольные роты ----------------------------------------
 

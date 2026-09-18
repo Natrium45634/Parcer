@@ -285,6 +285,9 @@ class ChronicleApp(tk.Tk):
             "Политика",
             filler=lambda: self._set_text(self.politics_text,
                                           chronicle.render_politics(self.world)))
+        self.embassy_text = self._add_text_tab(
+            "Посольства", lambda: self._set_text(
+                self.embassy_text, chronicle.render_embassies(self.world)))
         self.wars_text = self._add_text_tab(
             "Войны",
             filler=lambda: self._set_text(self.wars_text,
@@ -307,6 +310,7 @@ class ChronicleApp(tk.Tk):
             (230, 120, 60, 110, 150, 150, 200, 70), self._on_figure_open,
             toolbar=self._figures_toolbar, filler=lambda: self._fill_figures())
         self.folks_text = self._add_text_tab("Народы")
+        self.tongues_text = self._add_text_tab("Языки")
         self.peoples_text = self._add_text_tab("Державы и народы")
         self.trade_text = self._add_text_tab("Хозяйство")
         self.expeditions_text = self._add_text_tab("Походы")
@@ -574,6 +578,7 @@ class ChronicleApp(tk.Tk):
         self.refresh_chronicle()
         self._set_text(self.eras_text, chronicle.render_eras(world))
         self._set_text(self.folks_text, chronicle.render_folks(world))
+        self._set_text(self.tongues_text, chronicle.render_tongues(world))
         self._set_text(self.peoples_text, chronicle.render_peoples(world))
         self._set_text(self.trade_text, chronicle.render_trade(world))
         self._set_text(self.expeditions_text,

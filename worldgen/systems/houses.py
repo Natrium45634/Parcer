@@ -31,8 +31,10 @@ def found_house(ctx, figure, year: int, date, seat=None, rank: str = MINOR,
         return world.houses.get(figure.house_id)
 
     rng = ctx.rng("house", year, figure.id)
+    speech = ctx.tongue_of(figure.folk_id)
     house = world.add_house(
-        name=ctx.forge.house(rng, race), word=rng.choice(race.house_words),
+        name=ctx.forge.house(rng, race, speech),
+        word=rng.choice(race.house_words),
         race_id=race.id, founded=date, founder_id=figure.id,
         seat_id=seat.id if seat is not None else "",
         rank=rank, head_id=figure.id,
