@@ -12,6 +12,9 @@ from __future__ import annotations
 MASC, FEM, NEUT, PLUR = "m", "f", "n", "p"
 
 # Прилагательные-исключения: полные формы (м., ж., ср., мн.).
+_HUSHING_SET = "жшчщ"
+_VELAR_SET = "кгх"
+
 ADJ_EXCEPTIONS = {
     "Охотничий": ("Охотничий", "Охотничья", "Охотничье", "Охотничьи"),
     "Паучий": ("Паучий", "Паучья", "Паучье", "Паучьи"),
@@ -135,6 +138,8 @@ GENITIVE_EXCEPTIONS = {
     "Горный Союз": "Горного Союза",
     "Поднебесное Вождество": "Поднебесного Вождества",
     "Союз Гнёзд": "Союза Гнёзд",
+    "Торговая Республика": "Торговой Республики",
+    "Вольный Город": "Вольного Города",
     "Город-кузня": "Города-кузни",
     "Медвежий двор": "Медвежьего двора",
     "Подземный город": "Подземного города",
@@ -153,6 +158,13 @@ def genitive_noun(word: str) -> str:
     known = GENITIVE_EXCEPTIONS.get(word)
     if known:
         return known
+    # Двусловное название: определение склоняется вместе с существительным.
+    # «Вольный Город» -> «Вольного Города», а не «Вольный Города».
+    if " " in word:
+        head, tail = word.rsplit(" ", 1)
+        bent = " ".join(genitive_adjective(part) if _adjective(part) else part
+                        for part in head.split(" "))
+        return "%s %s" % (bent, genitive_noun(tail))
     if word.endswith("ье"):
         return word[:-1] + "я"
     last = word[-1]
@@ -190,7 +202,30 @@ def roman(number: int) -> str:
 
 DATIVE_EXCEPTIONS = {
     "Высокий Дом": "Высокому Дому",
+    # Мужские существительные на мягкий знак и беглые гласные — их не
+    # отличить по правилу, как и в родительном падеже.
+    "Лагерь": "Лагерю",
+    "Панцирь": "Панцирю",
+    "Уголь": "Углю",
+    "Камень": "Камню",
+    "Корень": "Корню",
+    "Огонёк": "Огоньку",
+    "Костёр": "Костру",
+    "Котёл": "Котлу",
+    "Шатёр": "Шатру",
+    "Венец": "Венцу",
+    "Ветер": "Ветру",
+    "Выводок": "Выводку",
+    # Разносклоняемые на -мя.
     "Племя": "Племени",
+    "Знамя": "Знамени",
+    "Имя": "Имени",
+    # Названия, где второе слово стоит в родительном падеже и не меняется.
+    "Союз Стай": "Союзу Стай",
+    "Союз Гнёзд": "Союзу Гнёзд",
+    # Притяжательные определения на мягкий знак.
+    "Медвежий двор": "Медвежьему двору",
+    "Город-кузня": "Городу-кузне",
 }
 
 
@@ -201,6 +236,15 @@ def dative_noun(word: str) -> str:
     known = DATIVE_EXCEPTIONS.get(word)
     if known:
         return known
+    if " " in word:
+        head, tail = word.rsplit(" ", 1)
+        bent = " ".join(dative_adjective(part) if _adjective(part) else part
+                        for part in head.split(" "))
+        return "%s %s" % (bent, dative_noun(tail))
+    # Существительные на -ия в дательном падеже кончаются на -ии:
+    # «Империя» -> «Империи», а не «Империе».
+    if word.endswith("ия"):
+        return word[:-1] + "и"
     last = word[-1]
     stem = word[:-1]
     if last in "ая":
@@ -210,14 +254,50 @@ def dative_noun(word: str) -> str:
     if last == "о":
         return stem + "у"
     if last == "е":
-        return stem + "ю"
+        # После шипящих — «Городищу», а не «Городищю».
+        return stem + ("у" if stem[-1:].lower() in _HUSHING_SET else "ю")
     if last == "й":
         return stem + "ю"
     return word + "у"
 
 
-_HUSHING_SET = "жшчщ"
-_VELAR_SET = "кгх"
+
+
+# Окончания, по которым слово опознаётся как определение при
+# существительном: «Вольный», «Торговая», «Подгорное», «Вечные».
+_ADJ_ENDINGS = ("ый", "ий", "ой", "ая", "яя", "ое", "ее", "ые", "ие")
+
+
+def _adjective(word: str) -> bool:
+    low = word.lower()
+    return len(low) > 3 and low.endswith(_ADJ_ENDINGS)
+
+
+def dative_adjective(form: str) -> str:
+    """Дательный падеж определения: «Вольный» -> «Вольному»."""
+    if not form:
+        return form
+    low = form.lower()
+    if low.endswith("ая"):
+        return form[:-2] + "ой"
+    if low.endswith("яя"):
+        return form[:-2] + "ей"
+    if low.endswith("ые"):
+        return form[:-2] + "ым"
+    if low.endswith("ие"):
+        return form[:-2] + "им"
+    if low.endswith("ое"):
+        return form[:-2] + "ому"
+    if low.endswith("ее"):
+        return form[:-2] + "ему"
+    if low.endswith("ний"):
+        return form[:-3] + "нему"
+    if low.endswith("ий"):
+        stem = form[:-2]
+        return stem + ("ему" if stem[-1:].lower() in _HUSHING_SET else "ому")
+    if low.endswith("ый") or low.endswith("ой"):
+        return form[:-2] + "ому"
+    return form
 
 
 def genitive_adjective(form: str) -> str:

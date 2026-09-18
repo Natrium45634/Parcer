@@ -42,6 +42,7 @@ from worldgen import aristocracy as arist                        # noqa: E402
 from worldgen import nations as pol                              # noqa: E402
 from worldgen import rulers                                      # noqa: E402
 from worldgen import narrative_war                               # noqa: E402
+from worldgen.morph import genitive_noun                         # noqa: E402
 from worldgen.systems import war as war_system                   # noqa: E402
 from worldgen import warfare                                     # noqa: E402
 from worldgen import warfare as wf                               # noqa: E402
@@ -70,6 +71,13 @@ RANK_FORMS = (("импер", ("импер",)), ("герцог", ("герцог",
 def race_name(race_id: str) -> str:
     race = RACES_BY_ID.get(race_id)
     return race.name if race else race_id
+
+
+def polity_gen(polity) -> str:
+    """«вольного города Сколгард» — чтобы читалось после «против»."""
+    if polity is None:
+        return "?"
+    return "%s %s" % (genitive_noun(polity.form).lower(), polity.name)
 
 
 def polity_population(world, polity):
@@ -268,7 +276,7 @@ def snapshot(world, year: int, out) -> None:
                 "сражений %d, погибло %d" % (
                     war.name,
                     attacker.full_name if attacker else "?",
-                    defender.full_name if defender else "?",
+                    polity_gen(defender),
                     war.start.year, warfare.cause_label(war.cause),
                     warfare.AIM_NAMES.get(war.aim, war.aim),
                     len(war.battle_ids), war.deaths))
