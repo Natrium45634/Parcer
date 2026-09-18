@@ -1175,6 +1175,9 @@ def _finish(ctx, war, year: int, outcome: str, note: str = "") -> None:
     _close_feud(ctx, war, year, rng)
 
 
+NEGOTIATED = "мир выговорен, а не выигран"
+
+
 def sue_for_peace(ctx, war, year: int, note: str = "") -> None:
     """Мир, выговоренный посольством: война кончается ничем.
 
@@ -1183,6 +1186,8 @@ def sue_for_peace(ctx, war, year: int, note: str = "") -> None:
     """
     if war.end is not None:
         return
+    if NEGOTIATED not in war.notes:
+        war.notes.append(NEGOTIATED)
     _finish(ctx, war, year, warfare.WHITE, note)
 
 

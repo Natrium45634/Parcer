@@ -337,6 +337,7 @@ def _close(ctx, guild, year: int, rng, reason: str) -> None:
     date = ctx.date_in(rng, year, guild.founded
                        if guild.founded.year == year else None)
     years = max(0, year - guild.founded.year)
+    guild.wealth = max(0.0, guild.wealth)     # долги гильдии уходят с ней
     world.end_guild(guild, date, reason)
     title, text = texts.guild_end(rng, guild, years)
     world.add_event(

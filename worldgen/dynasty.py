@@ -213,6 +213,10 @@ def choose_heir(world, rng, polity, ruler, race, law: str, year: int):
             if ruler is not None and head.id == ruler.id:
                 continue
             weight = max(0.2, other.prestige) * (1.6 if other.id == polity.house_id else 1.0)
+            # Выбирают своего: дом, чьего народа в державе не осталось
+            # вовсе, голосов почти не собирает.
+            if not polity.peoples.get(other.race_id, 0):
+                weight *= 0.2
             pairs.append(((head, other), weight * rng.uniform(0.7, 1.4)))
         for figure in house_adults(world, house, race, year):
             if ruler is not None and figure.id == ruler.id:

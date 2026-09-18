@@ -143,14 +143,14 @@ def _send(ctx, sender, host, year: int, rng) -> None:
                                                purpose, gift)
     note = _settle(ctx, record, sender, host, envoy, purpose, answer, year,
                    back, rng, fight)
-    title, text = texts.embassy_answer(rng, sender, host, envoy, purpose,
-                                       answer)
-    if note:
-        text = "%s %s" % (text, note)
-
     # Обычное посольство — одно событие: выехали, доехали, получили ответ.
     # Отдельной записи заслуживает только то, ради чего потом воюют.
     apart = answer == emb.BLOOD or purpose.key in ("мир", "дань", "покорность")
+    title, text = texts.embassy_answer(rng, sender, host, envoy, purpose,
+                                       answer, short=not apart)
+    if note:
+        text = "%s %s" % (text, note)
+
     if apart:
         world.add_event(
             date=date, era_index=world.era_index_at(year), kind="embassy",

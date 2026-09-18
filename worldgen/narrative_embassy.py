@@ -82,6 +82,9 @@ ANSWER_TEMPLATES = {
         "Спорили долго, но сошлись: %(errand)s. Посольство едет домой.",
         "Государь ставит печать под тем, ради чего посольство и ехало: "
         "%(errand)s.",
+        "%(host)s соглашается, и грамоту скрепляют печатями обеих держав.",
+        "Двор отвечает согласием прежде, чем послы успевают договорить.",
+        "Уговор скрепляют печатью, а скрепив, пируют три дня.",
     ),
     emb.REFUSE: (
         "%(host)s выслушивает посольство и отвечает отказом — вежливым, но "
@@ -127,8 +130,14 @@ ANSWER_TITLES = {
 }
 
 
-def embassy_answer(rng, sender, host, envoy, purpose, answer: str) -> tuple:
-    text = rng.choice(ANSWER_TEMPLATES[answer]) % {
+def embassy_answer(rng, sender, host, envoy, purpose, answer: str,
+                   short: bool = False) -> tuple:
+    """`short` — ответ пишется сразу за отъездом, и наказ повторять незачем."""
+    pool = ANSWER_TEMPLATES[answer]
+    if short:
+        trimmed = tuple(item for item in pool if "%(errand)s" not in item)
+        pool = trimmed or pool
+    text = rng.choice(pool) % {
         "host": host.full_name, "host_gen": polity_gen(host),
         "sender": sender.full_name, "envoy": envoy.name,
         "errand": purpose.errand,

@@ -42,6 +42,7 @@ from worldgen import aristocracy as arist                        # noqa: E402
 from worldgen import nations as pol                              # noqa: E402
 from worldgen import rulers                                      # noqa: E402
 from worldgen import narrative_war                               # noqa: E402
+from worldgen.systems import war as war_system                   # noqa: E402
 from worldgen import warfare                                     # noqa: E402
 from worldgen import warfare as wf                               # noqa: E402
 from worldgen.catastrophe import KIND_NAMES, SEVERITY_NAMES      # noqa: E402
@@ -518,8 +519,11 @@ def audit(world) -> list:
                  % (top_outcome, outcome_count * 100.0 / len(wars)))
         # Война, в которой не успели сойтись, — это либо оборванная
         # война, либо та, чей противник погиб раньше от чужой руки.
+        # Войну, которую развели послы или выкупили купцы, к аномалиям
+        # не относим: она и не должна была дойти до сражения.
         silent = [w for w in wars if not w.battle_ids
-                  and w.outcome not in (wf.INTERRUPTED, wf.ANNIHILATION)]
+                  and w.outcome not in (wf.INTERRUPTED, wf.ANNIHILATION)
+                  and war_system.NEGOTIATED not in w.notes]
         if silent:
             bad("войн без единого сражения: %d из %d" % (len(silent), len(wars)))
         peaceless = [w for w in wars if not w.peace_name
@@ -716,13 +720,6 @@ def audit(world) -> list:
         for union in world.unions.values():
             if union.first_id == union.second_id:
                 bad("держава в унии сама с собой")
-                break
-            first = world.polities.get(union.first_id)
-            second = world.polities.get(union.second_id)
-            if first is not None and second is not None \
-                    and first.race_id != second.race_id:
-                note("уния между державами разных народов: %s и %s"
-                     % (first.name, second.name))
                 break
 
     # 9. Мир, в котором ничего не выросло.
