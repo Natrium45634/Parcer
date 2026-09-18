@@ -550,6 +550,34 @@ def check_embassies(world, seed: str) -> list:
             problems.append("сид «%s»: договор посольства не найден" % seed)
             break
 
+    for guild in world.guilds.values():
+        if guild.seat_id and guild.seat_id not in world.settlements:
+            problems.append("сид «%s»: гильдия %s сидит в несуществующем городе"
+                            % (seed, guild.name))
+            break
+        if guild.polity_id and guild.polity_id not in world.polities:
+            problems.append("сид «%s»: гильдия %s в несуществующей державе"
+                            % (seed, guild.name))
+            break
+        if guild.ended is not None \
+                and guild.ended.ordinal < guild.founded.ordinal:
+            problems.append("сид «%s»: гильдия %s кончилась раньше, чем "
+                            "завелась" % (seed, guild.name))
+            break
+        if guild.status == ACTIVE and guild.id not in world.active_guilds:
+            problems.append("сид «%s»: живая гильдия %s не в списке живых"
+                            % (seed, guild.name))
+            break
+        if guild.republic_id and guild.republic_id not in world.polities:
+            problems.append("сид «%s»: вольный город гильдии %s не найден"
+                            % (seed, guild.name))
+            break
+        for polity_id in guild.charters:
+            if polity_id not in world.polities:
+                problems.append("сид «%s»: вольности гильдии %s при "
+                                "несуществующем дворе" % (seed, guild.name))
+                break
+
     for plot in world.plots.values():
         if plot.sender_id == plot.target_id:
             problems.append("сид «%s»: тайное дело затеяно против себя" % seed)

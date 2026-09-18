@@ -12,12 +12,10 @@ import heapq
 
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
-                     Battle, Calamity, Camp, Deity, Embassy, Event, Expedition,
-                     Faith,
-                     Company, Feud, Figure, Folk, Fortress, House, League, Pact,
-                     Plot, Polity, Region, Reign, Relic, Settlement, Temple,
-                     Tongue,
-                     TradeRoute, Tribe, Union, War)
+                     Battle, Calamity, Camp, Company, Deity, Embassy, Event,
+                     Expedition, Faith, Feud, Figure, Folk, Fortress, Guild,
+                     House, League, Pact, Plot, Polity, Region, Reign, Relic,
+                     Settlement, Temple, Tongue, TradeRoute, Tribe, Union, War)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
@@ -83,6 +81,8 @@ class World:
         self.embassies = {}
         self.unions = {}
         self.plots = {}
+        self.guilds = {}
+        self.active_guilds = []
         self.active_unions = []
         self.fortresses = {}
         self.active_fortresses = []
@@ -361,6 +361,27 @@ class World:
         if not other_id or polity is None:
             return
         polity.grudges.setdefault(other_id, {})[key] = int(year)
+
+    # --- гильдии ---------------------------------------------------------
+
+    def add_guild(self, **kwargs) -> Guild:
+        guild = Guild(id=self.next_id("G"), **kwargs)
+        self.guilds[guild.id] = guild
+        self.active_guilds.append(guild.id)
+        return guild
+
+    def end_guild(self, guild, date: Date, reason: str) -> None:
+        if guild.status != ACTIVE:
+            return
+        guild.status = ENDED
+        guild.ended = date
+        guild.end_reason = reason
+        if guild.id in self.active_guilds:
+            self.active_guilds.remove(guild.id)
+
+    def guilds_of(self, polity) -> list:
+        return [self.guilds[gid] for gid in self.active_guilds
+                if self.guilds[gid].polity_id == polity.id]
 
     # --- тайные дела -----------------------------------------------------
 

@@ -313,6 +313,9 @@ class ChronicleApp(tk.Tk):
         self.tongues_text = self._add_text_tab("Языки")
         self.peoples_text = self._add_text_tab("Державы и народы")
         self.trade_text = self._add_text_tab("Хозяйство")
+        self.guilds_text = self._add_text_tab(
+            "Гильдии", lambda: self._set_text(
+                self.guilds_text, chronicle.render_guilds(self.world)))
         self.expeditions_text = self._add_text_tab("Походы")
         self.regions_text = self._add_text_tab("Земли")
         self.stats_text = self._add_text_tab("Итоги")

@@ -22,9 +22,9 @@ from .context import GenContext
 from .eras import build_eras
 from .rng import seed_to_int
 from .systems import (aristocracy, calamity, diplomacy, embassy, era_events,
-                      exploration, founding, geography, houses, lives, nations,
-                      notables, peoples, religion, soldiery, succession,
-                      spies, tongues, trade, unions, war)
+                      exploration, founding, geography, guilds, houses, lives,
+                      nations, notables, peoples, religion, soldiery, spies,
+                      succession, tongues, trade, unions, war)
 from .timeline import Date
 from .world import World
 from . import narrative
@@ -133,6 +133,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             tongues.upkeep(ctx, year, UPKEEP_PERIOD)
             exploration.upkeep(ctx, year, UPKEEP_PERIOD)
             trade.upkeep(ctx, year, UPKEEP_PERIOD)
+            guilds.upkeep(ctx, year, UPKEEP_PERIOD)
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)
             religion.upkeep(ctx, year, UPKEEP_PERIOD)
 

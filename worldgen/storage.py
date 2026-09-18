@@ -11,12 +11,11 @@ import dataclasses
 import io
 import json
 
-from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Deity, Embassy,
-                     EraSpan,
-                     Company, Event, Expedition, Faith, Feud, Figure, Folk,
-                     Fortress, House, League, Pact, Polity, Region, Reign, Relic,
-                     Plot, Settlement, Temple, Tongue, TradeRoute, Union, War,
-                     Tribe)
+from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Company, Deity,
+                     Embassy, EraSpan, Event, Expedition, Faith, Feud, Figure,
+                     Folk, Fortress, Guild, House, League, Pact, Plot, Polity,
+                     Region, Reign, Relic, Settlement, Temple, Tongue,
+                     TradeRoute, Tribe, Union, War)
 from .timeline import Date
 from .world import World
 
@@ -113,6 +112,8 @@ def world_to_dict(world: World) -> dict:
                    for item in world.unions.values()],
         "plots": [_compact(Plot, item.to_dict())
                   for item in world.plots.values()],
+        "guilds": [_compact(Guild, item.to_dict())
+                   for item in world.guilds.values()],
         "fortresses": [_compact(Fortress, item.to_dict())
                        for item in world.fortresses.values()],
         "companies": [_compact(Company, item.to_dict())
@@ -213,6 +214,11 @@ def dict_to_world(data: dict) -> World:
         world.companies[company.id] = company
         if company.status == ACTIVE:
             world.active_companies.append(company.id)
+    for item in data.get("guilds", ()):
+        guild = Guild(**_clean(Guild, item))
+        world.guilds[guild.id] = guild
+        if guild.status == ACTIVE:
+            world.active_guilds.append(guild.id)
     for item in data.get("plots", ()):
         plot = Plot(**_clean(Plot, item))
         world.plots[plot.id] = plot

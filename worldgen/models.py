@@ -753,6 +753,35 @@ class Tongue:
 
 
 @dataclass
+class Guild:
+    """Гильдия: касса, склады и своё право между престолом и знатью."""
+
+    id: str
+    name: str
+    kind: str                  # купеческая / мореходная / ремесленная / банкирская
+    good: str                  # товар, на котором поднялась
+    seat_id: str               # город, где сидит
+    polity_id: str
+    founded: Date
+    head_id: str = ""          # старшина
+    wealth: float = 0.0
+    charters: list = field(default_factory=list)   # державы, где есть вольности
+    companies: list = field(default_factory=list)  # нанятые роты
+    deeds: int = 0             # сколько раз вмешивалась в дела держав
+    republic_id: str = ""      # держава, которой гильдия стала
+    status: str = ACTIVE
+    ended: Date = None
+    end_reason: str = ""
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["founded"] = _date_out(self.founded)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
 class Plot:
     """Тайное дело: кто, против кого, чьими руками и чем кончилось."""
 

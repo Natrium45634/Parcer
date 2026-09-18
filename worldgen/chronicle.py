@@ -591,6 +591,71 @@ def render_trade(world) -> str:
     return "\n".join(rows)
 
 
+def render_guilds(world) -> str:
+    """Гильдии и вольные города: деньги как третья сила."""
+    rows = ["ГИЛЬДИИ И ВОЛЬНЫЕ ГОРОДА", ""]
+    if not world.guilds:
+        rows.append("  Купцы этого мира в силу не вошли.")
+        return "\n".join(rows)
+
+    guilds = sorted(world.guilds.values(),
+                    key=lambda item: item.founded.ordinal)
+    republics = [item for item in guilds if item.republic_id]
+    rows.append("  Всего гильдий: %d, из них держится доныне %d. "
+                "Вольных городов вышло %d."
+                % (len(guilds), len(world.active_guilds), len(republics)))
+    rows.append("  Вольностей куплено при чужих дворах: %d; вмешательств в "
+                "дела держав: %d."
+                % (sum(len(item.charters) for item in guilds),
+                   sum(item.deeds for item in guilds)))
+    rows.append("")
+
+    header = "  %-8s %-46s %-14s %-9s %s" % ("Год", "Гильдия", "Род", "Казна",
+                                             "Судьба")
+    rows.append(header)
+    rows.append("  " + "-" * (len(header) - 2))
+    for guild in guilds:
+        seat = world.settlements.get(guild.seat_id)
+        polity = world.polities.get(guild.polity_id)
+        rows.append("  %-8d %-46s %-14s %-9d %s" % (
+            guild.founded.year, guild.name[:46], guild.kind,
+            int(guild.wealth), guild.end_reason or "действует"))
+        line = "        город: %s; держава: %s; товар: %s" % (
+            seat.name if seat else "—",
+            polity.full_name if polity else "—", guild.good)
+        rows.append(line)
+        head = world.figures.get(guild.head_id)
+        if head is not None:
+            rows.append("        старшина: %s" % head.name)
+        if guild.charters:
+            names = [world.polities[pid].full_name for pid in guild.charters
+                     if pid in world.polities]
+            if names:
+                rows.append("        вольности при дворах: %s"
+                            % ", ".join(names[:4]))
+        if guild.republic_id:
+            republic = world.polities.get(guild.republic_id)
+            rows.append("        добилась вольности города: %s"
+                        % (republic.full_name if republic else "—"))
+    rows.append("")
+
+    free = [world.polities[pid] for pid in world.polities
+            if world.polities[pid].form in ("Торговая Республика",
+                                            "Вольный Город")]
+    if free:
+        rows.append("  ВОЛЬНЫЕ ГОРОДА И РЕСПУБЛИКИ")
+        for polity in sorted(free, key=lambda p: p.founded.ordinal):
+            ruler = world.figures.get(polity.ruler_id)
+            rows.append("    %d — %s%s"
+                        % (polity.founded.year, polity.full_name,
+                           "" if polity.id in world.active_polities
+                           else " (%s)" % (polity.end_reason or "пала")))
+            if ruler is not None:
+                rows.append("        во главе: %s" % ruler.name)
+        rows.append("")
+    return "\n".join(rows)
+
+
 def render_soldiery(world) -> str:
     """Крепости и вольные роты: то, что остаётся от войны между войнами."""
     from .models import ACTIVE as ACTIVE_STATE
@@ -1306,6 +1371,7 @@ def full_text(world) -> str:
         render_folks(world),
         render_tongues(world),
         render_trade(world),
+        render_guilds(world),
         render_expeditions(world),
         render_politics(world),
         render_embassies(world),
