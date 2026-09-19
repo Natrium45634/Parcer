@@ -410,7 +410,8 @@ def _betray(ctx, war, pact, ally, polity, year: int, rng) -> None:
     dip.set_relation(ally, polity, dip.relation(ally, polity.id) - 0.35)
     if pact.betrayals < 2 and not rng.chance(0.45):
         return
-    date = ctx.date_in(rng, year)
+    date = ctx.date_in(rng, year,
+                       pact.signed if pact.signed.year == year else None)
     world.end_pact(pact, date, "клятву не исполнили")
     title, text = dip_texts.betrayal(rng, pact, ally, polity, war.name)
     world.add_event(

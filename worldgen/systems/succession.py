@@ -89,7 +89,7 @@ def close_reign(ctx, reign, date: Date, reason: str) -> None:
     # Тот, кто сел на престол ребёнком, а умер взрослым, должен получить
     # лицо хотя бы к концу правления: десятилетний такт мог его не застать.
     if not reign.skills:
-        grown_up(ctx, polity, date.year)
+        _endow_late(ctx, polity, reign, date.year)
     world.refresh_populations()
     closing = rulers_mod.snapshot(world, polity)
     if polity.status != ACTIVE:
@@ -101,6 +101,28 @@ def close_reign(ctx, reign, date: Date, reason: str) -> None:
     reign.verdict = grade
     reign.score = round(max(0.0, score), 3)
     _name_by_deeds(ctx, polity, reign, date)
+
+
+def _endow_late(ctx, polity, reign, year: int) -> None:
+    """Задним числом даёт лицо государю, который его не успел получить.
+
+    ``grown_up`` работает по живым: он застаёт того, кто дорос до
+    совершеннолетия и продолжает править. Но бывает и так, что государь
+    сел на престол ребёнком, вырос и умер в один и тот же десяток лет —
+    такт его не застал, и в летописи оставался безликий король. Здесь
+    он получает нрав и умения хотя бы к своему приговору.
+    """
+    world = ctx.world
+    ruler = world.figures.get(reign.ruler_id)
+    if ruler is None:
+        return
+    if ruler.skills:
+        # Нрав у государя есть, а в записи о правлении его нет: бывает у
+        # тех, кто возвращался на престол.
+        _sync_reign(world, polity, ruler)
+        return
+    _endow(ctx, polity, ruler, world.houses.get(ruler.house_id), year)
+    _sync_reign(world, polity, ruler)
 
 
 def _name_by_deeds(ctx, polity, reign, date) -> None:

@@ -267,7 +267,12 @@ def _pick_spec(ctx, year: int, rng):
     return rng.weighted(pairs)
 
 
-def _pick_regions(ctx, rng, spec, count: int, victim=None):
+# Великое бедствие должно коснуться людей: извержение в пустой глуши —
+# это событие природы, а не истории, и летописи о нём не пишут.
+WITNESSED_FROM = 4
+
+
+def _pick_regions(ctx, rng, spec, count: int, victim=None, severity: int = 0):
     world = ctx.world
     if victim is not None and victim.region_ids:
         chosen = list(victim.region_ids)
@@ -291,8 +296,36 @@ def _pick_regions(ctx, rng, spec, count: int, victim=None):
         if any(weight > 0.2 for _, weight in pairs):
             return _grow_regions(world, rng, [rng.weighted(pairs)], count)
 
+    if severity >= WITNESSED_FROM:
+        # Очаг великой беды ищут там, где есть кому её запомнить.
+        lived_in = [(region, float(_souls_in(world, region.id)))
+                    for region in pool]
+        lived_in = [(region, souls) for region, souls in lived_in if souls > 0]
+        if lived_in:
+            seed_region = rng.weighted([(region, souls ** 0.6)
+                                        for region, souls in lived_in])
+            return _grow_regions(world, rng, [seed_region.id], count)
+
     seed_region = rng.choice(sorted(pool, key=lambda region: region.id))
     return _grow_regions(world, rng, [seed_region.id], count)
+
+
+def _souls_in(world, region_id: str) -> int:
+    """Сколько душ живёт в этой земле — в городах, племенах и лагерях."""
+    total = 0
+    for settlement_id in world.active_settlements:
+        settlement = world.settlements[settlement_id]
+        if settlement.region_id == region_id:
+            total += world.settlement_realm(settlement)
+    for tribe_id in world.active_tribes:
+        tribe = world.tribes[tribe_id]
+        if tribe.region_id == region_id:
+            total += tribe.population
+    for camp_id in world.active_camps:
+        camp = world.camps[camp_id]
+        if camp.region_id == region_id:
+            total += camp.population
+    return total
 
 
 def _grow_regions(world, rng, start_ids, count: int) -> list:
@@ -352,7 +385,8 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
         if victim is None:
             return None
     if not region_ids:
-        region_ids = _pick_regions(ctx, rng, spec, count, victim)
+        region_ids = _pick_regions(ctx, rng, spec, count, victim,
+                                   severity)
     region_ids = [rid for rid in region_ids if rid in world.regions]
     if not region_ids:
         return None

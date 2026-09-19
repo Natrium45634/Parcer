@@ -77,8 +77,19 @@ def claim(ctx, polity, race, year: int):
 
 
 def form(ctx, first, second, monarch, year: int, date, rng):
-    """Записывает унию: first — держава государя, second — вторая корона."""
+    """Записывает унию: first — держава государя, second — вторая корона.
+
+    Третьей короны на той же голове не бывает: если какая-то из держав
+    уже состоит в унии, прежняя уния при этом кончается — иначе держава
+    числилась бы разом в двух, а помнила бы только последнюю.
+    """
     world = ctx.world
+    for polity in (first, second):
+        running = world.unions.get(polity.union_id)
+        if running is not None and running.status == ACTIVE:
+            _close(ctx, running, world.polities.get(running.first_id),
+                   world.polities.get(running.second_id), year, rng,
+                   reason="корона ушла в новую унию", absorbed=True)
     union = world.add_union(
         first_id=first.id, second_id=second.id, monarch_id=monarch.id,
         started=date, monarchs=[monarch.id])
@@ -127,13 +138,17 @@ def upkeep(ctx, year: int, period: int) -> None:
             _merge(ctx, union, first, second, year, rng)
 
 
-def _close(ctx, union, first, second, year: int, rng, gone: bool = False) -> None:
+def _close(ctx, union, first, second, year: int, rng, gone: bool = False,
+           reason: str = "", absorbed: bool = False) -> None:
     world = ctx.world
     date = ctx.date_in(rng, year, union.started
                        if union.started.year == year else None)
-    world.end_union(union, date,
-                    "одной из держав не стало" if gone else "короны разошлись")
-    title, text = texts.union_split(rng, union, first, second, gone=gone)
+    world.end_union(union, date, reason or
+                    ("одной из держав не стало" if gone else "короны разошлись"))
+    if absorbed:
+        title, text = texts.union_absorbed(rng, union, first, second)
+    else:
+        title, text = texts.union_split(rng, union, first, second, gone=gone)
     subjects = [union.id] + [p.id for p in (first, second) if p is not None]
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="union_end",

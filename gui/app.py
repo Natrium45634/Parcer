@@ -14,7 +14,7 @@ from worldgen import chronicle, storage
 from worldgen.engine import GenerationCancelled, Settings, generate
 from worldgen.models import ACTIVE
 from worldgen.races import RACES, RACES_BY_ID, get_race
-from worldgen.rng import random_seed_text
+from worldgen.rng import normalize_seed, random_seed_text
 from worldgen.timeline import years_text
 
 APP_TITLE = "Хронист — генератор фэнтезийных историй"
@@ -176,7 +176,7 @@ class ChronicleApp(tk.Tk):
         ttk.Label(panel, text="Настройки мира", style="Head.TLabel").grid(
             row=0, column=0, columnspan=8, sticky="w", pady=(0, 8))
 
-        self.seed_var = tk.StringVar(value="Начало")
+        self.seed_var = tk.StringVar(value=random_seed_text())
         self.years_var = tk.StringVar(value="10000")
         self.regions_var = tk.StringVar(value="18")
         self.density_var = tk.StringVar(value=DENSITY_CHOICES[1][0])
@@ -428,7 +428,10 @@ class ChronicleApp(tk.Tk):
         except ValueError:
             regions = 18
         density = dict(DENSITY_CHOICES).get(self.density_var.get(), 1.0)
-        seed = self.seed_var.get().strip() or "Начало"
+        # Код сида приводится к единому виду прямо в поле: человек видит,
+        # под каким именем мир уйдёт в летопись.
+        seed = normalize_seed(self.seed_var.get()) or random_seed_text()
+        self.seed_var.set(seed)
         return Settings(seed=seed, years=years, regions=regions, density=density,
                         map_path=self.map_path)
 
@@ -550,7 +553,8 @@ class ChronicleApp(tk.Tk):
     def _show_welcome(self) -> None:
         self._set_text(self.chronicle_text, (
             "\n  Здесь появится летопись мира.\n\n"
-            "  1. Впишите сид (любое слово) или нажмите «Случайный».\n"
+            "  1. Нажмите «Случайный» — получите код вида «KR7M-93XD» —\n"
+            "     или впишите свой: хоть код, хоть любое слово.\n"
             "  2. Укажите, сколько лет истории нужно сгенерировать.\n"
             "  3. Нажмите «Сгенерировать мир».\n\n"
             "  Один и тот же сид всегда даёт одну и ту же историю.\n"

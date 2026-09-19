@@ -128,3 +128,26 @@ def union_merged(rng, union, first, second) -> tuple:
                                        "years": years_text(max(1, union.years))},
         rng.choice(MERGE_NOTES))
     return ("Державы сливаются: %s и %s" % (first.name, second.name)), cap(text)
+
+
+# ---------------------------------------------------------------------------
+# Уния уступает место новой
+# ---------------------------------------------------------------------------
+
+ABSORBED_TEMPLATES = (
+    "Эта уния кончается не распадом, а прибавлением: та же голова "
+    "принимает ещё одну корону, и прежний договор переписывают заново. "
+    "Продержалась она %(years)s.",
+    "Прежняя уния растворяется в новой: корон стало больше, чем было, и "
+    "старые грамоты теряют силу. %(years)s — весь её век.",
+    "Уния уступает место новой, где тот же государь стоит во главе "
+    "большего. Прожила она %(years)s.",
+)
+
+
+def union_absorbed(rng, union, first, second) -> tuple:
+    text = rng.choice(ABSORBED_TEMPLATES) % {
+        "years": years_text(max(1, union.years))}
+    return ("Уния уступает новой: %s и %s"
+            % (first.name if first else "?",
+               second.name if second else "?")), cap(text)

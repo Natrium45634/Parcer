@@ -145,8 +145,8 @@ def _tend(ctx, first, second, year: int, period: int, rng, index=None) -> None:
         higher = dip.pact_kind_for(value, pact.kind)
         if higher and rng.chance(PACT_CHANCE) \
                 and world.war_between(first.id, second.id) is None:
-            world.end_pact(pact, ctx.date_in(rng, year), "перерос в %s"
-                           % dip.PACT_NAMES[higher])
+            world.end_pact(pact, _after_signing(ctx, pact, year, rng),
+                           "перерос в %s" % dip.PACT_NAMES[higher])
             league = world.leagues.get(pact.league_id)
             if league is not None and league.status == ACTIVE:
                 pact.league_id = ""
@@ -242,9 +242,20 @@ def _marriageable(world, polity, year: int):
     return people[0]
 
 
+def _after_signing(ctx, pact, year: int, rng):
+    """Дата расторжения — не раньше дня, когда договор подписали.
+
+    Посольство может заключить договор в любой день года, а державы
+    пересматривают дела своим чередом: без этой оговорки договор иногда
+    рвали за месяц до того, как поставили под ним печать.
+    """
+    return ctx.date_in(rng, year,
+                       pact.signed if pact.signed.year == year else None)
+
+
 def _break_pact(ctx, pact, first, second, reasons, year: int, rng) -> None:
     world = ctx.world
-    date = ctx.date_in(rng, year)
+    date = _after_signing(ctx, pact, year, rng)
     world.end_pact(pact, date, "отношения испортились")
     league = world.leagues.get(pact.league_id)
     if league is not None and league.status == ACTIVE:

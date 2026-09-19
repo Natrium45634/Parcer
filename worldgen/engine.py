@@ -20,7 +20,7 @@ from dataclasses import dataclass, asdict
 from .chronicle_map import MapRecorder
 from .context import GenContext
 from .eras import build_eras
-from .rng import seed_to_int
+from .rng import normalize_seed, seed_to_int
 from .systems import (aristocracy, calamity, diplomacy, embassy, era_events,
                       exploration, founding, geography, guilds, houses, lives,
                       nations, notables, peoples, religion, soldiery, spies,
@@ -51,7 +51,10 @@ class Settings:
         years = max(50, min(100000, int(self.years)))
         regions = max(6, min(60, int(self.regions)))
         density = max(0.2, min(3.0, float(self.density)))
-        return Settings(seed=str(self.seed), years=years, regions=regions,
+        # Код сида приводится к единому виду: «kr7m93xd» и «KR7M-93XD» —
+        # один и тот же мир. Обычные слова остаются как написаны.
+        return Settings(seed=normalize_seed(self.seed), years=years,
+                        regions=regions,
                         density=density, map_path=str(self.map_path or ""),
                         map_interval=max(5, min(1000, int(self.map_interval))))
 

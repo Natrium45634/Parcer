@@ -438,21 +438,26 @@ def audit(world) -> list:
 
     # 5. Связь урона с длительностью: долгая беда не должна быть безобиднее
     #    короткой той же тяжести.
+    # Сравнивать надо подобное с подобным: долгая перемена климата и
+    # нашествие демонов убивают по-разному и должны мериться каждое со
+    # своей роднёй, иначе безобидный по замыслу ледник вечно числится
+    # аномалией рядом с легионом.
     by_severity = {}
     for item in world.calamities.values():
         if item.end is None or item.severity < 3:
             continue
-        by_severity.setdefault(item.severity, []).append(item)
-    for severity, items in sorted(by_severity.items()):
+        by_severity.setdefault((item.kind, item.severity), []).append(item)
+    for (kind, severity), items in sorted(by_severity.items()):
         if len(items) < 3:
             continue
         longest = max(items, key=lambda c: c.end.year - c.start.year)
         typical = sorted(c.deaths for c in items)[len(items) // 2]
         span = longest.end.year - longest.start.year
         if span > 200 and typical > 0 and longest.deaths < typical * 0.2:
-            note("самое долгое бедствие тяжести %d (%s, %d лет) унесло %d — "
-                 "меньше пятой части обычного (%d)"
-                 % (severity, longest.name, span, longest.deaths, typical))
+            note("самое долгое бедствие рода «%s» тяжести %d (%s, %d лет) "
+                 "унесло %d — меньше пятой части обычного (%d)"
+                 % (KIND_NAMES.get(kind, kind), severity, longest.name,
+                    span, longest.deaths, typical))
 
     # 6. Тяжёлое бедствие без единой жертвы.
     empty = [c for c in world.calamities.values()

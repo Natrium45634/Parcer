@@ -156,17 +156,87 @@ class RngHub:
         return rng
 
 
+# ---------------------------------------------------------------------------
+# Сиды: коды, которые не жалко диктовать вслух
+# ---------------------------------------------------------------------------
+#
+# Сид — это имя мира, и его переписывают от руки, диктуют и вставляют в
+# письма. Поэтому код собран из букв и цифр, которые нельзя перепутать:
+# ни нуля рядом с «O», ни единицы рядом с «I», ни пятёрки рядом с «S».
+# Пишется он двумя четвёрками через дефис — «KR7M-93XD»: так и читается
+# легче, и на слух разбирается.
+
+# В коде нет букв, которые путают с цифрами: вместо «O» пишется ноль,
+# вместо «I» — единица, а «B», «S», «Z» и «Q» не встречаются вовсе.
+SEED_LETTERS = "ACDEFGHJKLMNPRTUVWXY"      # без B, I, O, Q, S, Z
+SEED_DIGITS = "0123456789"
+SEED_ALPHABET = SEED_LETTERS + SEED_DIGITS
+SEED_GROUP = 4
+SEED_GROUPS = 2
+SEED_LENGTH = SEED_GROUP * SEED_GROUPS
+
+# Что во что превращается, если сид набрали как услышали или как увидели:
+# спорные латинские буквы и кириллица, неотличимая от латиницы на вид.
+SEED_FIXES = {
+    "B": "8", "I": "1", "O": "0", "Q": "0", "S": "5", "Z": "2",
+    "А": "A", "В": "8", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "0",
+    "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X", "Ё": "E",
+    "І": "1", "Ѕ": "5", "Ј": "J",
+}
+
+
+def make_seed_text(raw: int) -> str:
+    """Собирает код сида из 64-битного числа."""
+    letters = []
+    value = raw
+    for _ in range(SEED_LENGTH):
+        letters.append(SEED_ALPHABET[value % len(SEED_ALPHABET)])
+        value //= len(SEED_ALPHABET)
+    # В каждой четвёрке должна быть и буква, и цифра: иначе код читается
+    # то как слово, то как число, и глазу не за что зацепиться.
+    for group in range(SEED_GROUPS):
+        start = group * SEED_GROUP
+        chunk = letters[start:start + SEED_GROUP]
+        if not any(item in SEED_DIGITS for item in chunk):
+            letters[start + (raw >> group) % SEED_GROUP] = \
+                SEED_DIGITS[(raw >> (group * 3)) % len(SEED_DIGITS)]
+        elif not any(item in SEED_LETTERS for item in chunk):
+            letters[start + (raw >> group) % SEED_GROUP] = \
+                SEED_LETTERS[(raw >> (group * 5)) % len(SEED_LETTERS)]
+    return "-".join("".join(letters[i:i + SEED_GROUP])
+                    for i in range(0, SEED_LENGTH, SEED_GROUP))
+
+
+def normalize_seed(text) -> str:
+    """Приводит набранный код к единому виду — и только код.
+
+    «kr7m93xd», «KR7M-93XD» и «КR7М 93ХD» набранное вперемешку с
+    кириллицей — это один и тот же мир. А вот «Начало», «карта-1» и
+    любое другое слово остаются как есть: их никто не диктует по буквам,
+    и трогать их — значит ломать старые сиды.
+    """
+    raw = str(text).strip()
+    if not raw:
+        return "Начало"          # пустое поле — мир по умолчанию
+    body = []
+    for letter in raw.upper():
+        if letter in " -_.":
+            continue
+        body.append(SEED_FIXES.get(letter, letter))
+    code = "".join(body)
+    if len(code) != SEED_LENGTH:
+        return raw
+    if any(letter not in SEED_ALPHABET for letter in code):
+        return raw
+    return "-".join(code[i:i + SEED_GROUP]
+                    for i in range(0, SEED_LENGTH, SEED_GROUP))
+
+
 def random_seed_text() -> str:
-    """Случайный сид для кнопки «перемешать» (единственное недетерминированное место)."""
+    """Случайный сид для кнопки «перемешать».
+
+    Единственное недетерминированное место во всём движке.
+    """
     import os
 
-    words = (
-        "аэр", "бран", "вел", "гор", "драк", "эль", "жар", "зим", "иль", "кар",
-        "лун", "мор", "нор", "орк", "пепл", "рун", "сол", "тар", "урд", "фел",
-        "хрон", "цер", "черн", "шор", "эрн", "юрт", "ярн",
-    )
-    raw = int.from_bytes(os.urandom(8), "big")
-    first = words[raw % len(words)]
-    second = words[(raw >> 8) % len(words)]
-    number = (raw >> 16) % 10000
-    return "%s%s-%04d" % (first.capitalize(), second, number)
+    return make_seed_text(int.from_bytes(os.urandom(8), "big"))
