@@ -442,6 +442,7 @@ def render_folks(world) -> str:
 
 def render_tongues(world) -> str:
     """Языки: семьи, звуковые законы, письменность и те, кто на них говорит."""
+    from . import narrative_tongues
     from . import races as races_mod
     from . import tongues as tng
 
@@ -504,7 +505,8 @@ def render_tongues(world) -> str:
                 source = world.tongues.get(tongue.script_from)
                 origin = ""
                 if source is not None and source.id != tongue.id:
-                    origin = ", взято у народа, что говорит на «%s»" % source.name
+                    origin = (", взято у народа, что говорит на %s"
+                              % narrative_tongues.quoted(source.name))
                 rows.append("%s    письмо: %s%s%s"
                             % (pad, tongue.script,
                                " с %d года" % tongue.script_year

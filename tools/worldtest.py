@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from worldgen import aristocracy as arist                        # noqa: E402
 from worldgen import nations as pol                              # noqa: E402
 from worldgen import rulers                                      # noqa: E402
+from worldgen import narrative_tongues                           # noqa: E402
 from worldgen import narrative_war                               # noqa: E402
 from worldgen.morph import genitive_noun                         # noqa: E402
 from worldgen.systems import war as war_system                   # noqa: E402
@@ -197,7 +198,7 @@ def tongue_line(world, polity) -> str:
     tongue = world.tongues.get(polity.tongue_id)
     if tongue is None:
         return "—"
-    parts = ["«%s»" % tongue.name]
+    parts = [narrative_tongues.quoted(tongue.name)]
     if tongue.laws:
         parts.append("законы: %s" % ", ".join(tongue.laws[:3]))
     if tongue.script:

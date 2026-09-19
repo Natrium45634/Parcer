@@ -130,3 +130,16 @@ def tongue_dead(rng, tongue, sacred: bool, years: int):
     return (("Священный язык: %s" if sacred else "Мёртвый язык: %s") % tongue.name,
             "%s Он прожил %s." % (cap(rng.choice(pool) % data),
                                   years_text(max(1, years))))
+
+
+def quoted(name: str) -> str:
+    """Имя языка в кавычках, с внутренними кавычками второго рода.
+
+    Имя наречия часто само содержит кавычки, и без этого выходит
+    «язык народа «Племена Чёрного Знака»» — две пары подряд. По-русски
+    вторые кавычки пишут лапками: «язык народа „Племена Чёрного Знака“».
+    """
+    if not name:
+        return "—"
+    inner = name.replace("«", "„").replace("»", "“")
+    return "«%s»" % inner
