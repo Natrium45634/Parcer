@@ -760,10 +760,10 @@ def render_politics(world) -> str:
             second = world.polities.get(union.second_id)
             span = "%d—%s" % (union.started.year,
                               union.ended.year if union.ended else "…")
-            rows.append("    %-46s %-12s государей %d"
-                        % (("%s и %s" % (first.full_name if first else "?",
-                                         second.full_name if second else "?"))[:46],
-                           span, len(union.monarchs)))
+            rows.append("    %s — %s и %s (государей %d)"
+                        % (span, first.full_name if first else "?",
+                           second.full_name if second else "?",
+                           len(union.monarchs)))
             names = []
             for figure_id in union.monarchs:
                 figure = world.figures.get(figure_id)
