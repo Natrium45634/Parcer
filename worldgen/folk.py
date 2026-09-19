@@ -40,6 +40,13 @@ ALT_SUFFIXES = ("ичи", "ане", "иты")
 
 # --- 2. Приметы: слова, а не слоги -------------------------------------
 MARK_HEADS = ("Люди", "Дети", "Народ", "Сыны", "Племена")
+# «Люди Тихих Троп» — имя для людей и только для них: у эльфийского
+# народа это слово в имени читается как ошибка.
+OTHER_HEADS = tuple(head for head in MARK_HEADS if head != "Люди")
+
+
+def heads_for(race) -> tuple:
+    return MARK_HEADS if race.id == "human" else OTHER_HEADS
 MARK_BY_TERRAIN = {
     races_mod.FOREST: ("Долгой Тени", "Хвойного Пояса", "Тихих Троп",
                        "Смолы и Коры", "Зелёного Молчания"),
@@ -72,6 +79,12 @@ MARK_GENERAL = ("Первого Костра", "Старого Договора"
 
 # --- 3. Ориентиры ------------------------------------------------------
 LANDMARK_HEADS = ("люди", "дети", "народ")
+OTHER_LANDMARK_HEADS = tuple(head for head in LANDMARK_HEADS
+                             if head != "люди")
+
+
+def landmark_heads_for(race) -> tuple:
+    return LANDMARK_HEADS if race.id == "human" else OTHER_LANDMARK_HEADS
 
 # --- черты народа: чем он отличается от собратьев по расе ---------------
 FOLK_TRAITS_BY_TERRAIN = {
@@ -118,7 +131,8 @@ def folk_name(rng, race, region, used) -> tuple:
 
     landmark = _landmark(region)
     if landmark:
-        ways.append(("landmark", "%s %s" % (rng.choice(LANDMARK_HEADS), landmark)))
+        ways.append(("landmark", "%s %s"
+                     % (rng.choice(landmark_heads_for(race)), landmark)))
 
     # Имя земли идёт впереди имени материка: иначе половина народов мира
     # окажется «виренцами» просто потому, что материк один на всех.
@@ -133,7 +147,8 @@ def folk_name(rng, race, region, used) -> tuple:
                              + rng.choice(ALT_SUFFIXES)))
 
     marks = MARK_BY_TERRAIN.get(region.terrain, ()) + MARK_GENERAL
-    ways.append(("mark", "%s %s" % (rng.choice(MARK_HEADS), rng.choice(marks))))
+    heads = heads_for(race)
+    ways.append(("mark", "%s %s" % (rng.choice(heads), rng.choice(marks))))
 
     # Занятым считается не только имя целиком, но и его сердцевина: иначе
     # рядом оказываются «Дети Позднего Снега», «Сыны Позднего Снега» и
@@ -143,7 +158,7 @@ def folk_name(rng, race, region, used) -> tuple:
         kind, name = rng.choice(ways)
         if kind == "mark":
             marks_pool = MARK_BY_TERRAIN.get(region.terrain, ()) + MARK_GENERAL
-            name = "%s %s" % (rng.choice(MARK_HEADS), rng.choice(marks_pool))
+            name = "%s %s" % (rng.choice(heads), rng.choice(marks_pool))
         if name and name not in used and _core(name) not in cores:
             return name, kind
     # Всё занято — добавляем сторону света, а не выдуманный слог.
