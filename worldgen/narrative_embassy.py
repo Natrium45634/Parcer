@@ -113,7 +113,7 @@ ANSWER_TEMPLATES = {
         "%(envoy)s не возвращается: посольство убивают при дворе %(host_gen)s. "
         "Кровь посла — повод к войне, который не забывается.",
         "Посольство перехватывают на обратном пути, и вину возлагают на "
-        "%(host)s. %(envoy)s среди убитых.",
+        "державу по имени %(host_name)s. %(envoy)s среди убитых.",
         "%(host)s велит казнить посла на месте. Такого не прощают.",
         "Свиту посольства вырезают на постоялом дворе. %(envoy)s гибнет "
         "первым.",
@@ -139,6 +139,7 @@ def embassy_answer(rng, sender, host, envoy, purpose, answer: str,
         pool = trimmed or pool
     text = rng.choice(pool) % {
         "host": host.full_name, "host_gen": polity_gen(host),
+        "host_name": host.name,
         "sender": sender.full_name, "envoy": envoy.name,
         "errand": purpose.errand,
     }

@@ -281,7 +281,8 @@ def _bone_relic(ctx, monster, hero, race, polity, year: int, date, rng,
         ctx, rng, race, year, art.TAKEN,
         region_id=monster.region_id, sort=art.WEAPON)
     artifact.material = "кость %s" % monster.name
-    artifact.material_gen = "из кости, взятой у %s" % monster.name
+    artifact.material_gen = "из кости, взятой у чудовища по имени %s" \
+        % monster.name
     artifact.notes.append("сделана из убитого в %d году %s"
                           % (year, monster.name))
     world.put_artifact(artifact, art.WITH_FIGURE, date, figure=hero,

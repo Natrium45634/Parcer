@@ -29,7 +29,8 @@ WAKE_TEMPLATES = (
     "В земле по имени %(region)s заводится то, чего там прежде не было: "
     "%(who)s. %(note)s",
     "Пастухи приносят весть, которой сперва не верят, а потом верят "
-    "слишком хорошо: в %(place)s поселился %(who_short)s. %(note)s",
+    "слишком хорошо: земля по имени %(region)s теперь не своя — на ней "
+    "%(who_short)s. %(note)s",
     "%(who)s приходит в эти земли и остаётся: место ему подходит. "
     "%(note)s",
     "Никто не помнит, когда это началось, но к этому году ясно: в земле "
@@ -45,27 +46,36 @@ LAIR_LINES = (
 )
 
 
+def _note(text: str) -> str:
+    """Приметы породы записаны обрывками — в летописи это целая фраза."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    return cap(text) if text.endswith((".", "!", "?")) else cap(text) + "."
+
+
 def awoken(rng, monster, region, note: str) -> tuple:
     text = rng.choice(WAKE_TEMPLATES) % {
         "who": beast_nom(monster), "who_short": monster.name,
         "region": region.name if region is not None else "безымянной",
         "place": region.name if region is not None else "той земле",
-        "note": note,
+        "note": _note(note),
     }
     text = "%s %s" % (text, rng.choice(LAIR_LINES))
     return ("Чудовище: %s" % monster.name), cap(text)
 
 
 HIDE_TEMPLATES = (
-    "В городе %(city)s появляется новый человек, о котором никто ничего "
+    "В городе по имени %(city)s появляется новый человек, о котором никто "
+    "ничего "
     "толком не знает. Через тридцать лет он выглядит так же, как в день "
     "приезда. %(note)s",
     "Никто не замечает главного: %(who_short)s живёт среди людей и живёт "
     "давно. %(note)s",
-    "Пропажи в %(city)s списывают на зверя, на разбойников и на дурную "
-    "воду. %(note)s",
-    "%(who)s селится в %(city)s и заводит знакомства с теми, кого не "
-    "хватятся. %(note)s",
+    "Пропажи в городе по имени %(city)s списывают на зверя, на "
+    "разбойников и на дурную воду. %(note)s",
+    "%(who)s селится в городе по имени %(city)s и заводит знакомства "
+    "с теми, кого не хватятся. %(note)s",
 )
 
 
@@ -73,7 +83,7 @@ def hidden(rng, monster, settlement, note: str) -> tuple:
     text = rng.choice(HIDE_TEMPLATES) % {
         "who": beast_nom(monster), "who_short": monster.name,
         "city": settlement.name if settlement is not None else "городе",
-        "note": note,
+        "note": _note(note),
     }
     return ("Ночная тварь: %s" % monster.name), cap(text)
 
@@ -85,8 +95,8 @@ def hidden(rng, monster, settlement, note: str) -> tuple:
 RAID_TEMPLATES = (
     "%(who)s выходит из логова и разоряет округу. Убитых считают "
     "сотнями, скот не считают вовсе.",
-    "Деревни у %(region)s пустеют: кто мог — ушёл, кто не мог — остался "
-    "там навсегда.",
+    "Деревни в земле по имени %(region)s пустеют: кто мог — ушёл, кто не "
+    "мог — остался там навсегда.",
     "Этот год в тех краях называют годом %(name)s и не поминают всуе.",
     "%(who)s берёт своё: сожжённые поля, угнанный скот и тишина по "
     "хуторам.",
@@ -113,9 +123,10 @@ def raided(rng, monster, region, dead: int) -> tuple:
 
 
 FEED_TEMPLATES = (
-    "В %(city)s снова пропадают люди. Считают, что виноват зверь.",
-    "Пропажи в %(city)s идут по одной в год, и это тянется дольше, чем "
-    "живут те, кто мог бы заметить.",
+    "В городе по имени %(city)s снова пропадают люди. Считают, что "
+    "виноват зверь.",
+    "Пропажи в городе по имени %(city)s идут по одной в год, и это "
+    "тянется дольше, чем живут те, кто мог бы заметить.",
     "Город хоронит очередного пропавшего без тела и без объяснений.",
 )
 

@@ -54,6 +54,7 @@ from worldgen.pantheon import (ALIGNMENT_NAMES, DOMAINS_BY_KEY,  # noqa: E402
 from worldgen.races import RACES_BY_ID, SUCCESSION_NAMES         # noqa: E402
 from worldgen.rng import random_seed_text                        # noqa: E402
 from worldgen.models import ACTIVE                                # noqa: E402
+from worldgen.systems.upheaval import GREAT as GREAT_KEYS        # noqa: E402
 from worldgen.world import RURAL_FACTOR                          # noqa: E402
 
 # Даты берутся по одной из каждой полосы истории: так срезы не сбиваются
@@ -760,6 +761,140 @@ def audit(world) -> list:
             if union.first_id == union.second_id:
                 bad("держава в унии сама с собой")
                 break
+
+    # 19. Вещи и места: то, из чего потом строят подземелья.
+    if world.artifacts:
+        with_owner = sum(1 for item in world.artifacts.values() if item.owner_id)
+        in_places = sum(1 for item in world.artifacts.values() if item.site_id)
+        cursed = sum(1 for item in world.artifacts.values() if item.curse)
+        hands = sorted(len(item.trail) for item in world.artifacts.values())
+        found.append(("=", "именных вещей: %d (у владельцев %d, в местах %d, "
+                      "проклятых %d), рук в самой заслуженной %d"
+                      % (len(world.artifacts), with_owner, in_places, cursed,
+                         hands[-1])))
+        lonely = [item for item in world.artifacts.values()
+                  if len(item.trail) <= 1 and item.made.year
+                  < world.total_years - 1500]
+        if len(lonely) > len(world.artifacts) * 0.6:
+            note("вещи не ходят по рукам: у %d из %d всего один владелец"
+                 % (len(lonely), len(world.artifacts)))
+    elif world.total_years >= 2000:
+        bad("за всю историю не выковано ни одной именной вещи")
+
+    if world.sites:
+        by_kind = Counter(item.kind for item in world.sites.values())
+        untouched = sum(1 for item in world.sites.values()
+                        if item.status == "нетронуто")
+        with_story = sum(1 for item in world.sites.values() if item.story)
+        found.append(("=", "мест истории: %d (%s), нетронутых %d"
+                      % (len(world.sites),
+                         ", ".join("%s %d" % (kind, count)
+                                   for kind, count in by_kind.most_common(4)),
+                         untouched)))
+        if with_story < len(world.sites) * 0.9:
+            bad("мест без своей истории: %d — подземелью не из чего расти"
+                % (len(world.sites) - with_story))
+        if untouched == 0 and len(world.sites) > 40:
+            note("не осталось ни одного нетронутого места: всё уже вскрыли")
+    elif world.total_years >= 2000:
+        bad("мир не оставил ни одного места с историей")
+
+    if world.monsters:
+        slain = sum(1 for item in world.monsters.values()
+                    if item.status == "убит")
+        alive = len(world.living_monsters)
+        biggest = max(item.kills for item in world.monsters.values())
+        found.append(("=", "именных чудовищ: %d (убито %d, живы %d), "
+                      "худшее съело %d"
+                      % (len(world.monsters), slain, alive, biggest)))
+        if slain == 0 and len(world.monsters) > 8:
+            note("ни одно чудовище так и не убито: героям нечего рассказывать")
+
+    # 20. Ремёсла: расходятся ли открытия и есть ли отстающие.
+    if world.discoveries:
+        spread = sorted(len(item.known_by) for item in world.discoveries.values())
+        levels = sorted(len(p.known) for p in
+                        (world.polities[pid] for pid in world.active_polities))
+        found.append(("=", "открытий: %d, самое расхожее знают %d держав; "
+                      "ремёсел у держав от %d до %d"
+                      % (len(world.discoveries), spread[-1],
+                         levels[0] if levels else 0,
+                         levels[-1] if levels else 0)))
+        if levels and levels[0] == levels[-1] and len(levels) > 3:
+            note("все державы знают поровну: ремесло не даёт им различий")
+    elif world.total_years >= 2000:
+        bad("за всю историю не сделано ни одного открытия")
+
+    # 21. Своды и легенды: врут ли летописцы и расходится ли молва.
+    if world.codices:
+        kept = sum(1 for item in world.codices.values()
+                   if item.status == "ведётся")
+        spans = sorted(item.span for item in world.codices.values())
+        keepers = max(len(item.keepers) for item in world.codices.values())
+        accuracy = sum(item.accuracy for item in world.codices.values()) \
+            / len(world.codices)
+        found.append(("=", "летописных сводов: %d (ведутся %d), самый долгий "
+                      "%d лет, рук за пером до %d, средняя точность %.2f"
+                      % (len(world.codices), kept, spans[-1], keepers,
+                         accuracy)))
+        if spans[-1] < 150 and world.total_years >= 3000:
+            note("ни один свод не продержался и полутора веков")
+        if keepers < 2 and len(world.codices) > 5:
+            note("летописи не передают: каждый свод кончается со своим "
+                 "летописцем")
+
+    if world.legends:
+        drifted = sum(1 for item in world.legends.values() if item.shifts)
+        abouts = Counter(item.about for item in world.legends.values())
+        found.append(("=", "легенд: %d (изменились в пересказе %d), о чём: %s"
+                      % (len(world.legends), drifted,
+                         ", ".join("%s %d" % (about, count)
+                                   for about, count in abouts.most_common(4)))))
+        if drifted == 0 and len(world.legends) > 10:
+            note("легенды не меняются в пересказе — а должны")
+
+    # 22. Законы: расходятся ли реформы и есть ли образцовые державы.
+    if world.laws:
+        famous = [item for item in world.laws.values() if item.famous]
+        widest = max(len(item.copied_by) for item in world.laws.values())
+        kinds = len({item.key for item in world.laws.values()})
+        found.append(("=", "реформ: %d видов %d, самую переняли %d держав, "
+                      "образцовых %d"
+                      % (len(world.laws), kinds, widest, len(famous))))
+        if widest <= 1 and len(world.laws) > 6:
+            note("реформы никто не перенимает: державы не смотрят друг на друга")
+    elif world.total_years >= 3000:
+        note("ни одна держава за всю историю не провела реформы")
+
+    # 23. Великие бедствия: меняли ли они карту и пережил ли мир это.
+    great = [item for item in world.calamities.values()
+             if item.key in GREAT_KEYS]
+    drowned = [r for r in world.regions.values() if r.drowned]
+    sundered = [r for r in world.regions.values() if r.sundered]
+    gone = world.notes.get("народов больше нет") or {}
+    peaks = world.notes.get("народ в лучший век") or {}
+    notable_gone = [rid for rid in gone if int(peaks.get(rid, 0)) >= 20000]
+    found.append(("=", "великих бедствий: %d (%s); затоплено земель %d, "
+                  "разрезано %d; народов ушло из мира %d"
+                  % (len(great),
+                     ", ".join(sorted({item.key for item in great})) or "нет",
+                     len(drowned), len(sundered), len(notable_gone))))
+    if len(great) > 6:
+        bad("великих бедствий %d за %d лет — это уже погода"
+            % (len(great), world.total_years))
+    if len(drowned) > len(world.regions) * 0.4:
+        bad("под водой оказалось больше трети мира: %d земель из %d"
+            % (len(drowned), len(world.regions)))
+    peak = int(world.notes.get("людей в лучший век") or 0)
+    now = world.world_population()
+    if peak and now * 20 < peak:
+        bad("мир опустел: от лучшего века осталась двадцатая доля "
+            "(%d из %d)" % (now, peak))
+    for calamity in great:
+        if calamity.key == "deep_waking" and not calamity.parent_id:
+            bad("«%s» поднялось ниоткуда, а должно быть осколком прошлого"
+                % calamity.name)
+            break
 
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:

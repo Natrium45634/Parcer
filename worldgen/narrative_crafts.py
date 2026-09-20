@@ -42,19 +42,19 @@ def discovered(rng, craft, figure, settlement, polity) -> tuple:
 
 
 SPREAD_TEMPLATES = (
-    "То, что придумали за морем, приходит с купцами: в %(polity)s "
-    "осваивают %(what)s.",
+    "То, что придумали за морем, приходит с купцами: в державе по имени "
+    "%(name)s осваивают %(what)s.",
     "%(polity)s перенимает %(what)s у соседей — не сразу и не даром.",
     "Мастера, переманенные щедростью, привозят с собой %(what)s.",
     "%(what)s доходит и сюда: переняли, переделали и стали считать своим.",
-    "Посольство возвращается не только с грамотой: в %(polity)s "
-    "появляется %(what)s.",
+    "Посольство возвращается не только с грамотой: в державе по имени "
+    "%(name)s появляется %(what)s.",
 )
 
 
 def spread(rng, craft, polity, source) -> tuple:
     text = rng.choice(SPREAD_TEMPLATES) % {
-        "polity": polity.full_name, "what": craft.name}
+        "polity": polity.full_name, "name": polity.name, "what": craft.name}
     if source is not None:
-        text = "%s Переняли у %s." % (text, source.name)
+        text = "%s Переняли у державы по имени %s." % (text, source.name)
     return ("Переняли: %s" % craft.name), cap(text)

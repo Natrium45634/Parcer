@@ -42,7 +42,7 @@ PACT_TEMPLATES = (
     "%(buyer)s не хватает %(need_gen)s, а у %(seller_gen)s его в избытке. "
     "Договор подписывают на десять лет.",
     "Купцы находят друг друга раньше послов: %(seller)s везёт %(need_acc)s "
-    "в %(buyer)s, обратно идёт %(back_acc)s.",
+    "в державу по имени %(buyer_name)s, обратно идёт %(back_acc)s.",
     "Голод учит считать: %(buyer)s покупает %(need_acc)s у %(seller_gen)s "
     "и платит тем, чего у самой девать некуда.",
     "Между %(seller_gen)s и %(buyer_gen)s ложится торговый путь. Возят "
@@ -63,6 +63,7 @@ PACT_ROAD = (
 def trade_pact(rng, buyer, seller, need, back, path_length: int):
     data = {
         "buyer": buyer.full_name, "buyer_gen": polity_gen(buyer),
+        "buyer_name": buyer.name,
         "seller": seller.full_name, "seller_gen": polity_gen(seller),
         "need_acc": acc(need), "need_gen": gen(need),
         "back_acc": acc(back) if back else "серебро",
@@ -106,12 +107,15 @@ SHORTAGE_TEMPLATES = {
         "Кузни %(polity_gen)s стоят: руды нет, а привозная дорога.",
         "Войско %(polity_gen)s перековывает старое оружие — нового железа "
         "взять негде.",
-        "Металл в %(polity)s дороже серебра, и это не оборот речи.",
+        "Металл в державе по имени %(name)s дороже серебра, и это не "
+        "оборот речи.",
     ),
     "лес": (
-        "Строевого леса в %(polity)s не осталось: последние рощи вырубили "
+        "Строевого леса в державе по имени %(name)s не осталось: "
+        "последние рощи вырубили "
         "на верфи.",
-        "Дома в %(polity)s ставят из камня не от хорошей жизни.",
+        "Дома в державе по имени %(name)s ставят из камня не от хорошей "
+        "жизни.",
     ),
     "соль": (
         "Без соли рыбу не сохранить, и %(polity)s платит за неё вдвое.",
@@ -119,14 +123,16 @@ SHORTAGE_TEMPLATES = {
 }
 SHORTAGE_GENERAL = (
     "%(polity)s остро не хватает %(good_gen)s, и это чувствует каждый двор.",
-    "Нужда в %(good_prep)s становится в %(polity)s делом государственным.",
-    "Чего в %(polity)s нет совсем — так это %(good_gen)s.",
+    "Нужда в %(good_prep)s становится в державе по имени %(name)s делом "
+    "государственным.",
+    "Чего в державе по имени %(name)s нет совсем — так это %(good_gen)s.",
 )
 
 
 def shortage(rng, polity, good):
     data = {
         "polity": polity.full_name, "polity_gen": polity_gen(polity),
+        "name": polity.name,
         "good_gen": gen(good), "good_prep": gen(good), "good_acc": acc(good),
     }
     pool = SHORTAGE_TEMPLATES.get(good)
@@ -141,14 +147,16 @@ FAMINE_TEMPLATES = (
     "В %(polity)s наступает голод. Считают не урожай, а умерших: %(dead)s.",
     "Два неурожая подряд, и %(polity)s начинает есть посевное зерно. "
     "Умерших — %(dead)s.",
-    "Голод в %(polity)s выкашивает окраины первыми. Всего погибает "
+    "Голод в державе по имени %(name)s выкашивает окраины первыми. "
+    "Всего погибает "
     "%(dead)s.",
     "Хлеба нет ни купить, ни отнять. %(polity)s теряет %(dead)s.",
 )
 
 
 def famine(rng, polity, dead: int):
-    data = {"polity": polity.full_name, "dead": _souls(dead)}
+    data = {"polity": polity.full_name, "name": polity.name,
+            "dead": _souls(dead)}
     return ("Голод: %s" % polity.name, cap(rng.choice(FAMINE_TEMPLATES) % data))
 
 

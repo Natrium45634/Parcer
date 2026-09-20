@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from .morph import accusative_noun
 from .narrative import cap
 
 
@@ -33,6 +34,17 @@ def thing_nom(artifact) -> str:
     return "%s %s" % (artifact.word, artifact.name)
 
 
+def thing_acc(artifact) -> str:
+    """«чашу по имени X» — винительный падеж, но только у слова рода.
+
+    Имя вещи остаётся как есть: склоняется только «чаша», «меч», «венец».
+    """
+    if artifact.word.lower() in artifact.name.lower():
+        return artifact.name
+    return "%s по имени %s" % (accusative_noun(artifact.word).lower(),
+                               artifact.name)
+
+
 # ---------------------------------------------------------------------------
 # Ковка
 # ---------------------------------------------------------------------------
@@ -40,7 +52,8 @@ def thing_nom(artifact) -> str:
 FORGE_TEMPLATES = (
     "%(maker)s заканчивает работу, которой отдал не один год: %(what)s, "
     "%(material)s. %(power)s",
-    "В кузне %(city)s рождается %(what)s — %(material)s. %(power)s",
+    "В кузне города по имени %(city)s рождается %(what)s — %(material)s. "
+    "%(power)s",
     "%(maker)s берётся за заказ, от которого отказались все прочие, и "
     "выходит %(what)s, %(material)s. %(power)s",
     "Работу ведут в тайне и заканчивают к сроку: %(what)s, %(material)s. "
@@ -88,7 +101,7 @@ GIFT_TEMPLATES = (
     "%(what)s, %(material)s. %(power)s",
     "Дар приходит во сне, а наутро лежит наяву: %(what)s, %(material)s. "
     "%(power)s",
-    "Жрецы выносят к народу %(what)s и говорят, что вещь дана свыше. "
+    "Жрецы выносят к народу %(what_acc)s и говорят, что вещь дана свыше. "
     "%(power)s",
     "За выстроенный храм бог платит щедро: %(what)s, %(material)s. "
     "%(power)s",
@@ -100,7 +113,8 @@ def gifted(rng, artifact, deity, temple) -> tuple:
         "power": artifact.powers[0] if artifact.powers else "не знает износа"}
     text = rng.choice(GIFT_TEMPLATES) % {
         "deity": deity.name if deity is not None else "Бог",
-        "what": thing_nom(artifact), "material": artifact.material_gen,
+        "what": thing_nom(artifact), "what_acc": thing_acc(artifact),
+        "material": artifact.material_gen,
         "power": power,
     }
     if artifact.curse:
@@ -114,11 +128,12 @@ def gifted(rng, artifact, deity, temple) -> tuple:
 # ---------------------------------------------------------------------------
 
 GRANT_TEMPLATES = (
-    "%(who)s получает %(what)s из державной сокровищницы — за дело, а не "
+    "%(who)s получает %(what_acc)s из державной сокровищницы — за дело, а не "
     "за родство.",
     "Государь жалует %(who)s вещь, о которой говорят все: %(what_nom)s. "
     "Такие дают перед войной, а не после.",
-    "%(what_nom)s переходит к %(who)s, и при дворе это считают знаком.",
+    "%(what_nom)s переходит в другие руки: принимает её %(who)s, и при "
+    "дворе это считают знаком.",
     "%(who)s принимает вещь из державной казны — %(what_nom)s — и "
     "клянётся вернуть её или не вернуться самому.",
 )
@@ -127,15 +142,15 @@ GRANT_TEMPLATES = (
 def granted(rng, artifact, figure, polity) -> tuple:
     text = rng.choice(GRANT_TEMPLATES) % {
         "who": figure.name, "what": thing(artifact),
-        "what_acc": thing(artifact), "what_nom": thing_nom(artifact),
+        "what_acc": thing_acc(artifact), "what_nom": thing_nom(artifact),
     }
     return ("Вещь в новых руках: %s" % artifact.name), cap(text)
 
 
 INHERIT_TEMPLATES = (
-    "%(what_nom)s переходит к наследнику: %(who)s принимает его вместе с "
+    "%(what_nom)s достаётся наследнику: %(who)s принимает её вместе с "
     "долгами прежнего хозяина.",
-    "Вещь остаётся в роду: %(what_nom)s достаётся %(who)s.",
+    "Вещь остаётся в роду: %(what_nom)s принимает %(who)s.",
     "%(who)s берёт вещь из рук умирающего — %(what_nom)s, — и это видят "
     "все, кому нужно было увидеть.",
 )
@@ -143,7 +158,7 @@ INHERIT_TEMPLATES = (
 
 def inherited(rng, artifact, figure) -> tuple:
     text = rng.choice(INHERIT_TEMPLATES) % {
-        "what_nom": thing_nom(artifact), "what_acc": thing(artifact),
+        "what_nom": thing_nom(artifact), "what_acc": thing_acc(artifact),
         "who": figure.name,
     }
     return ("Наследство: %s" % artifact.name), cap(text)
@@ -159,7 +174,7 @@ SEIZED_TEMPLATES = (
 
 def seized(rng, artifact, figure) -> tuple:
     text = rng.choice(SEIZED_TEMPLATES) % {
-        "what_nom": thing_nom(artifact), "what_acc": thing(artifact),
+        "what_nom": thing_nom(artifact), "what_acc": thing_acc(artifact),
         "who": figure.name,
     }
     return ("Добыча: %s" % artifact.name), cap(text)
@@ -183,7 +198,7 @@ LOST_TEMPLATES = (
 
 def lost(rng, artifact, region) -> tuple:
     text = rng.choice(LOST_TEMPLATES) % {
-        "what_nom": thing_nom(artifact), "what_acc": thing(artifact),
+        "what_nom": thing_nom(artifact), "what_acc": thing_acc(artifact),
         "name": artifact.name}
     if region is not None:
         text = "%s Последний раз %s видели в земле по имени %s." % (
@@ -208,7 +223,7 @@ def found(rng, artifact, figure, place: str, years: int) -> tuple:
     text = rng.choice(FOUND_TEMPLATES) % {
         "who": figure.name if figure is not None else "неизвестный",
         "place": place, "place_cap": cap(place),
-        "what_nom": thing_nom(artifact), "what_acc": thing(artifact),
+        "what_nom": thing_nom(artifact), "what_acc": thing_acc(artifact),
         "years": years_text(max(1, years)),
     }
     return ("Находка: %s" % artifact.name), cap(text)
@@ -225,7 +240,7 @@ DESTROYED_TEMPLATES = (
 
 def destroyed(rng, artifact) -> tuple:
     text = rng.choice(DESTROYED_TEMPLATES) % {
-        "what_nom": thing_nom(artifact), "what_acc": thing(artifact),
+        "what_nom": thing_nom(artifact), "what_acc": thing_acc(artifact),
         "name": artifact.name}
     return ("Конец вещи: %s" % artifact.name), cap(text)
 
