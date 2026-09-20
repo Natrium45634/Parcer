@@ -47,6 +47,8 @@ from worldgen.morph import genitive_noun                         # noqa: E402
 from worldgen.systems import war as war_system                   # noqa: E402
 from worldgen import warfare                                     # noqa: E402
 from worldgen import warfare as wf                               # noqa: E402
+from worldgen import goods                                       # noqa: E402
+from worldgen import crafts as crafts_mod                        # noqa: E402
 from worldgen.catastrophe import KIND_NAMES, SEVERITY_NAMES      # noqa: E402
 from worldgen.engine import Settings, generate                   # noqa: E402
 from worldgen.pantheon import (ALIGNMENT_NAMES, DOMAINS_BY_KEY,  # noqa: E402
@@ -228,7 +230,7 @@ def faith_line(world, faith_id: str) -> str:
 
 
 def polity_block(world, polity, year: int, population: int, cities: int,
-                 out) -> None:
+                 out, middle: float = 0.0) -> None:
     """Держава в подробностях: кто правит, чем правит и во что верит."""
     capital = world.settlements.get(polity.capital_id)
     out("   основана %s — держава стоит %d-й год"
@@ -254,6 +256,16 @@ def polity_block(world, polity, year: int, population: int, cities: int,
     if polity.policy:
         out("   закон о народах: %s" % pol.POLICY_NAMES.get(polity.policy,
                                                             polity.policy))
+    out("   хозяйство: %s" % goods.living_line(
+        goods.polity_balance(world, polity),
+        goods.polity_souls(world, polity), middle))
+    if polity.shortages:
+        out("   не хватает: %s" % ", ".join(
+            "%s (%.0f%%)" % (good, value * 100)
+            for good, value in polity.shortages[:4]))
+    if polity.known:
+        out("   ремёсел освоено: %d из %d" % (len(polity.known),
+                                              len(crafts_mod.CRAFTS)))
     out("   вера: %s" % faith_line(world, polity.faith_id))
     out("   язык двора: %s" % tongue_line(world, polity))
     guilds = world.guilds_of(polity)
@@ -378,11 +390,13 @@ def snapshot(world, year: int, out) -> None:
     else:
         heads = ("КРУПНЕЙШАЯ ДЕРЖАВА", "ВТОРАЯ ДЕРЖАВА МИРА",
                  "ТРЕТЬЯ ДЕРЖАВА МИРА")
+        middle = goods.middle_wealth(world)
         for index, (population, cities, polity) in enumerate(active[:3]):
             out("")
             out("%s: %s — %s" % (heads[index], polity.full_name,
                                  race_name(polity.race_id)))
-            polity_block(world, polity, year, population, cities, out)
+            polity_block(world, polity, year, population, cities, out,
+                         middle)
         if len(active) > 3:
             out("")
             out("ОСТАЛЬНЫЕ ДЕРЖАВЫ (всего %d):" % len(active))
@@ -1083,6 +1097,47 @@ def audit(world) -> list:
                 bad("бедствие «%s» старше своего родителя «%s»"
                     % (calamity.name, parent.name))
                 break
+
+    # 26. Хозяйство: ясно ли, чем держава живёт, и разное ли оно у разных.
+    living = [world.polities[pid] for pid in world.active_polities]
+    if living:
+        middle = goods.middle_wealth(world)
+        mainstays, rich, poor = Counter(), None, None
+        best, worst = -1.0, 1e9
+        for polity in living:
+            souls = goods.polity_souls(world, polity)
+            if souls <= 0:
+                continue
+            balance = goods.polity_balance(world, polity)
+            rows = goods.mainstay(balance, 2)
+            if rows:
+                mainstays[rows[0][0]] += 1
+            value = goods.wealth(balance, souls)
+            if value > best:
+                best, rich = value, (polity, rows)
+            if value < worst:
+                worst, poor = value, (polity, rows)
+        if mainstays:
+            found.append(("=", "хозяйство: держав %d, опор %d; чаще всего "
+                          "живут %s (%d держав); достаток середняка %.1f"
+                          % (len(living), len(mainstays),
+                             goods.instr(mainstays.most_common(1)[0][0]),
+                             mainstays.most_common(1)[0][1], middle)))
+        if rich is not None and poor is not None and rich[0] is not poor[0]:
+            found.append(("=", "богаче всех %s (%s, %.1f), беднее всех %s "
+                          "(%s, %.1f)"
+                          % (rich[0].name,
+                             goods.instr(rich[1][0][0]) if rich[1] else "ничем",
+                             best, poor[0].name,
+                             goods.instr(poor[1][0][0]) if poor[1] else "ничем",
+                             worst)))
+        top = mainstays.most_common(1)[0][1] if mainstays else 0
+        if len(living) >= 6 and top * 10 > len(living) * 8:
+            note("почти все державы мира живут одним и тем же — хозяйства "
+                 "не различаются")
+        if len(living) >= 6 and len(mainstays) < 3:
+            note("опор у держав всего %d: хозяйство мира однообразно"
+                 % len(mainstays))
 
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:

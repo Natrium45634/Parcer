@@ -543,8 +543,11 @@ def render_tongues(world) -> str:
 def render_trade(world) -> str:
     """Чем державы богаты, чего им не хватает и кто с кем торгует."""
 
+    from . import goods as goods_mod
+
     rows = ["ХОЗЯЙСТВО И ТОРГОВЛЯ", ""]
     living = [world.polities[pid] for pid in world.active_polities]
+    middle = goods_mod.middle_wealth(world)
     open_routes = [world.routes[rid] for rid in world.active_routes]
     rows.append("  Держав: %d. Торговых путей за историю: %d, действует: %d."
                 % (len(living), len(world.routes), len(open_routes)))
@@ -574,11 +577,14 @@ def render_trade(world) -> str:
         if not polity.goods:
             continue
         rows.append("  %s" % polity.full_name)
-        wealth = ", ".join("%s %d" % (good, values[0])
+        souls = goods_mod.polity_souls(world, polity)
+        balance = goods_mod.polity_balance(world, polity)
+        rows.append("      %s" % goods_mod.living_line(balance, souls, middle))
+        output = ", ".join("%s %d" % (good, values[0])
                            for good, values in sorted(
                                polity.goods.items(),
                                key=lambda kv: -kv[1][0])[:6])
-        rows.append("      даёт: %s" % (wealth or "—"))
+        rows.append("      даёт: %s" % (output or "—"))
         if polity.shortages:
             rows.append("      не хватает: %s" % ", ".join(
                 "%s (%.0f%%)" % (good, value * 100)

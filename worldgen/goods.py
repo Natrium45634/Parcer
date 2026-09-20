@@ -88,6 +88,65 @@ TRAIT_YIELD = {
 }
 
 
+# Промысел расы — то, чем народ славен независимо от земли. Дворф и на
+# равнине останется рудознатцем: он найдёт болотное железо там, где
+# человек пройдёт мимо. Эльф и в степи разведёт сад.
+#
+# Это не про землю, а про руки: числа здесь вдвое-втрое меньше, чем у
+# местности, и с голой пустыни дворф хлеба не снимет. Но там, где земля
+# и промысел сходятся — дворфы в горах, эльфы в лесу, — получается то,
+# чем эта держава живёт и чем её знают у соседей.
+RACE_YIELD = {
+    "human":      {GRAIN: 0.30, TIMBER: 0.12, WOOL: 0.10},
+    "dwarf":      {METAL: 0.45, STONE: 0.35, GEMS: 0.25},
+    "elf":        {WINE: 0.30, TIMBER: 0.25, REAGENTS: 0.25, FURS: 0.12},
+    "high_elf":   {REAGENTS: 0.45, GEMS: 0.20, WINE: 0.15},
+    "dark_elf":   {REAGENTS: 0.40, GEMS: 0.15, SPICE: 0.12},
+    "catfolk":    {SPICE: 0.35, WOOL: 0.15, GEMS: 0.10},
+    "wolfkin":    {FURS: 0.35, MEAT: 0.25},
+    "bearkin":    {WINE: 0.25, FURS: 0.20, REAGENTS: 0.18, MEAT: 0.15},
+    "foxkin":     {REAGENTS: 0.25, FURS: 0.20, WINE: 0.15},
+    "birdkin":    {SPICE: 0.20, WOOL: 0.15, FISH: 0.12},
+    "lizardfolk": {FISH: 0.30, REAGENTS: 0.18, MEAT: 0.15},
+    "serpentfolk": {REAGENTS: 0.40, SPICE: 0.15},
+    "toadfolk":   {FISH: 0.30, REAGENTS: 0.25},
+    "turtlefolk": {FISH: 0.40, SALT: 0.18},
+    "crabfolk":   {SALT: 0.40, FISH: 0.30, GEMS: 0.10},
+    "orc":        {MEAT: 0.25, METAL: 0.15},
+    "goblin":     {METAL: 0.15, FURS: 0.12},
+    "troll":      {STONE: 0.30, MEAT: 0.15},
+    "ogre":       {MEAT: 0.30, STONE: 0.15},
+    "kobold":     {METAL: 0.30, GEMS: 0.15, STONE: 0.15},
+    "gnoll":      {MEAT: 0.30, FURS: 0.20},
+}
+
+# Ремесло меняет то, что земля и руки дают. Две державы одной расы на
+# одной и той же земле были неразличимы до этой таблицы: считалось, что
+# хозяйство зависит только от почвы и от крови. А оно зависит ещё и от
+# того, что в державе успели придумать и перенять.
+CRAFT_YIELD = {
+    "plough":     {GRAIN: 0.22},
+    "rotation":   {GRAIN: 0.18, MEAT: 0.10},
+    "watermill":  {GRAIN: 0.16},
+    "irrigation": {GRAIN: 0.26},
+    "windmill":   {GRAIN: 0.14},
+    "bronze":     {METAL: 0.14},
+    "iron":       {METAL: 0.22},
+    "steel":      {METAL: 0.26},
+    "furnace":    {METAL: 0.34, STONE: 0.10},
+    "keel":       {FISH: 0.18, SPICE: 0.10},
+    "compass":    {SPICE: 0.14, FISH: 0.08},
+    "astrolabe":  {SPICE: 0.16},
+    "caravel":    {SPICE: 0.30, FISH: 0.12},
+    "arch":       {STONE: 0.14},
+    "aqueduct":   {GRAIN: 0.14, STONE: 0.10},
+    "mortar":     {STONE: 0.20},
+    "road":       {SALT: 0.12, WOOL: 0.10},
+    "paper":      {REAGENTS: 0.10},
+    "glass":      {GEMS: 0.20, REAGENTS: 0.12},
+    "quarantine": {MEAT: 0.10},
+}
+
 # Немного камня, леса и руды найдётся почти везде: валун у дороги, болотное
 # железо, роща за околицей. Без этого нехватка у всех выходит стопроцентной,
 # а должна быть степенью — одному не хватает чуть, другому нечем ковать.
@@ -123,6 +182,27 @@ def region_yield(region) -> dict:
     return {key: round(value, 3) for key, value in out.items() if value > 0.01}
 
 
+def craft_bonus(known) -> dict:
+    """Что добавляет к хозяйству то, что держава успела придумать."""
+    out = {}
+    for key in known or ():
+        for good, value in CRAFT_YIELD.get(key, {}).items():
+            out[good] = out.get(good, 0.0) + value
+    return out
+
+
+def race_bonus(race) -> dict:
+    """Что народ даёт своими руками, где бы он ни жил."""
+    if race is None:
+        return {}
+    out = dict(RACE_YIELD.get(race.id, {}))
+    # Промыслы, вписанные расе как черты, работают наравне с народными.
+    for trait in race.traits:
+        for good, value in TRAIT_YIELD.get(trait, {}).items():
+            out[good] = out.get(good, 0.0) + value * 0.5
+    return out
+
+
 def folk_bonus(folk) -> dict:
     """Что добавляет к достатку промысел народа."""
     out = {}
@@ -153,10 +233,11 @@ def polity_balance(world, polity) -> dict:
         souls += realm
         rates = region_yield(region)
         extra = folk_bonus(world.folks.get(settlement.folk_id))
-        for good, rate in rates.items():
-            produced[good] = produced.get(good, 0.0) + rate * realm
-        for good, rate in extra.items():
-            produced[good] = produced.get(good, 0.0) + rate * realm
+        hands = race_bonus(races_mod.RACES_BY_ID.get(settlement.race_id))
+        craft = craft_bonus(polity.known)
+        for source in (rates, extra, hands, craft):
+            for good, rate in source.items():
+                produced[good] = produced.get(good, 0.0) + rate * realm
 
     balance = {}
     for good in GOODS:
@@ -204,3 +285,124 @@ def famine_pressure(balance: dict) -> float:
     if need <= 0:
         return 0.0
     return max(0.0, min(1.0, 1.0 - have / float(need)))
+
+
+# ---------------------------------------------------------------------------
+# Чем держава живёт
+# ---------------------------------------------------------------------------
+
+# Во сколько ценится товар против хлеба. Еда кормит, но богатеют не с неё:
+# горсть самоцветов стоит обоза зерна, и на этом стоят все караванные пути.
+GOOD_WORTH = {
+    GRAIN: 1.0, MEAT: 1.3, FISH: 1.0, TIMBER: 1.1, STONE: 1.0,
+    METAL: 2.4, SALT: 1.6, WOOL: 1.4, FURS: 3.0, WINE: 2.6,
+    SPICE: 4.5, GEMS: 7.0, REAGENTS: 6.0,
+}
+
+
+def mainstay(balance: dict, limit: int = 3) -> list:
+    """Чем держава живёт: товары, на которых держится её достаток.
+
+    Считается не по тому, чего больше всего снимают, а по тому, что
+    приносит: два обоза самоцветов весят больше, чем десять обозов
+    камня, и держава знаменита именно ими.
+    """
+    rows = []
+    for good, (have, need) in balance.items():
+        spare = have - need
+        if spare <= 0:
+            continue
+        rows.append((good, spare * GOOD_WORTH.get(good, 1.0)))
+    if not rows:
+        return []
+    total = sum(value for _, value in rows) or 1.0
+    rows.sort(key=lambda pair: -pair[1])
+    return [(good, round(value / total, 3)) for good, value in rows[:limit]]
+
+
+def wealth(balance: dict, souls: int) -> float:
+    """Достаток на душу: сколько лишнего добра приходится на человека."""
+    if souls <= 0:
+        return 0.0
+    spare = 0.0
+    for good, (have, need) in balance.items():
+        extra = have - need
+        if extra > 0:
+            spare += extra * GOOD_WORTH.get(good, 1.0)
+    return round(spare / float(souls), 3)
+
+
+# Достаток считается не в чём-то абсолютном, а относительно мира. Мир,
+# где все освоили доменную печь, богаче первобытного в разы, и мерить их
+# одной меркой бессмысленно: «богатой» держава бывает среди соседей.
+WEALTH_STEPS = ((0.55, "бедно"), (0.85, "небогато"), (1.30, "в достатке"),
+                (2.00, "богато"))
+
+
+def wealth_label(value: float, middle: float = 0.0) -> str:
+    """Достаток словом. middle — середина по миру; без неё судят грубо."""
+    if middle <= 0:
+        middle = 6.0
+    share = value / float(middle)
+    for edge, name in WEALTH_STEPS:
+        if share < edge:
+            return name
+    return "очень богато"
+
+
+def middle_wealth(world) -> float:
+    """Достаток середняка этого мира — мерка, с которой сравнивают."""
+    values = []
+    for polity_id in world.active_polities:
+        polity = world.polities.get(polity_id)
+        if polity is None:
+            continue
+        souls = polity_souls(world, polity)
+        if souls <= 0:
+            continue
+        values.append(wealth(polity_balance(world, polity), souls))
+    if not values:
+        return 0.0
+    values.sort()
+    return values[len(values) // 2]
+
+
+def polity_souls(world, polity) -> int:
+    total = 0
+    for settlement_id in polity.settlement_ids:
+        settlement = world.settlements.get(settlement_id)
+        if settlement is not None and settlement.status == ACTIVE:
+            total += world.settlement_realm(settlement)
+    return total
+
+
+# Творительный падеж товаров: «живёт самоцветами», а не «живёт самоцветы».
+# Товары не придумываются, а лежат списком, поэтому склонять их можно.
+GOOD_INSTR = {
+    GRAIN: "хлебом", MEAT: "скотом", FISH: "рыбой", TIMBER: "лесом",
+    STONE: "камнем", METAL: "металлом", SALT: "солью", WOOL: "шерстью",
+    FURS: "мехами", WINE: "вином", SPICE: "пряностями", GEMS: "самоцветами",
+    REAGENTS: "чародейными снадобьями",
+}
+
+
+def instr(good: str) -> str:
+    return GOOD_INSTR.get(good, good)
+
+
+def living_line(balance: dict, souls: int, middle: float = 0.0) -> str:
+    """Одной строкой: чем держава живёт и насколько ей хватает.
+
+    «живёт самоцветами (46%) и металлом (31%); достаток: богато»
+    """
+    rows = mainstay(balance, 3)
+    if not rows:
+        return "живёт с того, что вырастит, и лишнего не имеет"
+    parts = ["%s (%.0f%%)" % (instr(good), share * 100)
+             for good, share in rows]
+    if len(parts) > 1:
+        head = ", ".join(parts[:-1]) + " и " + parts[-1]
+    else:
+        head = parts[0]
+    return "живёт %s; достаток: %s" % (
+        head, wealth_label(wealth(balance, souls), middle))
