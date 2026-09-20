@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import heapq
 
+from . import artifacts as artifacts_mod
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
-                     Battle, Calamity, Camp, Company, Deity, Embassy, Event,
-                     Expedition, Faith, Feud, Figure, Folk, Fortress, Guild,
-                     House, League, Pact, Plot, Polity, Region, Reign, Relic,
-                     Settlement, Temple, Tongue, TradeRoute, Tribe, Union, War)
+                     Artifact, Battle, Calamity, Camp, Company, Deity, Embassy,
+                     Event, Expedition, Faith, Feud, Figure, Folk, Fortress,
+                     Guild, House, League, Pact, Plot, Polity, Region, Reign,
+                     Relic, Settlement, Site, Temple, Tongue, TradeRoute, Tribe,
+                     Union, War)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
@@ -83,6 +85,8 @@ class World:
         self.plots = {}
         self.guilds = {}
         self.active_guilds = []
+        self.artifacts = {}
+        self.sites = {}
         self.active_unions = []
         self.fortresses = {}
         self.active_fortresses = []
@@ -361,6 +365,61 @@ class World:
         if not other_id or polity is None:
             return
         polity.grudges.setdefault(other_id, {})[key] = int(year)
+
+    # --- вещи и места ----------------------------------------------------
+
+    def add_artifact(self, **kwargs) -> Artifact:
+        artifact = Artifact(id=self.next_id("A"), **kwargs)
+        self.artifacts[artifact.id] = artifact
+        return artifact
+
+    def add_site(self, **kwargs) -> Site:
+        site = Site(id=self.next_id("Z"), **kwargs)
+        self.sites[site.id] = site
+        return site
+
+    def artifacts_of(self, figure) -> list:
+        return [item for item in self.artifacts.values()
+                if item.owner_id == figure.id and item.where == "у владельца"]
+
+    def put_artifact(self, artifact, where: str, date: Date = None,
+                     figure=None, polity=None, site=None, how: str = "") -> None:
+        """Перекладывает вещь в новые руки или в новое место — и помнит это.
+
+        Всякая перемена записывается в цепочку: год, чьи руки (или чьё
+        место) и как вещь туда попала. Из этой цепочки потом и строится
+        рассказ о ней — и подземелье, в котором она лежит.
+        """
+        artifact.where = where
+        artifact.owner_id = figure.id if figure is not None else ""
+        artifact.polity_id = polity.id if polity is not None else (
+            artifact.polity_id if where in ("в сокровищнице державы",) else "")
+        artifact.site_id = site.id if site is not None else ""
+        if site is not None:
+            artifact.region_id = site.region_id
+            if artifact.id not in site.artifact_ids:
+                site.artifact_ids.append(artifact.id)
+        elif figure is not None and figure.origin_region:
+            artifact.region_id = figure.origin_region
+        if where == "потерян":
+            artifact.lost = date
+        who = ""
+        if figure is not None:
+            who = figure.name
+        elif site is not None:
+            who = site.name
+        elif polity is not None:
+            who = polity.full_name
+        else:
+            # Ни рук, ни места: пусть в цепочке останется хотя бы земля,
+            # где вещь видели в последний раз.
+            region = self.regions.get(artifact.region_id)
+            who = "земля по имени %s" % region.name if region is not None else "—"
+        artifact.trail.append({
+            "year": date.year if date is not None else 0,
+            "who": who, "where": where, "how": how,
+        })
+        artifact.fame = artifacts_mod.fame_of(artifact)
 
     # --- гильдии ---------------------------------------------------------
 

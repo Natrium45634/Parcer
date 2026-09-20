@@ -11,10 +11,11 @@ import dataclasses
 import io
 import json
 
-from .models import (ACTIVE, ONGOING, Battle, Calamity, Camp, Company, Deity,
+from .models import (ACTIVE, ONGOING, Artifact, Battle, Calamity, Camp,
+                     Company, Deity,
                      Embassy, EraSpan, Event, Expedition, Faith, Feud, Figure,
                      Folk, Fortress, Guild, House, League, Pact, Plot, Polity,
-                     Region, Reign, Relic, Settlement, Temple, Tongue,
+                     Region, Reign, Relic, Settlement, Site, Temple, Tongue,
                      TradeRoute, Tribe, Union, War)
 from .timeline import Date
 from .world import World
@@ -24,7 +25,7 @@ FORMAT_VERSION = 1
 
 _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
                 "created", "awakened", "revealed", "born", "opened",
-                "sent", "returned", "started",
+                "sent", "returned", "started", "made", "lost", "opened",
                 "closed", "married", "signed", "built"}
 
 
@@ -114,6 +115,10 @@ def world_to_dict(world: World) -> dict:
                   for item in world.plots.values()],
         "guilds": [_compact(Guild, item.to_dict())
                    for item in world.guilds.values()],
+        "artifacts": [_compact(Artifact, item.to_dict())
+                      for item in world.artifacts.values()],
+        "sites": [_compact(Site, item.to_dict())
+                  for item in world.sites.values()],
         "fortresses": [_compact(Fortress, item.to_dict())
                        for item in world.fortresses.values()],
         "companies": [_compact(Company, item.to_dict())
@@ -214,6 +219,12 @@ def dict_to_world(data: dict) -> World:
         world.companies[company.id] = company
         if company.status == ACTIVE:
             world.active_companies.append(company.id)
+    for item in data.get("artifacts", ()):
+        artifact = Artifact(**_clean(Artifact, item))
+        world.artifacts[artifact.id] = artifact
+    for item in data.get("sites", ()):
+        site = Site(**_clean(Site, item))
+        world.sites[site.id] = site
     for item in data.get("guilds", ()):
         guild = Guild(**_clean(Guild, item))
         world.guilds[guild.id] = guild

@@ -861,6 +861,32 @@ class NameForge:
 
         return self._unique("place", make, rng)
 
+    def artifact(self, rng, race, shape, tongue=None) -> str:
+        """Имя вещи: своё, как у человека, или сказанное словами летописи.
+
+        Одни вещи зовут по-настоящему — «Гламдринг», и это имя звучит на
+        языке того, кто её ковал. Другие входят в память описанием:
+        «Меч Полуночи», «Немеркнущий Венец», «Последний Довод».
+        """
+        from . import artifacts as art
+        from .morph import phrase as adj_phrase
+
+        st = self.style_of(race)
+        laws = _laws(tongue)
+
+        def make():
+            roll = rng.random()
+            if roll < 0.34:
+                return tongues_mod.speak(self._proper_place(rng, st), laws)
+            if roll < 0.60:
+                return "%s %s" % (shape.word, rng.choice(art.NAME_TAILS))
+            if roll < 0.82:
+                return adj_phrase(rng.choice(art.NAME_ADJECTIVES),
+                                  shape.word, shape.gender)
+            return rng.choice(art.WORD_NAMES)
+
+        return self._unique("artifact", make, rng)
+
     def deity(self, rng, race, sex: str = "m") -> str:
         """Имя божества: длиннее и звучнее смертного.
 

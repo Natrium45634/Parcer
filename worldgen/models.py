@@ -631,6 +631,87 @@ class Relic:
 
 
 @dataclass
+class Artifact:
+    """Вещь, у которой есть имя, и потому есть история.
+
+    Артефакт никогда не висит в пустоте: у него либо владелец, либо
+    место — курган, сокровищница, храм, логово, руины. Цепочка рук
+    (``trail``) хранится целиком: кто держал, в каком году и как получил.
+    """
+
+    id: str
+    name: str
+    shape: str                 # ключ рода вещи: sword, crown, book …
+    word: str                  # «Меч», «Венец» — как называть в летописи
+    gender: str                # род слова: m / f / n — для согласования
+    sort: str                  # оружие / доспех / регалия / утварь / книга
+    material: str
+    material_gen: str          # «из звёздного железа»
+    made: Date
+    origin: str                # выкован / дарован богом / взят у чудовища …
+    maker_id: str = ""
+    race_id: str = ""
+    powers: list = field(default_factory=list)
+    curse: str = ""
+    where: str = "у владельца"  # у владельца / в кургане / в логове / потерян …
+    owner_id: str = ""
+    polity_id: str = ""
+    site_id: str = ""
+    region_id: str = ""
+    trail: list = field(default_factory=list)   # [{year, who, how}]
+    deeds: list = field(default_factory=list)   # id событий
+    fame: float = 1.0
+    lost: Date = None
+    status: str = ACTIVE
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["made"] = _date_out(self.made)
+        data["lost"] = _date_out(self.lost)
+        return data
+
+
+@dataclass
+class Site:
+    """Место, у которого есть содержимое и история.
+
+    Курган героя, клад в логове, руины павшего города, запечатанный
+    чертог. Всё, что нужно, чтобы построить по нему подземелье: кто
+    здесь лежит, что здесь спрятано, кто это стережёт и когда сюда в
+    последний раз входили.
+    """
+
+    id: str
+    kind: str                  # курган / руины / логово / клад / поле битвы …
+    name: str
+    region_id: str
+    created: Date
+    hex_index: int = -1
+    figure_id: str = ""        # чей курган
+    polity_id: str = ""        # чья держава его оставила
+    settlement_id: str = ""    # если это руины города
+    calamity_id: str = ""      # если это след бедствия
+    monster_id: str = ""       # кто там поселился
+    battle_id: str = ""
+    artifact_ids: list = field(default_factory=list)
+    guards: str = ""           # кто стережёт
+    riches: int = 0            # сколько там добра, в условном счёте
+    depth: int = 1             # насколько глубоко и опасно, 1…5
+    story: str = ""            # одна строка: чем это место памятно
+    status: str = "нетронуто"  # нетронуто / разграблено / обитаемо / обрушено
+    opened: Date = None
+    opened_by: str = ""
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["created"] = _date_out(self.created)
+        data["opened"] = _date_out(self.opened)
+        return data
+
+
+@dataclass
 class Battle:
     """Сражение: кто, с кем, где и чем кончилось."""
 

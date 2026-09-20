@@ -658,6 +658,112 @@ def render_guilds(world) -> str:
     return "\n".join(rows)
 
 
+def render_artifacts(world) -> str:
+    """Вещи с именами: кто сделал, через чьи руки прошли, где лежат."""
+    from . import artifacts as art
+
+    rows = ["ВЕЩИ, У КОТОРЫХ ЕСТЬ ИМЯ", ""]
+    if not world.artifacts:
+        rows.append("  Таких вещей этот мир не сделал.")
+        return "\n".join(rows)
+
+    items = sorted(world.artifacts.values(),
+                   key=lambda item: item.made.ordinal)
+    where = {}
+    for item in items:
+        where[item.where] = where.get(item.where, 0) + 1
+    rows.append("  Всего вещей: %d. Из них с проклятием: %d."
+                % (len(items), sum(1 for item in items if item.curse)))
+    rows.append("  Где они сейчас: %s." % ", ".join(
+        "%s %d" % (key, count) for key, count in
+        sorted(where.items(), key=lambda pair: (-pair[1], pair[0]))))
+    rows.append("")
+
+    for item in items:
+        maker = world.figures.get(item.maker_id)
+        rows.append("  %s — %s, %s" % (item.name, item.word.lower(),
+                                       item.material_gen))
+        line = "      сделана в %d году" % item.made.year
+        if maker is not None:
+            line += "; мастер: %s" % maker.name
+        line += "; %s" % art.ORIGIN_NAMES.get(item.origin, item.origin)
+        rows.append(line)
+        if item.powers:
+            rows.append("      за ней числится: %s" % "; ".join(item.powers))
+        if item.curse:
+            rows.append("      проклятие: %s" % item.curse)
+        site = world.sites.get(item.site_id)
+        owner = world.figures.get(item.owner_id)
+        place = item.where
+        if site is not None:
+            place = "%s (%s)" % (item.where, site.name)
+        elif owner is not None:
+            place = "%s — %s" % (item.where, owner.name)
+        rows.append("      ныне: %s; слава: %.1f" % (place, item.fame))
+        if item.trail:
+            hands = ["%d — %s" % (step.get("year", 0), step.get("who") or "—")
+                     for step in item.trail]
+            rows.append("      руки: %s" % " → ".join(hands[:8]))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def render_sites(world) -> str:
+    """Места, в которых лежит история: курганы, руины, клады, логова.
+
+    Это и есть тот справочник, по которому будущая игра строит
+    подземелья: у каждого места есть год, имя, содержимое и тот, кто его
+    стережёт.
+    """
+    from . import sites as sites_mod
+
+    rows = ["МЕСТА, ГДЕ ЛЕЖИТ ИСТОРИЯ", ""]
+    if not world.sites:
+        rows.append("  Таких мест этот мир не оставил.")
+        return "\n".join(rows)
+
+    items = sorted(world.sites.values(), key=lambda item: item.created.ordinal)
+    kinds, states = {}, {}
+    for item in items:
+        kinds[item.kind] = kinds.get(item.kind, 0) + 1
+        states[item.status] = states.get(item.status, 0) + 1
+    rows.append("  Всего мест: %d — %s." % (len(items), ", ".join(
+        "%s %d" % (key, count) for key, count in
+        sorted(kinds.items(), key=lambda pair: (-pair[1], pair[0])))))
+    rows.append("  Состояние: %s." % ", ".join(
+        "%s %d" % (key, count) for key, count in
+        sorted(states.items(), key=lambda pair: (-pair[1], pair[0]))))
+    rows.append("")
+
+    # Сперва те, куда ещё никто не входил: они и интересны.
+    order = {sites_mod.UNTOUCHED: 0, sites_mod.INHABITED: 1,
+             sites_mod.ROBBED: 2, sites_mod.COLLAPSED: 3}
+    items.sort(key=lambda item: (order.get(item.status, 4), -item.riches))
+    for item in items:
+        region = world.regions.get(item.region_id)
+        rows.append("  %s — %s, %s" % (item.name, item.kind,
+                                       item.status))
+        rows.append("      земля: %s; год: %d; глубина: %d; добра: %d"
+                    % (region.name if region is not None else "—",
+                       item.created.year, item.depth, item.riches))
+        if item.story:
+            rows.append("      память: %s" % item.story)
+        if item.guards:
+            rows.append("      стережёт: %s" % item.guards)
+        if item.artifact_ids:
+            names = [world.artifacts[aid].name for aid in item.artifact_ids
+                     if aid in world.artifacts]
+            if names:
+                rows.append("      внутри: %s" % ", ".join(names))
+        if item.opened is not None:
+            opener = world.figures.get(item.opened_by)
+            rows.append("      вскрыто в %d году%s"
+                        % (item.opened.year,
+                           "; вошёл %s" % opener.name if opener else ""))
+        rows.append("")
+    return "\n".join(rows)
+
+
 def render_soldiery(world) -> str:
     """Крепости и вольные роты: то, что остаётся от войны между войнами."""
     from .models import ACTIVE as ACTIVE_STATE
@@ -1385,5 +1491,7 @@ def full_text(world) -> str:
         render_pantheon(world),
         render_faiths(world),
         render_calamities(world),
+        render_artifacts(world),
+        render_sites(world),
         render_stats(world),
     ))

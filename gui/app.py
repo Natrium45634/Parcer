@@ -316,6 +316,12 @@ class ChronicleApp(tk.Tk):
         self.guilds_text = self._add_text_tab(
             "Гильдии", lambda: self._set_text(
                 self.guilds_text, chronicle.render_guilds(self.world)))
+        self.artifacts_text = self._add_text_tab(
+            "Вещи", lambda: self._set_text(
+                self.artifacts_text, chronicle.render_artifacts(self.world)))
+        self.sites_text = self._add_text_tab(
+            "Места", lambda: self._set_text(
+                self.sites_text, chronicle.render_sites(self.world)))
         self.expeditions_text = self._add_text_tab("Походы")
         self.regions_text = self._add_text_tab("Земли")
         self.stats_text = self._add_text_tab("Итоги")
