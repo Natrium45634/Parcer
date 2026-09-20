@@ -59,16 +59,18 @@ def _live_cities(world, polity) -> list:
             and world.settlements[sid].status == ACTIVE]
 
 
-def ensure_titular(ctx, polity, year: int) -> bool:
+def ensure_titular(ctx, polity, year: int, refresh: bool = True) -> bool:
     """Народ государя должен жить в его державе.
 
     Война может отнять у страны все города её титульного народа и
-    оставить ей одни завоёванные. Тогда престол переходит к тем, кто в
-    ней остался: держава без собственного народа — это не держава,
-    а ошибка счёта.
+    оставить ей одни завоёванные. Но то же самое делают мор, голод и
+    бедствие — без всякой войны, — и тогда некому было это заметить.
+    Теперь смотрят каждый такт: держава без собственного народа — это
+    не держава, а ошибка счёта.
     """
     world = ctx.world
-    world.refresh_populations()
+    if refresh:
+        world.refresh_populations()
     if polity.status != ACTIVE or not polity.peoples:
         return False
     if polity.peoples.get(polity.race_id, 0) > 0:
@@ -171,6 +173,7 @@ def upkeep(ctx, year: int, period: int) -> None:
         if polity is None:
             continue
         _announce_capital(ctx, polity, year)
+        ensure_titular(ctx, polity, year, refresh=False)
         _tend(ctx, polity, year, period)
 
 
