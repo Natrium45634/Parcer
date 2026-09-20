@@ -641,7 +641,7 @@ GREAT_SPECS = (
         noun=("Погружение", "n"),
         severities=_s((4, 2.0), (5, 1.0)),
         duration=(1, 2), duration_scale=1.2, toll=1.9,
-        scope=(1, 2), scope_scale=1.3,
+        scope=(1, 2), scope_scale=1.15,
         terrains=("побережье", "острова"),
         resolutions=_s(("endured", 3.0), ("adapted", 1.0)),
         relics=_s(("затонувший город", 2.0), ("проклятое место", 0.6)),

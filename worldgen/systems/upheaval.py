@@ -22,6 +22,11 @@ from ..world import RURAL_FACTOR
 # Какие беды меняют мир и что именно они с ним делают.
 GREAT = ("drowning", "sundering", "long_dark", "deep_waking")
 
+# Море не забирает всё. Даже за десять тысяч лет под воду уходит не больше
+# четверти суши: мир, наполовину ставший океаном, — это уже не тот мир,
+# для которого писалось всё остальное.
+MAX_DROWNED_SHARE = 0.25
+
 
 def aftermath(ctx, calamity, spec, rng, year: int, date) -> None:
     """Вызывается при начале беды: то, что она делает с самой землёй."""
@@ -42,10 +47,16 @@ def _drown(ctx, calamity, rng, year: int, date) -> None:
     world = ctx.world
     drowned = []
     survivors = []          # (поселение, сколько душ успело в лодки)
+    already = sum(1 for item in world.regions.values() if item.drowned)
+    limit = max(1, int(len(world.regions) * MAX_DROWNED_SHARE))
     for region_id in calamity.region_ids:
+        if already >= limit:
+            calamity.notes.append("море остановилось у прежних берегов")
+            break
         region = world.regions.get(region_id)
         if region is None or region.drowned:
             continue
+        already += 1
         region.drowned = True
         region.capacity = 0.0
         region.habitat = 0.0

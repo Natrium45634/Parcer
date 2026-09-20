@@ -334,6 +334,9 @@ class ChronicleApp(tk.Tk):
         self.sites_text = self._add_text_tab(
             "Места", lambda: self._set_text(
                 self.sites_text, chronicle.render_sites(self.world)))
+        self.upheaval_text = self._add_text_tab(
+            "Как менялся мир", lambda: self._set_text(
+                self.upheaval_text, chronicle.render_upheavals(self.world)))
         self.expeditions_text = self._add_text_tab("Походы")
         self.regions_text = self._add_text_tab("Земли")
         self.stats_text = self._add_text_tab("Итоги")

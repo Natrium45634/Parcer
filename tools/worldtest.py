@@ -874,10 +874,12 @@ def audit(world) -> list:
     gone = world.notes.get("народов больше нет") or {}
     peaks = world.notes.get("народ в лучший век") or {}
     notable_gone = [rid for rid in gone if int(peaks.get(rid, 0)) >= 20000]
+    from worldgen.catastrophe import CATALOG_BY_KEY
+    great_titles = sorted({CATALOG_BY_KEY[item.key].title.lower()
+                           for item in great if item.key in CATALOG_BY_KEY})
     found.append(("=", "великих бедствий: %d (%s); затоплено земель %d, "
                   "разрезано %d; народов ушло из мира %d"
-                  % (len(great),
-                     ", ".join(sorted({item.key for item in great})) or "нет",
+                  % (len(great), ", ".join(great_titles) or "нет",
                      len(drowned), len(sundered), len(notable_gone))))
     if len(great) > 6:
         bad("великих бедствий %d за %d лет — это уже погода"
