@@ -312,6 +312,7 @@ class Polity:
     # --- умения и порядки (блок 12) ---
     known: list = field(default_factory=list)        # открытия, какими владеет
     reforms: list = field(default_factory=list)      # заведённые порядки
+    notes: list = field(default_factory=list)        # памятки летописи
 
     # --- обиды (блок 11) ---
     # держава -> {повод: год}. Кровь посла, пойманный соглядатай, яд при

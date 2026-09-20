@@ -93,6 +93,21 @@ def bury(ctx, figure, year: int, date, artifacts=(), deeds: str = "",
     return site
 
 
+def _blamed(world, settlement) -> str:
+    """Какая беда сожгла этот город — по его же записи о конце.
+
+    Место должно помнить, что его оставило: через тысячу лет по этой
+    памяти государь и найдёт дорогу сюда (systems/legacy.py).
+    """
+    reason = settlement.end_reason or ""
+    if "бедствия" not in reason and "беды" not in reason:
+        return ""
+    for calamity in world.calamities.values():
+        if calamity.name and calamity.name in reason:
+            return calamity.id
+    return ""
+
+
 def _mark_ruins(ctx, year: int, rng) -> None:
     """Погибший город оставляет по себе руины — и не пустые."""
     world = ctx.world
@@ -113,6 +128,7 @@ def _mark_ruins(ctx, year: int, rng) -> None:
             kind=sites_mod.RUIN, name=name, region_id=settlement.region_id,
             created=date, settlement_id=settlement.id,
             polity_id=settlement.polity_id,
+            calamity_id=_blamed(world, settlement),
             guards=rng.choice(sites_mod.GUARDS[sites_mod.RUIN]),
             riches=sites_mod.riches_for(rng, sites_mod.RUIN,
                                         0.6 + settlement.population / 9000.0),
@@ -145,6 +161,7 @@ def _mark_fields(ctx, year: int, rng) -> None:
         site = world.add_site(
             kind=sites_mod.FIELD, name=name, region_id=battle.region_id,
             created=battle.date, battle_id=battle.id,
+            calamity_id=battle.calamity_id,
             guards=rng.choice(sites_mod.GUARDS[sites_mod.FIELD]),
             riches=sites_mod.riches_for(rng, sites_mod.FIELD,
                                         0.5 + battle.deaths / 9000.0))

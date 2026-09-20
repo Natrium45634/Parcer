@@ -25,7 +25,8 @@ from .systems import (aristocracy, artifacts, calamity, citylife, crafts,
                       diplomacy, embassy,
                       era_events,
                       exploration, founding, geography, guilds, houses,
-                      laws, lives, lore, monsters, nations, notables, peoples,
+                      laws, legacy, lives, lore, monsters, nations, notables,
+                      peoples,
                       religion,
                       sites, soldiery, spies, succession, tongues, trade,
                       unions, upheaval, war)
@@ -120,6 +121,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         war.tick(ctx, year)
         notables.tick(ctx, year)
         calamity.tick(ctx, year)
+        legacy.tick(ctx, year)
         religion.tick(ctx, year)
         lives.tick(ctx, year)
 

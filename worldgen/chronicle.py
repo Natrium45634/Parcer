@@ -1807,6 +1807,114 @@ def render_upheavals(world) -> str:
     return "\n".join(rows)
 
 
+def render_sagas(world) -> str:
+    """Цепи бедствий: какая беда из какой выросла и через сколько веков.
+
+    Мир, где бедствия случаются порознь, читается как погода. Здесь
+    видно родословную: уцелевший позвал собратьев, осколок поднялся из
+    глубины, государь пришёл за силой на старое поле.
+    """
+    from . import catastrophe as cat
+    from .narrative_calamity import number
+
+    rows = ["ЦЕПИ БЕДСТВИЙ", ""]
+
+    kids = {}
+    for calamity in world.calamities.values():
+        if calamity.parent_id and calamity.parent_id in world.calamities:
+            kids.setdefault(calamity.parent_id, []).append(calamity)
+    if not kids:
+        rows.append("  Ни одна беда этого мира не выросла из прежней: "
+                    "все они пришли сами по себе.")
+        return "\n".join(rows)
+
+    roots = []
+    for calamity_id in kids:
+        calamity = world.calamities[calamity_id]
+        if not calamity.parent_id or calamity.parent_id not in world.calamities:
+            roots.append(calamity)
+    roots.sort(key=lambda item: item.start.ordinal)
+
+    def walk(calamity, depth: int) -> None:
+        pad = "    " + "    " * depth
+        spec = cat.CATALOG_BY_KEY.get(calamity.key)
+        rows.append("%s%s — %s, %d год%s" % (
+            pad, calamity.name,
+            spec.title.lower() if spec is not None else calamity.key,
+            calamity.start.year,
+            ", погибло %s" % number(calamity.deaths) if calamity.deaths else ""))
+        for note in calamity.notes:
+            if note.startswith(("выросло из следа", "поднялось из логова",
+                                "осколок нашествия", "наследие беды",
+                                "призвано государем", "через вещь")):
+                rows.append("%s    %s" % (pad, note))
+        for child in sorted(kids.get(calamity.id, ()),
+                            key=lambda item: item.start.ordinal):
+            gap = child.start.year - calamity.start.year
+            rows.append("%s      └─ через %d %s:" % (
+                pad, gap, plural_years(gap)))
+            walk(child, depth + 1)
+
+    longest, deepest = 0, 0
+    for root in roots:
+        rows.append("  Цепь от %d года" % root.start.year)
+        walk(root, 0)
+        rows.append("")
+        longest = max(longest, _chain_span(world, kids, root))
+        deepest = max(deepest, _chain_depth(kids, root))
+
+    linked = sum(len(items) for items in kids.values())
+    knees = deepest + 1
+    rows.append("  Связанных бед: %d из %d (%.0f%%); самая длинная цепь "
+                "тянется %d %s и насчитывает %d %s."
+                % (linked, len(world.calamities),
+                   linked * 100.0 / max(1, len(world.calamities)),
+                   longest, plural_years(longest), knees,
+                   _plural(knees, "колено", "колена", "колен")))
+    return "\n".join(rows)
+
+
+def _plural(value: int, one: str, few: str, many: str) -> str:
+    value = abs(int(value)) % 100
+    if 11 <= value <= 14:
+        return many
+    tail = value % 10
+    if tail == 1:
+        return one
+    if 2 <= tail <= 4:
+        return few
+    return many
+
+
+def plural_years(value: int) -> str:
+    value = abs(int(value)) % 100
+    if 11 <= value <= 14:
+        return "лет"
+    tail = value % 10
+    if tail == 1:
+        return "год"
+    if 2 <= tail <= 4:
+        return "года"
+    return "лет"
+
+
+def _chain_span(world, kids, root) -> int:
+    last = root.start.year
+    stack = [root]
+    while stack:
+        item = stack.pop()
+        last = max(last, item.start.year)
+        stack.extend(kids.get(item.id, ()))
+    return last - root.start.year
+
+
+def _chain_depth(kids, root) -> int:
+    children = kids.get(root.id, ())
+    if not children:
+        return 0
+    return 1 + max(_chain_depth(kids, child) for child in children)
+
+
 def full_text(world) -> str:
     """Полный экспорт: летопись + справочники."""
     return "\n\n".join((
@@ -1831,6 +1939,7 @@ def full_text(world) -> str:
         render_pantheon(world),
         render_faiths(world),
         render_calamities(world),
+        render_sagas(world),
         render_upheavals(world),
         render_monsters(world),
         render_artifacts(world),

@@ -1046,6 +1046,44 @@ def audit(world) -> list:
             note("население почти не падало за всю историю: спадов %d "
                  "из %d веков — мир рос как на дрожжах" % (drops, len(census)))
 
+    # 25. Цепи бедствий: помнит ли беда прежнюю беду.
+    kids = {}
+    for calamity in world.calamities.values():
+        if calamity.parent_id and calamity.parent_id in world.calamities:
+            kids.setdefault(calamity.parent_id, []).append(calamity)
+    linked = sum(len(items) for items in kids.values())
+    if world.calamities:
+        share = linked * 100.0 / len(world.calamities)
+        gap = 0
+        for parent_id, items in kids.items():
+            parent = world.calamities[parent_id]
+            for child in items:
+                gap = max(gap, child.start.year - parent.start.year)
+        errands = sum(1 for e in world.events if e.kind == "dark_errand")
+        fallen = sum(1 for e in world.events if e.kind == "ruler_fallen")
+        found.append(("=", "связанных бедствий: %d из %d (%.0f%%), самый "
+                      "долгий разрыв %d %s; выездов за силой %d, павших "
+                      "государей %d"
+                      % (linked, len(world.calamities), share,
+                         gap, _plural(gap, "год", "года", "лет"),
+                         errands, fallen)))
+        if world.total_years >= 4000 and share < 2:
+            note("беды этого мира не помнят друг друга: связанных "
+                 "%.0f%%" % share)
+        if share > 45:
+            bad("почти каждая беда выросла из прежней (%.0f%%) — цепь "
+                "перестала быть редкостью" % share)
+        for calamity in world.calamities.values():
+            if calamity.parent_id == calamity.id:
+                bad("бедствие «%s» выросло само из себя" % calamity.name)
+                break
+            parent = world.calamities.get(calamity.parent_id)
+            if parent is not None \
+                    and parent.start.ordinal > calamity.start.ordinal:
+                bad("бедствие «%s» старше своего родителя «%s»"
+                    % (calamity.name, parent.name))
+                break
+
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:
         biggest = max((world.polities[p].population
