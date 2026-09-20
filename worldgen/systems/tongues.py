@@ -13,10 +13,13 @@
 
 from __future__ import annotations
 
+from .. import narrative
 from .. import narrative_tongues as texts
+from .. import races as races_mod
 from .. import tongues as tng
 from ..models import ACTIVE
 
+FOLK_GRACE = 60             # столько лет народу дают, чтобы расселиться
 SCRIPT_RATE = 0.05          # шанс изобрести письмо за такт
 SCRIPT_MIN_SOULS = 4000     # раньше этого письмо некому и незачем
 BORROW_RATE = 0.06
@@ -64,12 +67,35 @@ def upkeep(ctx, year: int, period: int) -> None:
     # Народы считаются по городам и племенам; без этого пересчёта все
     # народы числятся пустыми, а языки — мёртвыми с первого же такта.
     world.refresh_folks()
+    _fade_folks(ctx, year, rng)
     _count_speakers(world)
     _maybe_split(ctx, year, period, rng)
     _maybe_script(ctx, year, period, rng)
     _maybe_borrow(ctx, year, period, rng)
     _maybe_die(ctx, year, period, rng)
     _state_tongues(world)
+
+
+# Народ, за которым не осталось ни одного живого, кончился. Назад такие
+# не возвращаются: новые народы рождаются только при пробуждении расы,
+# а раса просыпается один раз. Раньше такой народ оставался «активным»
+# навсегда — с мёртвым языком и нулём душ.
+def _fade_folks(ctx, year: int, rng) -> None:
+    world = ctx.world
+    for folk in world.folks.values():
+        if folk.status != ACTIVE or folk.population > 0:
+            continue
+        if year - folk.born.year < FOLK_GRACE:
+            continue          # только что проснулись, людей ещё не расселили
+        date = ctx.date_in(rng, year)
+        world.end_folk(folk, date, "не осталось ни одной живой души")
+        race = races_mod.RACES_BY_ID.get(folk.race_id)
+        title, text = narrative.folk_end(rng, folk, race,
+                                         year - folk.born.year)
+        world.add_event(
+            date=date, era_index=world.era_index_at(year), kind="folk_end",
+            title=title, text=text, importance=2, subjects=[folk.id],
+            region_id=folk.cradle_region, race_id=folk.race_id)
 
 
 def _count_speakers(world) -> None:

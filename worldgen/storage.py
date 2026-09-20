@@ -147,6 +147,7 @@ def world_to_dict(world: World) -> dict:
         "race_awakening": world.race_awakening,
         "counters": world._counters,
         "notes": world.notes,
+        "census": world.census,
     }
 
 
@@ -314,6 +315,7 @@ def dict_to_world(data: dict) -> World:
     world.race_awakening = dict(data.get("race_awakening") or {})
     world._counters = dict(data.get("counters") or {})
     world.notes = dict(data.get("notes") or {})
+    world.census = list(data.get("census") or [])
     world.map_source = data.get("map_source", "") or ""
     world.geography = dict(data.get("geography") or {})
     return world

@@ -205,7 +205,11 @@ class GenContext:
         if not birth_year:
             # Возраст в момент деяния: зрелость, но ещё не закат.
             age = int(lifespan * rng.uniform(0.22, 0.48))
-            birth_year = max(1, year - age)
+            # Но раньше своего народа никто не родился. Первое поколение
+            # приходит в мир вместе с расой — в год её пробуждения, и
+            # приходит взрослым: так его и записывает летопись.
+            dawn = world.race_awakening.get(race.id, 1) or 1
+            birth_year = max(1, dawn, year - age)
         if not death_year:
             death_year = birth_year + lifespan
             if death_year <= year:

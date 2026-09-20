@@ -456,6 +456,9 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
         # всемирная беда достаёт до каждого.
         everywhere = spec.worldwide or (
             severity >= 5 and len(region_ids) >= len(world.regions) * 0.7)
+        if everywhere and (_worldwide_dark(world, year)
+                           or _dark_pressure(world, year) > 0.45):
+            everywhere = False      # тьма поверх тьмы — всё та же тьма
         world.add_dark_age(calamity.id, year, year + duration, region_ids,
                            min(0.85, 0.16 * severity), worldwide=everywhere)
     _check_compound(ctx, calamity, rng, year)
@@ -1238,6 +1241,41 @@ def _guess_gender(noun: str) -> str:
     return "m"
 
 
+# Сколько последних веков мир уже провёл во тьме. Считается объединением:
+# три тёмных века, наложенных друг на друга, — это всё равно одна тьма.
+DARK_MEMORY = 2000
+
+
+def _dark_pressure(world, year: int, window: int = 0) -> float:
+    """Доля последних веков, прошедших во тьме, 0…1."""
+    window = window or min(DARK_MEMORY, max(200, world.total_years // 4))
+    low = max(1, year - window)
+    spans = []
+    for record in world.dark_ages:
+        start = max(record["start"], low)
+        end = min(record["end"], year)
+        if end > start:
+            spans.append((start, end))
+    if not spans:
+        return 0.0
+    spans.sort()
+    covered, edge = 0, low - 1
+    for start, end in spans:
+        if end <= edge:
+            continue
+        covered += end - max(start, edge)
+        edge = end
+    return min(1.0, covered / float(window))
+
+
+def _worldwide_dark(world, year: int) -> bool:
+    """Идёт ли прямо сейчас всемирная тьма."""
+    for record in world.dark_ages:
+        if record.get("worldwide") and record["start"] <= year <= record["end"]:
+            return True
+    return False
+
+
 def _start_dark_age(ctx, calamity, spec, rng, year: int, date) -> None:
     world = ctx.world
     if calamity.severity < 3:
@@ -1256,10 +1294,24 @@ def _start_dark_age(ctx, calamity, spec, rng, year: int, date) -> None:
     plan = ctx.calamity_plans.get(calamity.id, {})
     base = {3: (40, 160), 4: (120, 450), 5: (300, 1200)}[min(5, calamity.severity)]
     length = int(rng.uniform(*base) * (0.6 + 0.4 * min(2.0, plan.get("duration", 10) / 60.0)))
+    # Длина тьмы соразмерна длине истории: полторы тысячи лет мрака в
+    # мире на две тысячи лет — это не тёмные века, это весь мир.
+    length = int(length * max(0.25, min(1.0, world.total_years / 10000.0)))
+    # И у тьмы одна память на всех. Мир, который только что вылез из
+    # темноты, не уходит в неё обратно на тот же срок: иначе половина
+    # истории проходит в потёмках, ничего не успевает вырасти и читать
+    # в такой летописи нечего.
+    pressure = _dark_pressure(world, year)
+    length = int(length * max(0.15, 1.0 - pressure))
     length = max(20, length)
     intensity = min(0.9, 0.18 * calamity.severity + rng.uniform(-0.06, 0.12))
     worldwide = calamity.severity >= 5 or (
         calamity.severity == 4 and len(calamity.region_ids) >= len(world.regions) * 0.6)
+    if worldwide and (_worldwide_dark(world, year) or pressure > 0.45):
+        # Всемирная тьма поверх всемирной тьмы — это та же тьма. И мир,
+        # который последние века и так просидел в потёмках, второй раз
+        # солнца не лишается: беда ложится на свои земли, и только.
+        worldwide = False
 
     world.add_dark_age(calamity.id, year, year + length, calamity.region_ids,
                        intensity, worldwide)

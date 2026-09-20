@@ -16,7 +16,13 @@ from .. import races as races_mod
 from ..models import GONE
 from ..timeline import Date
 
-MIN_SPLIT_POPULATION = 320
+# Племя делится не по круглому числу, а когда земля под ним начинает
+# тесниться: пока прокормиться можно, никто никуда не уходит. Раньше
+# здесь стояло глухое «320», и племена всю первобытную эпоху топтались
+# на трёх сотнях душ — до потолка земли (TRIBE_CAPACITY) они не доживали
+# никогда, а мир за тысячу лет набирал едва десяток тысяч.
+SPLIT_SHARE_OF_LAND = 0.30     # доля прокорма, после которой откалываются
+MIN_SPLIT_POPULATION = 320     # и всё же меньше этого племя не делится
 TRIBE_CAPACITY = 1200.0
 
 # Доли расколов по категориям рас. Без этого зверолюды и злые расы —
@@ -222,6 +228,20 @@ def found_tribe(ctx, race, region, year: int, rng, first: bool = False,
     return tribe
 
 
+def _split_at(world, tribe) -> int:
+    """Сколько душ должно набраться, чтобы племя раскололось.
+
+    Считается от того, сколько народу кормит эта земля: на равнине
+    расходятся поздно и большими родами, в тундре — рано и малыми.
+    """
+    race = races_mod.get_race(tribe.race_id)
+    region = world.regions.get(tribe.region_id)
+    capacity = TRIBE_CAPACITY * (region.capacity if region else 1.0)
+    if race.category == races_mod.BEASTFOLK:
+        capacity *= 1.4
+    return max(MIN_SPLIT_POPULATION, int(capacity * SPLIT_SHARE_OF_LAND))
+
+
 def tick_tribes(ctx, year: int) -> None:
     """Раз в год — возможность появления нового племени (обычно откол)."""
     world = ctx.world
@@ -241,7 +261,7 @@ def tick_tribes(ctx, year: int) -> None:
     by_category = {}
     for tribe_id in world.active_tribes:
         tribe = world.tribes[tribe_id]
-        if tribe.population < MIN_SPLIT_POPULATION:
+        if tribe.population < _split_at(world, tribe):
             continue
         category = races_mod.get_race(tribe.race_id).category
         weight = float(tribe.population) / (

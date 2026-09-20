@@ -350,11 +350,12 @@ def mercy(ctx) -> float:
 
 
 def upkeep(ctx, year: int, period: int) -> None:
-    """Раз в несколько лет: запоминаем лучший век и проверяем, все ли живы."""
+    """Раз в несколько лет: перепись мира, лучший век и проверка, все ли живы."""
     world = ctx.world
     alive = world.world_population()
     if alive > int(world.notes.get(PEAK_NOTE) or 0):
         world.notes[PEAK_NOTE] = alive
+    _census(ctx, year, alive)
     check_extinction(ctx, year, ctx.date_in(ctx.rng("extinction", year), year),
                      ctx.rng("extinction_text", year))
 
@@ -428,3 +429,31 @@ def _worst_calamity(world, race_id: str):
 
 __all__ = ["aftermath", "check_extinction", "is_gone", "mercy",
            "upkeep", "GREAT"]
+
+
+def _census(ctx, year: int, alive: int) -> None:
+    """Перепись: сколько в мире душ и чем он на этот год занят.
+
+    По ней потом считают худший год мира: не по одному бедствию, а по
+    тому, сколько душ мир на самом деле потерял за десятилетие.
+    """
+    world = ctx.world
+    wars = sum(1 for war_id in world.active_wars
+               if war_id in world.wars)
+    blame = []
+    for calamity_id in world.active_calamities:
+        calamity = world.calamities.get(calamity_id)
+        if calamity is not None:
+            blame.append(calamity.name)
+    tribe_souls = sum(world.tribes[i].population for i in world.active_tribes)
+    world.census.append({
+        "year": year,
+        "souls": alive,
+        "tribe_souls": tribe_souls,
+        "tribes": len(world.active_tribes),
+        "towns": len(world.active_settlements),
+        "polities": len(world.active_polities),
+        "wars": wars,
+        "calamities": blame[:6],
+        "gloom": round(ctx.world_darkness, 3),
+    })

@@ -106,6 +106,9 @@ class World:
         self.leagues = {}
         self.active_leagues = []
         self.notes = {}                # свободные заметки для будущих блоков
+        # Перепись мира раз в несколько лет: по ней видно, как мир рос,
+        # когда он проваливался и какой век стоил ему дороже всего.
+        self.census = []               # [{year, souls, tribes, towns, ...}]
         self.map_source = ""           # файл карты, если мир построен по ней
         self.geography = {}            # имена океанов, материков, хребтов
         self.map_link = None           # связь с картой: чтобы освобождать гексы
@@ -254,6 +257,19 @@ class World:
             folk = self.folks.get(capital.folk_id) if capital is not None else None
             if folk is not None:
                 folk.polities += 1
+
+    def end_folk(self, folk, date: Date, reason: str, status: str = GONE) -> None:
+        """Народ кончился: последних его людей не стало.
+
+        Назад народы не возвращаются — новые рождаются только при
+        пробуждении расы, а раса просыпается один раз.
+        """
+        if folk.status != ACTIVE:
+            return
+        folk.status = status
+        folk.ended = date
+        folk.notes.append(reason)
+        folk.population = folk.settlements = folk.tribes = folk.polities = 0
 
     def folks_of_race(self, race_id: str) -> list:
         return [folk for folk in self.folks.values() if folk.race_id == race_id]
