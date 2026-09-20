@@ -1774,6 +1774,29 @@ def render_upheavals(world) -> str:
         rows.append("  Так и не поднялись: %s." % ", ".join(names))
         rows.append("")
 
+    census = [row for row in (getattr(world, "census", None) or [])
+              if row["souls"] > 0]
+    if len(census) > 11:
+        span = 10
+        age, age_loss = None, 0
+        for index in range(len(census) - span):
+            before, after = census[index], census[index + span]
+            if before["souls"] - after["souls"] > age_loss:
+                age, age_loss = (before, after), before["souls"] - after["souls"]
+        best = max(census, key=lambda row: row["souls"])
+        rows.append("  Как жил мир")
+        rows.append("    в лучший свой век: %s, %d год"
+                    % (number(best["souls"]), best["year"]))
+        if age is not None and age_loss > 0:
+            before, after = age
+            blame = ", ".join(after["calamities"][:3]) \
+                or ", ".join(before["calamities"][:3]) or "долгий упадок"
+            rows.append("    худший век: %d—%d, потеряно %s (%.0f%% живших)"
+                        % (before["year"], after["year"], number(age_loss),
+                           age_loss * 100.0 / max(1, before["souls"])))
+            rows.append("        виной: %s" % blame)
+        rows.append("")
+
     peak = world.notes.get(upheaval_mod.PEAK_NOTE)
     if peak:
         rows.append("  Людей в лучший свой век: %s." % number(peak))

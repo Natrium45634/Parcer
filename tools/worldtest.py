@@ -376,6 +376,31 @@ def snapshot(world, year: int, out) -> None:
 # Разбор: что обычно ломается
 # ---------------------------------------------------------------------------
 
+def _souls(value) -> str:
+    """«1 240 000 душ» — число с пробелами и правильным словом."""
+    value = int(value)
+    text = "%d" % abs(value)
+    groups = []
+    while len(text) > 3:
+        groups.insert(0, text[-3:])
+        text = text[:-3]
+    groups.insert(0, text)
+    return "%s %s" % (" ".join(groups),
+                      _plural(abs(value), "душа", "души", "душ"))
+
+
+def _plural(value: int, one: str, few: str, many: str) -> str:
+    value = abs(int(value)) % 100
+    if 11 <= value <= 14:
+        return many
+    tail = value % 10
+    if tail == 1:
+        return one
+    if 2 <= tail <= 4:
+        return few
+    return many
+
+
 def audit(world) -> list:
     """Ищет в готовом мире следы известных поломок.
 
@@ -881,7 +906,9 @@ def audit(world) -> list:
                   "разрезано %d; народов ушло из мира %d"
                   % (len(great), ", ".join(great_titles) or "нет",
                      len(drowned), len(sundered), len(notable_gone))))
-    if len(great) > 6:
+    # Одна великая беда на тысячу лет — редкость; чаще — уже погода.
+    great_limit = max(3, int(world.total_years / 1000.0) + 3)
+    if len(great) > great_limit:
         bad("великих бедствий %d за %d лет — это уже погода"
             % (len(great), world.total_years))
     if len(drowned) > len(world.regions) * 0.4:
@@ -897,6 +924,73 @@ def audit(world) -> list:
             bad("«%s» поднялось ниоткуда, а должно быть осколком прошлого"
                 % calamity.name)
             break
+
+    # 24. Худший год мира: не по одному бедствию, а по тому, сколько душ
+    #     мир на самом деле потерял — и что в тот век с ним делалось.
+    census = getattr(world, "census", None) or []
+    # Пролог, пока в мире никого нет, — не история: считаем с того века,
+    # когда появилась первая живая душа.
+    first = next((i for i, row in enumerate(census) if row["souls"] > 0), None)
+    census = census[first:] if first is not None else []
+    if len(census) >= 3:
+        worst, worst_loss = None, 0
+        for before, after in zip(census, census[1:]):
+            loss = before["souls"] - after["souls"]
+            if loss > worst_loss:
+                worst, worst_loss = (before, after), loss
+        # Век грызёт мир медленнее одного чёрного десятилетия, но
+        # выгрызает больше: худший век ищется отдельно.
+        span = 10
+        age, age_loss = None, 0
+        for index in range(len(census) - span):
+            before, after = census[index], census[index + span]
+            loss = before["souls"] - after["souls"]
+            if loss > age_loss:
+                age, age_loss = (before, after), loss
+        deepest = min(census, key=lambda row: row["souls"])
+        peak = max(census, key=lambda row: row["souls"])
+        if worst is not None and worst_loss > 0:
+            before, after = worst
+            share = worst_loss * 100.0 / max(1, before["souls"])
+            blame = ", ".join(after["calamities"][:3]) or "ничего громкого"
+            found.append(("=", "худшие десять лет: %d–%d, полегло %s "
+                          "(%.0f%% живших), виной %s; мрак %.2f, войн %d"
+                          % (before["year"], after["year"], _souls(worst_loss),
+                             share, blame, after["gloom"], after["wars"])))
+            if share >= 55:
+                note("за десять лет мир потерял %.0f%% населения (%d год)"
+                     % (share, after["year"]))
+        if age is not None and age_loss > 0:
+            before, after = age
+            share = age_loss * 100.0 / max(1, before["souls"])
+            blame = ", ".join(after["calamities"][:3]) \
+                or ", ".join(before["calamities"][:3]) or "долгий упадок"
+            found.append(("=", "худший век мира: %d–%d, мир потерял %s "
+                          "(%.0f%% живших), виной %s"
+                          % (before["year"], after["year"], _souls(age_loss),
+                             share, blame)))
+        found.append(("=", "лучший век: %d год, %s; самый пустой: %d год, %s"
+                      % (peak["year"], _souls(peak["souls"]),
+                         deepest["year"], _souls(deepest["souls"]))))
+        # Мир, который к концу истории так и не поднялся выше горстки,
+        # читать нечего — это не суровый мир, это пустой.
+        if peak["souls"] and census[-1]["souls"] * 50 < peak["souls"]:
+            bad("мир кончает историю в пятидесятой доле от лучшего века: "
+                "%s против %s"
+                % (_souls(census[-1]["souls"]), _souls(peak["souls"])))
+        dark = sum(1 for row in census if row["gloom"] >= 0.5)
+        if dark * 2 > len(census):
+            bad("больше половины истории мир провёл во всемирной тьме: "
+                "%d десятилетий из %d" % (dark, len(census)))
+        elif dark * 4 > len(census):
+            note("четверть истории мир провёл во всемирной тьме: "
+                 "%d десятилетий из %d" % (dark, len(census)))
+        # Мир, который только растёт, тоже не история: должны быть спады.
+        drops = sum(1 for a, b in zip(census, census[1:])
+                    if b["souls"] < a["souls"])
+        if drops * 20 < len(census):
+            note("население почти не падало за всю историю: спадов %d "
+                 "из %d веков — мир рос как на дрожжах" % (drops, len(census)))
 
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:
