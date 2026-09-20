@@ -170,7 +170,28 @@ def upkeep(ctx, year: int, period: int) -> None:
         polity = world.polities.get(polity_id)
         if polity is None:
             continue
+        _announce_capital(ctx, polity, year)
         _tend(ctx, polity, year, period)
+
+
+def _announce_capital(ctx, polity, year: int) -> None:
+    """Столицу перенесли при гибели прежней — летопись пишет об этом."""
+    if not polity.capital_moved:
+        return
+    world = ctx.world
+    seat = world.settlements.get(polity.capital_id)
+    lost = polity.capital_lost
+    moved = polity.capital_moved
+    polity.capital_moved, polity.capital_lost = 0, ""
+    if seat is None or not lost:
+        return
+    rng = ctx.rng("capital_move", polity.id, moved)
+    date = ctx.date_in(rng, year)
+    title, text = texts.capital_moved(rng, polity, seat, lost)
+    world.add_event(
+        date=date, era_index=world.era_index_at(year), kind="capital_moved",
+        title=title, text=text, importance=3, subjects=[polity.id, seat.id],
+        region_id=seat.region_id, race_id=polity.race_id)
 
 
 def _tend(ctx, polity, year: int, period: int) -> None:

@@ -282,6 +282,10 @@ class Polity:
     policy: str = ""               # как держава обходится с иными народами
     policy_since: int = 0
     titular_since: int = 0         # с какого года престол у нынешнего народа
+    # Столица пала, и корону перенесли. Летопись запишет это на
+    # ближайшем такте и обнулит поля.
+    capital_moved: int = 0         # год переноса, 0 — переносить нечего
+    capital_lost: str = ""         # как звался павший престольный город
     grievance: dict = field(default_factory=dict)    # раса -> обида, 0…1
     conquests: list = field(default_factory=list)    # id событий завоеваний
 

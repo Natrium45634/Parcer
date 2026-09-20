@@ -44,6 +44,37 @@ SAMPLE_MAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
                           "maps", "aurora-7.world")
 
 
+def check_capitals(world, seed: str) -> list:
+    """Престол державы: он должен быть живым городом этой самой державы."""
+    problems = []
+    for polity_id in world.active_polities:
+        polity = world.polities[polity_id]
+        if not polity.capital_id:
+            if polity.settlement_ids:
+                problems.append("сид «%s»: у державы %s есть города, но нет "
+                                "престола" % (seed, polity.name))
+                break
+            continue
+        capital = world.settlements.get(polity.capital_id)
+        if capital is None:
+            problems.append("сид «%s»: престол державы %s — несуществующий "
+                            "город" % (seed, polity.name))
+            break
+        if capital.status != ACTIVE:
+            problems.append("сид «%s»: престол державы %s стоит в руинах (%s)"
+                            % (seed, polity.name, capital.name))
+            break
+        if capital.id not in polity.settlement_ids:
+            problems.append("сид «%s»: престол державы %s ей не принадлежит "
+                            "(%s)" % (seed, polity.name, capital.name))
+            break
+        if not capital.is_capital:
+            problems.append("сид «%s»: город %s держит престол, но не знает "
+                            "об этом" % (seed, capital.name))
+            break
+    return problems
+
+
 def check_nations(world, seed: str) -> list:
     """Проверяет народы держав и походы в неизведанное."""
     problems = []
@@ -1107,6 +1138,7 @@ def main() -> int:
         failures.extend(check_things(first, seed))
         failures.extend(check_lore(first, seed))
         failures.extend(check_upheavals(first, seed))
+        failures.extend(check_capitals(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -1149,6 +1181,7 @@ def main() -> int:
             failures.extend(check_things(first, "карта/" + seed))
             failures.extend(check_lore(first, "карта/" + seed))
             failures.extend(check_upheavals(first, "карта/" + seed))
+            failures.extend(check_capitals(first, "карта/" + seed))
             failures.extend(check_map_world(first, None, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "

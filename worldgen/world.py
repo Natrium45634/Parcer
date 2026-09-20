@@ -804,6 +804,31 @@ class World:
         polity = self.polities.get(settlement.polity_id)
         if polity is not None and settlement.id in polity.settlement_ids:
             polity.settlement_ids.remove(settlement.id)
+        if polity is not None and polity.capital_id == settlement.id:
+            self._move_crown(polity, settlement, date)
+
+    def _move_crown(self, polity, fallen, date: Date) -> None:
+        """Столица пала — корону переносят в крупнейший из уцелевших городов.
+
+        Раньше держава оставалась со столицей-руиной: на её месте пепел,
+        а в справочнике она всё ещё престольный город. Вместе с этим
+        сбивался и титульный народ, которого в державе уже не было.
+        """
+        fallen.is_capital = False
+        best, best_souls = None, -1
+        for settlement_id in polity.settlement_ids:
+            settlement = self.settlements.get(settlement_id)
+            if settlement is None or settlement.status != ACTIVE:
+                continue
+            if settlement.population > best_souls:
+                best, best_souls = settlement, settlement.population
+        if best is None:
+            polity.capital_id = ""
+            return
+        best.is_capital = True
+        polity.capital_id = best.id
+        polity.capital_moved = date.year
+        polity.capital_lost = fallen.name
 
     def end_polity(self, polity, date: Date, reason: str, status: str = FALLEN) -> None:
         if polity.status != ACTIVE:

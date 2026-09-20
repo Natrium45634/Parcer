@@ -11,7 +11,7 @@ from __future__ import annotations
 from . import warfare
 from .morph import dative_noun, genitive_noun
 from .narrative import cap
-from .timeline import years_text
+from .timeline import plural, years_text
 
 
 def polity_nom(polity) -> str:
@@ -41,6 +41,12 @@ def army_text(men: int) -> str:
 
 def souls_text(count: int) -> str:
     return "%d" % max(0, int(count))
+
+
+def lives_text(count: int) -> str:
+    """«239 жизней», «21 жизнь» — со словом и в правильном числе."""
+    count = max(0, int(count))
+    return "%d %s" % (count, plural(count, "жизнь", "жизни", "жизней"))
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +136,21 @@ BATTLE_FIELDS = (
 WAR_ORDINALS = ("Вторая", "Третья", "Четвёртая", "Пятая", "Шестая", "Седьмая",
                 "Восьмая", "Девятая", "Десятая", "Одиннадцатая",
                 "Двенадцатая", "Тринадцатая")
+
+
+# Итоговая строка войны звучит по-разному: одна и та же фраза под каждой
+# войной мира превращает летопись в ведомость.
+WAR_TOLL_LINES = (
+    "Война длилась %(years)s и стоила %(dead)s.",
+    "Считают потом: %(years)s войны и %(dead)s.",
+    "За %(years)s этой войны земля приняла %(dead)s.",
+    "%(years)s, %(dead)s — так её и запомнят.",
+    "Летопись подводит черту: %(years)s войны, %(dead)s.",
+    "Войне этой %(years)s, и обошлась она в %(dead)s.",
+    "Ни одна сторона не считает себя виноватой в том, что %(years)s войны "
+    "стоили %(dead)s.",
+    "Цена сходится плохо: %(years)s и %(dead)s, а межа лежит почти там же.",
+)
 
 
 def numbered(title: str, index: int) -> str:
@@ -655,8 +676,9 @@ def peace_text(rng, war, attacker, defender, terms_map, deaths: int,
             parts.append(note % {"years": years_text(int(value))})
         else:
             parts.append(note)
-    parts.append("Война длилась %s и стоила %s жизней."
-                 % (years_text(max(1, war.years)), souls_text(deaths)))
+    parts.append(rng.choice(WAR_TOLL_LINES)
+                 % {"years": years_text(max(1, war.years)),
+                    "dead": lives_text(deaths)})
     if war.outcome != warfare.ANNIHILATION:
         parts.append(rng.choice(PEACE_AFTER))
     title = war.peace_name or ("Конец войны: %s" % war.name)
