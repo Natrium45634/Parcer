@@ -27,6 +27,11 @@ GREAT = ("drowning", "sundering", "long_dark", "deep_waking")
 # для которого писалось всё остальное.
 MAX_DROWNED_SHARE = 0.25
 
+# И разлом не рассекает весь мир: больше трети суши он не трогает, а
+# последнюю сухопутную дорогу не рвёт никогда — иначе земля остаётся
+# островом посреди материка, и караванам некуда идти вовсе.
+MAX_SUNDERED_SHARE = 0.35
+
 
 def aftermath(ctx, calamity, spec, rng, year: int, date) -> None:
     """Вызывается при начале беды: то, что она делает с самой землёй."""
@@ -212,16 +217,24 @@ def _sunder(ctx, calamity, rng, year: int, date) -> None:
     """Суша рвётся: там, где ходили посуху, теперь ходят кораблём."""
     world = ctx.world
     torn = []
+    already = sum(1 for item in world.regions.values() if item.sundered)
+    limit = max(1, int(len(world.regions) * MAX_SUNDERED_SHARE))
     for region_id in calamity.region_ids:
+        if already >= limit:
+            calamity.notes.append("разлом упёрся в старые разломы")
+            break
         region = world.regions.get(region_id)
-        if region is None or not region.neighbors:
+        if region is None or len(region.neighbors) < 2:
             continue
-        # Рвутся не все связи, а половина: иначе земля остаётся островом
-        # посреди мира, и караванам некуда идти вовсе.
+        # Рвутся не все связи, а половина, и одна дорога посуху остаётся
+        # всегда: земля, отрезанная начисто, — это уже не раскол, а остров.
+        keep = max(1, len(region.neighbors) // 2)
         cut = [item for item in region.neighbors
                if item in world.regions and rng.chance(0.5)]
+        cut = cut[:max(0, len(region.neighbors) - keep)]
         if not cut:
             continue
+        already += 1
         for other_id in cut:
             other = world.regions[other_id]
             if other_id in region.neighbors:
