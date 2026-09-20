@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from .. import crafts as crafts_mod
+from .. import laws as laws_mod
 from .. import narrative_crafts as texts
 from .. import races as races_mod
 from ..models import ACTIVE
@@ -43,6 +44,9 @@ def upkeep(ctx, year: int, period: int) -> None:
         urge *= 0.5 + 0.5 * min(3.0, len(polity.settlement_ids) / 4.0)
         urge *= 1.0 + 0.12 * len(polity.routes)
         urge *= max(0.4, 1.0 - polity.hunger)
+        # Школа и почта — это не украшение: там, где их завели, открывают
+        # чаще.
+        urge *= laws_mod.bonus(polity.reforms, "lore")
         if rng.chance(min(0.6, urge)):
             _discover(ctx, polity, era_index, year, rng)
 

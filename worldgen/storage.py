@@ -14,7 +14,8 @@ import json
 from .models import (ACTIVE, ONGOING, Artifact, Battle, Calamity, Camp,
                      Codex, Company, Deity, Discovery,
                      Embassy, EraSpan, Legend, Event, Expedition, Faith, Feud, Figure,
-                     Folk, Fortress, Guild, House, League, Monster, Pact, Plot,
+                     Folk, Fortress, Guild, House, Law, League, Monster, Pact,
+                     Plot,
                      Polity,
                      Region, Reign, Relic, Settlement, Site, Temple, Tongue,
                      TradeRoute, Tribe, Union, War)
@@ -125,6 +126,8 @@ def world_to_dict(world: World) -> dict:
                      for item in world.monsters.values()],
         "discoveries": [_compact(Discovery, item.to_dict())
                         for item in world.discoveries.values()],
+        "laws": [_compact(Law, item.to_dict())
+                 for item in world.laws.values()],
         "codices": [_compact(Codex, item.to_dict())
                     for item in world.codices.values()],
         "legends": [_compact(Legend, item.to_dict())
@@ -232,6 +235,9 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("artifacts", ()):
         artifact = Artifact(**_clean(Artifact, item))
         world.artifacts[artifact.id] = artifact
+    for item in data.get("laws", ()):
+        law = Law(**_clean(Law, item))
+        world.laws[law.id] = law
     for item in data.get("codices", ()):
         codex = Codex(**_clean(Codex, item))
         world.codices[codex.id] = codex

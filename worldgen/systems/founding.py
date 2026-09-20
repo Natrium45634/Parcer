@@ -14,6 +14,7 @@ from . import houses as houses_mod
 from . import peoples
 from . import succession
 from .. import crafts as crafts_mod
+from .. import laws as laws_mod
 from .. import narrative
 from .. import races as races_mod
 from .. import rulers as rulers_mod
@@ -434,6 +435,8 @@ def upkeep(ctx, year: int, period: int) -> None:
         if polity is not None:
             # Плуг, трёхполье и акведук кормят больше народу, чем указ.
             capacity *= crafts_mod.bonus(polity.known, "growth")
+            # Но и указ кое-что значит: отпущенные рабы пашут лучше рабов.
+            capacity *= laws_mod.bonus(polity.reforms, "growth")
             # Хозяйская хватка государя кормит города или не кормит их:
             # отсюда и берутся «при нём страна поднялась» и наоборот.
             capacity *= rulers_mod.stewardship(world, polity)

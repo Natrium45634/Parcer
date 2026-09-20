@@ -764,6 +764,55 @@ def render_sites(world) -> str:
     return "\n".join(rows)
 
 
+def render_laws(world) -> str:
+    """Законы и реформы: кто что завёл и кто это перенял."""
+    from . import laws as laws_mod
+
+    rows = ["ЗАКОНЫ И РЕФОРМЫ", ""]
+    if not world.laws:
+        rows.append("  Порядков в этом мире не заводили.")
+        return "\n".join(rows)
+
+    items = sorted(world.laws.values(), key=lambda item: item.made.ordinal)
+    common = [item for item in items if item.famous]
+    rows.append("  Заведено порядков: %d из %d возможных; общими стали %d."
+                % (len(items), len(laws_mod.REFORMS), len(common)))
+    rows.append("")
+
+    header = "  %-8s %-26s %-14s %-32s %s" % (
+        "Год", "Порядок", "Дело", "Кто первым", "Держав")
+    rows.append(header)
+    rows.append("  " + "-" * (len(header) - 2))
+    for item in items:
+        polity = world.polities.get(item.polity_id)
+        ruler = world.figures.get(item.ruler_id)
+        rows.append("  %-8d %-26s %-14s %-32s %d%s"
+                    % (item.made.year, item.name[:26],
+                       laws_mod.FAMILY_NAMES.get(item.family,
+                                                 item.family)[:14],
+                       (polity.full_name if polity is not None else "—")[:32],
+                       len(item.copied_by),
+                       "  (общий порядок)" if item.famous else ""))
+        if ruler is not None:
+            rows.append("        завёл: %s" % ruler.name)
+    rows.append("")
+
+    living = [world.polities[pid] for pid in world.active_polities]
+    if living:
+        living.sort(key=lambda item: (-len(item.reforms), item.name))
+        rows.append("  ЧЕМ ЖИВУТ ДЕРЖАВЫ НА КОНЕЦ ИСТОРИИ")
+        for polity in living[:8]:
+            names = [laws_mod.REFORMS_BY_KEY[key].name
+                     for key in polity.reforms
+                     if key in laws_mod.REFORMS_BY_KEY]
+            rows.append("    %-34s порядков %2d: %s"
+                        % (polity.full_name[:34], len(names),
+                           ", ".join(names[:5])
+                           + ("…" if len(names) > 5 else "")))
+        rows.append("")
+    return "\n".join(rows)
+
+
 def render_lore(world) -> str:
     """Своды и легенды: что мир записал о себе и что об этом поёт."""
     from . import lore as lore_mod
@@ -1651,6 +1700,7 @@ def full_text(world) -> str:
         render_tongues(world),
         render_trade(world),
         render_crafts(world),
+        render_laws(world),
         render_lore(world),
         render_guilds(world),
         render_expeditions(world),

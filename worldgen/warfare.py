@@ -563,12 +563,15 @@ def quality(world, polity, race, general=None) -> float:
     from . import rulers as rulers_mod
 
     from . import crafts as crafts_mod
+    from . import laws as laws_mod
 
     value = 0.75 + 0.35 * martial(race)
     value *= rulers_mod.war_edge(world, polity)
     # Стремя, сталь и самострел стоят выучки: держава, отставшая на век,
     # выходит в поле хуже вооружённой — и это видно по исходу.
     value *= crafts_mod.bonus(polity.known, "war")
+    # Постоянное войско и правильный набор стоят не меньше стали.
+    value *= laws_mod.bonus(polity.reforms, "war")
     if general is not None:
         value *= 0.85 + 0.06 * _general_skill(general)
     # Обиженные народы воюют хуже: их держат в тылу и не доверяют оружия.

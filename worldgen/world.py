@@ -16,7 +16,8 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Artifact, Battle, Calamity, Camp, Codex, Company, Deity,
                      Discovery, Embassy, Event, Expedition, Faith, Feud, Figure,
                      Folk, Fortress,
-                     Guild, House, League, Legend, Monster, Pact, Plot, Polity,
+                     Guild, House, Law, League, Legend, Monster, Pact, Plot,
+                     Polity,
                      Region,
                      Reign,
                      Relic, Settlement, Site, Temple, Tongue, TradeRoute, Tribe,
@@ -94,6 +95,7 @@ class World:
         self.living_monsters = []
         self.discoveries = {}
         self.codices = {}
+        self.laws = {}
         self.active_codices = []
         self.legends = {}
         self.active_unions = []
@@ -386,6 +388,17 @@ class World:
         site = Site(id=self.next_id("Z"), **kwargs)
         self.sites[site.id] = site
         return site
+
+    def add_law(self, **kwargs) -> Law:
+        law = Law(id=self.next_id("X"), **kwargs)
+        self.laws[law.id] = law
+        return law
+
+    def law_of(self, key: str):
+        for item in self.laws.values():
+            if item.key == key:
+                return item
+        return None
 
     def add_codex(self, **kwargs) -> Codex:
         codex = Codex(id=self.next_id("L"), **kwargs)
