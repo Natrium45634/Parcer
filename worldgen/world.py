@@ -805,16 +805,25 @@ class World:
         if polity is not None and settlement.id in polity.settlement_ids:
             polity.settlement_ids.remove(settlement.id)
         if polity is not None and polity.capital_id == settlement.id:
-            self._move_crown(polity, settlement, date)
+            self.ensure_capital(polity, date)
 
-    def _move_crown(self, polity, fallen, date: Date) -> None:
-        """Столица пала — корону переносят в крупнейший из уцелевших городов.
+    def ensure_capital(self, polity, date: Date) -> bool:
+        """Престол должен быть живым городом этой самой державы.
 
-        Раньше держава оставалась со столицей-руиной: на её месте пепел,
-        а в справочнике она всё ещё престольный город. Вместе с этим
-        сбивался и титульный народ, которого в державе уже не было.
+        Город пал, откололся в вольную республику, отошёл победителю или
+        ушёл с мятежным домом — во всех этих случаях корона оставалась
+        при нём, и держава числилась со столицей, которой у неё нет.
+        Теперь корону переносят в крупнейший из уцелевших своих городов.
         """
-        fallen.is_capital = False
+        seat = self.settlements.get(polity.capital_id)
+        if seat is not None and seat.status == ACTIVE \
+                and seat.id in polity.settlement_ids:
+            seat.is_capital = True
+            return False
+        lost = seat.name if seat is not None else ""
+        if seat is not None:
+            seat.is_capital = False
+
         best, best_souls = None, -1
         for settlement_id in polity.settlement_ids:
             settlement = self.settlements.get(settlement_id)
@@ -824,11 +833,13 @@ class World:
                 best, best_souls = settlement, settlement.population
         if best is None:
             polity.capital_id = ""
-            return
+            return False
         best.is_capital = True
         polity.capital_id = best.id
-        polity.capital_moved = date.year
-        polity.capital_lost = fallen.name
+        if lost:
+            polity.capital_moved = date.year
+            polity.capital_lost = lost
+        return True
 
     def end_polity(self, polity, date: Date, reason: str, status: str = FALLEN) -> None:
         if polity.status != ACTIVE:

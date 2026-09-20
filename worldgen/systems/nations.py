@@ -172,6 +172,8 @@ def upkeep(ctx, year: int, period: int) -> None:
         polity = world.polities.get(polity_id)
         if polity is None:
             continue
+        world.ensure_capital(polity, ctx.date_in(
+            ctx.rng("capital_check", polity.id, year), year))
         _announce_capital(ctx, polity, year)
         ensure_titular(ctx, polity, year, refresh=False)
         _tend(ctx, polity, year, period)
