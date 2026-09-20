@@ -599,6 +599,7 @@ class Calamity:
     relic_ids: list = field(default_factory=list)
     compounded_with: list = field(default_factory=list)
     dark_age_until: int = 0
+    captive_taken: bool = False    # пленника этой беды уже выпустили
     battle_ids: list = field(default_factory=list)
     strength: float = 1.0      # запас сил захватчика, 1.0 — полон
     host_size: int = 0         # сколько их было

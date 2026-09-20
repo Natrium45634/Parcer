@@ -1075,9 +1075,25 @@ def audit(world) -> list:
                 gap = max(gap, child.start.year - parent.start.year)
         errands = sum(1 for e in world.events if e.kind == "dark_errand")
         fallen = sum(1 for e in world.events if e.kind == "ruler_fallen")
+        # Путей возврата двенадцать; если мир знает один-два, цепи стали
+        # однообразными и читатель угадывает конец с первой строки.
+        from worldgen.systems.legacy import WAY_NOTES
+        used = set()
+        for calamity in world.calamities.values():
+            for note in calamity.notes:
+                for key, pattern in WAY_NOTES.items():
+                    if note.startswith(pattern.split("%")[0].strip()):
+                        used.add(key)
+        if linked >= 6 and len(used) <= 2:
+            note("зло возвращается в мир всего %d путями из %d — цепи "
+                 "однообразны" % (len(used), len(WAY_NOTES)))
+        if used:
+            found.append(("=", "путей возврата зла: %d из %d (%s)"
+                          % (len(used), len(WAY_NOTES),
+                             ", ".join(sorted(used)))))
         found.append(("=", "связанных бедствий: %d из %d (%.0f%%), самый "
-                      "долгий разрыв %d %s; выездов за силой %d, павших "
-                      "государей %d"
+                      "долгий разрыв %d %s; дверей в прошлое открыто %d, "
+                      "павших государей %d"
                       % (linked, len(world.calamities), share,
                          gap, _plural(gap, "год", "года", "лет"),
                          errands, fallen)))
