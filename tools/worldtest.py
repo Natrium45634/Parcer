@@ -456,7 +456,9 @@ def audit(world) -> list:
     if chiefs:
         deity_id, count = chiefs.most_common(1)[0]
         share = count * 100.0 / max(1, len(world.faiths))
-        if share > 20:
+        # На пяти верах любой бог возглавляет «двадцать процентов»: чтобы
+        # говорить о монополии, вер должно быть достаточно много.
+        if share > 20 and count >= 5 and len(world.faiths) >= 12:
             deity = world.deities.get(deity_id)
             bad("один бог возглавляет %.0f%% вер мира (%s, %d из %d)"
                 % (share, deity.given_name if deity else deity_id, count,
