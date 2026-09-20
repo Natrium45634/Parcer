@@ -17,6 +17,7 @@ from .. import narrative_upheaval as texts
 from .. import races as races_mod
 from .. import sites as sites_mod
 from ..models import ACTIVE, GONE, RUINED
+from ..world import RURAL_FACTOR
 
 # Какие беды меняют мир и что именно они с ним делают.
 GREAT = ("drowning", "sundering", "long_dark", "deep_waking")
@@ -57,11 +58,21 @@ def _drown(ctx, calamity, rng, year: int, date) -> None:
             # города, и то если повезёт с погодой.
             saved = max(1, int(settlement.population * rng.uniform(0.08, 0.2)))
             survivors.append((settlement, saved))
+            lost = max(0, world.settlement_realm(settlement)
+                       - int(saved * RURAL_FACTOR))
+            _toll(calamity, lost, settlement.polity_id, settlement.race_id)
             _sink_city(ctx, calamity, settlement, region, date, year, rng)
+            calamity.settlements_lost += 1
         for tribe_id in list(world.active_tribes):
             tribe = world.tribes[tribe_id]
             if tribe.region_id == region_id:
+                _toll(calamity, tribe.population, "", tribe.race_id)
                 world.end_tribe(tribe, date, "ушло под воду", GONE)
+        for camp_id in list(world.active_camps):
+            camp = world.camps[camp_id]
+            if camp.region_id == region_id:
+                _toll(calamity, camp.population, "", camp.race_id)
+                world.end_camp(camp, date, "ушло под воду", GONE)
     if not drowned:
         return
     calamity.notes.append("под воду ушло земель: %d" % len(drowned))
@@ -74,6 +85,20 @@ def _drown(ctx, calamity, rng, year: int, date) -> None:
         title=title, text=text, importance=5,
         subjects=[calamity.id], region_id=drowned[0].id)
     _exodus(ctx, calamity, survivors, refuge, rng, year, date)
+
+
+def _toll(calamity, dead: int, polity_id: str, race_id: str) -> None:
+    """Счёт беды: утонувшие — такие же её жертвы, как убитые."""
+    dead = int(dead)
+    if dead <= 0:
+        return
+    calamity.deaths += dead
+    if polity_id:
+        calamity.deaths_by_polity[polity_id] = \
+            calamity.deaths_by_polity.get(polity_id, 0) + dead
+    if race_id:
+        calamity.deaths_by_race[race_id] = \
+            calamity.deaths_by_race.get(race_id, 0) + dead
 
 
 def _sink_city(ctx, calamity, settlement, region, date, year: int, rng) -> None:
@@ -240,6 +265,7 @@ def _empty_hall(ctx, calamity, rng, year: int, date) -> None:
     site.story = "здесь стоял %s, пока из глубины не поднялось то, что там спало" \
         % best.full_name
     calamity.notes.append("оставлен город: %s" % best.name)
+    calamity.settlements_lost += 1
 
     title, text = texts.deep_waking(rng, best, site, polity)
     world.add_event(

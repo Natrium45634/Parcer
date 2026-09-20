@@ -1690,6 +1690,97 @@ def render_dynasties(world) -> str:
     return "\n".join(rows)
 
 
+def render_upheavals(world) -> str:
+    """Что великие беды сделали с самой картой — и кого мир потерял."""
+    from . import catastrophe as cat
+    from . import sites as sites_mod
+    from .narrative_calamity import number
+    from .systems import upheaval as upheaval_mod
+
+    rows = ["КАК МЕНЯЛСЯ МИР", ""]
+
+    great = [calamity for calamity in world.calamities.values()
+             if calamity.key in upheaval_mod.GREAT]
+    great.sort(key=lambda c: c.start.ordinal)
+    if great:
+        rows.append("  Великие беды")
+        for calamity in great:
+            spec = cat.CATALOG_BY_KEY.get(calamity.key)
+            rows.append("    %s — %s, %d год" % (
+                calamity.name, spec.title.lower() if spec else calamity.key,
+                calamity.start.year))
+            if calamity.deaths:
+                rows.append("        погибло: %s" % number(calamity.deaths))
+            for note in calamity.notes:
+                if note.startswith(("под воду", "порвано", "оставлен",
+                                    "исход", "осколок")):
+                    rows.append("        %s" % note)
+        rows.append("")
+
+    drowned = [region for region in world.regions.values() if region.drowned]
+    if drowned:
+        rows.append("  Земли, которых больше нет под ногами")
+        for region in sorted(drowned, key=lambda r: r.name):
+            rows.append("    %s — под водой" % region.name)
+        rows.append("")
+
+    sundered = [region for region in world.regions.values() if region.sundered]
+    if sundered:
+        rows.append("  Земли, разрезанные разломом")
+        for region in sorted(sundered, key=lambda r: r.name):
+            links = ", ".join(world.regions[rid].name
+                              for rid in region.sea_links
+                              if rid in world.regions)
+            rows.append("    %s — теперь только морем: %s"
+                        % (region.name, links or "никуда"))
+        rows.append("")
+
+    sunken = [site for site in world.sites.values()
+              if site.kind in (sites_mod.SUNKEN, sites_mod.SEALED)]
+    if sunken:
+        rows.append("  Места, куда не ходят")
+        for site in sorted(sunken, key=lambda s: s.created.ordinal):
+            region = world.regions.get(site.region_id)
+            rows.append("    %s (%s, %s), %d год" % (
+                site.name, site.kind, region.name if region else "—",
+                site.created.year))
+            if site.story:
+                rows.append("        %s" % site.story)
+        rows.append("")
+
+    gone = world.notes.get(upheaval_mod.GONE_NOTE) or {}
+    peaks = world.notes.get(upheaval_mod.PEAK_BY_RACE) or {}
+    notable = [(race_id, year) for race_id, year in gone.items()
+               if int(peaks.get(race_id, 0)) >= upheaval_mod.NOTABLE_PEAK]
+    if notable:
+        rows.append("  Народы, которых больше нет")
+        for race_id, year in sorted(notable, key=lambda item: item[1]):
+            race = races_mod.RACES_BY_ID.get(race_id)
+            rows.append("    %s — %d год (в лучший век: %s)" % (
+                race.name if race else race_id, year,
+                number(peaks.get(race_id, 0))))
+        rows.append("")
+
+    faded = [race_id for race_id in gone
+             if int(peaks.get(race_id, 0)) < upheaval_mod.NOTABLE_PEAK]
+    if faded:
+        names = []
+        for race_id in sorted(faded):
+            race = races_mod.RACES_BY_ID.get(race_id)
+            names.append(race.name.lower() if race else race_id)
+        rows.append("  Так и не поднялись: %s." % ", ".join(names))
+        rows.append("")
+
+    peak = world.notes.get(upheaval_mod.PEAK_NOTE)
+    if peak:
+        rows.append("  Людей в лучший свой век: %s." % number(peak))
+        rows.append("  Сейчас: %s." % number(world.world_population()))
+
+    if len(rows) <= 2:
+        rows.append("  Карта мира осталась такой, какой её начертили.")
+    return "\n".join(rows)
+
+
 def full_text(world) -> str:
     """Полный экспорт: летопись + справочники."""
     return "\n\n".join((
@@ -1714,6 +1805,7 @@ def full_text(world) -> str:
         render_pantheon(world),
         render_faiths(world),
         render_calamities(world),
+        render_upheavals(world),
         render_monsters(world),
         render_artifacts(world),
         render_sites(world),

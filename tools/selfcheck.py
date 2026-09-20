@@ -708,6 +708,302 @@ def check_calamities(world, seed: str) -> list:
     return problems
 
 
+def check_things(world, seed: str) -> list:
+    """Вещи, места и чудовища: всё ли на месте и ни у кого ли нет лишнего.
+
+    Главное правило блока: подземелье берёт факты из истории, а не наоборот.
+    Значит, у каждой вещи должна быть цепочка рук, у каждого места — то,
+    от чего оно осталось, а у каждого чудовища — год, когда его убили,
+    если оно мертво.
+    """
+    problems = []
+
+    names = [item.name for item in world.artifacts.values()]
+    if len(names) != len(set(names)):
+        problems.append("сид «%s»: имена вещей повторяются" % seed)
+
+    for artifact in world.artifacts.values():
+        if artifact.made is None:
+            problems.append("сид «%s»: вещь «%s» никогда не делали"
+                            % (seed, artifact.name))
+            break
+        if artifact.gender not in ("m", "f", "n", "p"):
+            problems.append("сид «%s»: у вещи «%s» нет рода"
+                            % (seed, artifact.name))
+            break
+        if artifact.owner_id and artifact.owner_id not in world.figures:
+            problems.append("сид «%s»: вещь «%s» у несуществующего владельца"
+                            % (seed, artifact.name))
+            break
+        if artifact.site_id and artifact.site_id not in world.sites:
+            problems.append("сид «%s»: вещь «%s» лежит в несуществующем месте"
+                            % (seed, artifact.name))
+            break
+        if not artifact.trail:
+            problems.append("сид «%s»: у вещи «%s» пустая цепочка рук"
+                            % (seed, artifact.name))
+            break
+        years = [int(step.get("year", 0)) for step in artifact.trail]
+        if any(years[i] > years[i + 1] for i in range(len(years) - 1)):
+            problems.append("сид «%s»: цепочка рук вещи «%s» идёт вспять"
+                            % (seed, artifact.name))
+            break
+        if years and years[0] < artifact.made.year:
+            problems.append("сид «%s»: вещь «%s» сменила владельца до ковки"
+                            % (seed, artifact.name))
+            break
+
+    names = [site.name for site in world.sites.values()]
+    if len(names) != len(set(names)):
+        problems.append("сид «%s»: имена мест повторяются" % seed)
+
+    for site in world.sites.values():
+        if site.region_id and site.region_id not in world.regions:
+            problems.append("сид «%s»: место «%s» лежит вне земель"
+                            % (seed, site.name))
+            break
+        if not (1 <= site.depth <= 5):
+            problems.append("сид «%s»: у места «%s» немыслимая глубина"
+                            % (seed, site.name))
+            break
+        if site.riches < 0:
+            problems.append("сид «%s»: у места «%s» отрицательное добро"
+                            % (seed, site.name))
+            break
+        if site.opened is not None and site.opened.ordinal < site.created.ordinal:
+            problems.append("сид «%s»: место «%s» вскрыли до того, как оно "
+                            "появилось" % (seed, site.name))
+            break
+        if site.figure_id and site.figure_id not in world.figures:
+            problems.append("сид «%s»: в месте «%s» лежит неизвестно кто"
+                            % (seed, site.name))
+            break
+        for artifact_id in site.artifact_ids:
+            if artifact_id not in world.artifacts:
+                problems.append("сид «%s»: в месте «%s» лежит несуществующая вещь"
+                                % (seed, site.name))
+                break
+        if not (site.figure_id or site.settlement_id or site.battle_id
+                or site.calamity_id or site.monster_id or site.polity_id
+                or site.artifact_ids or site.story):
+            problems.append("сид «%s»: место «%s» появилось ниоткуда"
+                            % (seed, site.name))
+            break
+
+    names = [monster.name for monster in world.monsters.values()]
+    if len(names) != len(set(names)):
+        problems.append("сид «%s»: имена чудовищ повторяются" % seed)
+
+    for monster in world.monsters.values():
+        if monster.status != "жив" and monster.ended is None:
+            problems.append("сид «%s»: чудовище «%s» мертво без года смерти"
+                            % (seed, monster.name))
+            break
+        if monster.ended is not None and monster.ended.ordinal < monster.born.ordinal:
+            problems.append("сид «%s»: чудовище «%s» умерло до рождения"
+                            % (seed, monster.name))
+            break
+        if monster.slayer_id and monster.slayer_id not in world.figures:
+            problems.append("сид «%s»: чудовище «%s» убил никто"
+                            % (seed, monster.name))
+            break
+        if monster.hoard < 0 or monster.kills < 0:
+            problems.append("сид «%s»: у чудовища «%s» отрицательный счёт"
+                            % (seed, monster.name))
+            break
+        if monster.site_id and monster.site_id not in world.sites:
+            problems.append("сид «%s»: у чудовища «%s» логово в пустоте"
+                            % (seed, monster.name))
+            break
+
+    return problems
+
+
+def check_lore(world, seed: str) -> list:
+    """Ремёсла, своды, легенды и законы: связность и здравый смысл."""
+    problems = []
+
+    for discovery in world.discoveries.values():
+        if discovery.polity_id and discovery.polity_id not in world.polities:
+            problems.append("сид «%s»: открытие «%s» сделала несуществующая страна"
+                            % (seed, discovery.name))
+            break
+        for polity_id in discovery.known_by:
+            if polity_id not in world.polities:
+                problems.append("сид «%s»: открытие «%s» перенял никто"
+                                % (seed, discovery.name))
+                break
+        if len(discovery.known_by) != len(set(discovery.known_by)):
+            problems.append("сид «%s»: открытие «%s» переняли дважды"
+                            % (seed, discovery.name))
+            break
+        if discovery.polity_id and discovery.polity_id not in discovery.known_by:
+            problems.append("сид «%s»: страна забыла своё же открытие «%s»"
+                            % (seed, discovery.name))
+            break
+
+    for polity in world.polities.values():
+        if len(polity.known) != len(set(polity.known)):
+            problems.append("сид «%s»: страна %s знает одно ремесло дважды"
+                            % (seed, polity.name))
+            break
+        if len(polity.reforms) != len(set(polity.reforms)):
+            problems.append("сид «%s»: страна %s провела одну реформу дважды"
+                            % (seed, polity.name))
+            break
+
+    for codex in world.codices.values():
+        if codex.seat_id and codex.seat_id not in world.settlements:
+            problems.append("сид «%s»: свод «%s» пишут в несуществующем городе"
+                            % (seed, codex.name))
+            break
+        if not (0.0 <= codex.accuracy <= 1.0):
+            problems.append("сид «%s»: у свода «%s» немыслимая точность"
+                            % (seed, codex.name))
+            break
+        if codex.ended is not None and codex.ended.ordinal < codex.started.ordinal:
+            problems.append("сид «%s»: свод «%s» закрыли до того, как начали"
+                            % (seed, codex.name))
+            break
+        if codex.status != "ведётся" and codex.ended is None:
+            problems.append("сид «%s»: свод «%s» оборван без года"
+                            % (seed, codex.name))
+            break
+        years = [int(entry.get("year", 0)) for entry in codex.entries]
+        if any(years[i] > years[i + 1] for i in range(len(years) - 1)):
+            problems.append("сид «%s»: записи свода «%s» идут вспять"
+                            % (seed, codex.name))
+            break
+        if years and years[0] < codex.started.year:
+            problems.append("сид «%s»: в своде «%s» есть запись до его начала"
+                            % (seed, codex.name))
+            break
+        seen = set()
+        for keeper in codex.keepers:
+            figure_id = keeper.get("figure")
+            if figure_id and figure_id not in world.figures:
+                problems.append("сид «%s»: свод «%s» ведёт неизвестно кто"
+                                % (seed, codex.name))
+                break
+            if figure_id in seen:
+                problems.append("сид «%s»: летописец свода «%s» садится за него "
+                                "дважды" % (seed, codex.name))
+                break
+            seen.add(figure_id)
+
+    names = [legend.name for legend in world.legends.values()]
+    if len(names) != len(set(names)):
+        problems.append("сид «%s»: имена легенд повторяются" % seed)
+
+    for legend in world.legends.values():
+        if legend.tellings < 1:
+            problems.append("сид «%s»: легенду «%s» никто не рассказывал"
+                            % (seed, legend.name))
+            break
+        if not legend.truth:
+            problems.append("сид «%s»: у легенды «%s» нет правды под ней"
+                            % (seed, legend.name))
+            break
+        shift_years = [int(shift.get("year", 0)) for shift in legend.shifts]
+        if any(year < legend.born.year for year in shift_years):
+            problems.append("сид «%s»: легенда «%s» изменилась до рождения"
+                            % (seed, legend.name))
+            break
+
+    for law in world.laws.values():
+        if law.polity_id and law.polity_id not in world.polities:
+            problems.append("сид «%s»: закон «%s» завела несуществующая страна"
+                            % (seed, law.name))
+            break
+        if law.polity_id and law.polity_id not in law.copied_by:
+            problems.append("сид «%s»: страна забыла свой же закон «%s»"
+                            % (seed, law.name))
+            break
+        if len(law.copied_by) != len(set(law.copied_by)):
+            problems.append("сид «%s»: закон «%s» переняли дважды"
+                            % (seed, law.name))
+            break
+        if law.ruler_id and law.ruler_id not in world.figures:
+            problems.append("сид «%s»: закон «%s» завёл никто"
+                            % (seed, law.name))
+            break
+
+    return problems
+
+
+def check_upheavals(world, seed: str) -> list:
+    """Великие бедствия: что они сделали с картой — и осталось ли согласовано."""
+    from worldgen.systems import upheaval as upheaval_mod
+
+    problems = []
+
+    for region in world.regions.values():
+        if not region.drowned:
+            continue
+        if region.capacity or region.habitat:
+            problems.append("сид «%s»: затопленная земля %s всё ещё кормит"
+                            % (seed, region.name))
+            break
+        for settlement_id in world.active_settlements:
+            if world.settlements[settlement_id].region_id == region.id:
+                problems.append("сид «%s»: город стоит в затопленной земле %s"
+                                % (seed, region.name))
+                break
+        for tribe_id in world.active_tribes:
+            if world.tribes[tribe_id].region_id == region.id:
+                problems.append("сид «%s»: племя живёт в затопленной земле %s"
+                                % (seed, region.name))
+                break
+
+    for region in world.regions.values():
+        for other_id in region.neighbors:
+            other = world.regions.get(other_id)
+            if other is None:
+                problems.append("сид «%s»: земля %s соседит с пустотой"
+                                % (seed, region.name))
+                break
+            if region.id not in other.neighbors:
+                problems.append("сид «%s»: соседство %s и %s держится в одну "
+                                "сторону" % (seed, region.name, other.name))
+                break
+        for other_id in region.sea_links:
+            other = world.regions.get(other_id)
+            if other is None:
+                problems.append("сид «%s»: у земли %s морской путь в пустоту"
+                                % (seed, region.name))
+                break
+            if other_id in region.neighbors:
+                problems.append("сид «%s»: %s и %s соседят и по суше, и по морю "
+                                "разом" % (seed, region.name, other.name))
+                break
+
+    gone = world.notes.get(upheaval_mod.GONE_NOTE) or {}
+    alive = world.population_by_race()
+    for race_id in gone:
+        if alive.get(race_id):
+            problems.append("сид «%s»: вымерший народ «%s» всё ещё жив"
+                            % (seed, race_id))
+            break
+
+    great = [item for item in world.calamities.values()
+             if item.key in upheaval_mod.GREAT]
+    if len(great) > 8:
+        problems.append("сид «%s»: великих бедствий %d — это уже погода, "
+                        "а не конец света" % (seed, len(great)))
+    for calamity in great:
+        if calamity.key == "deep_waking" and not calamity.parent_id:
+            problems.append("сид «%s»: «%s» поднялось ниоткуда, а должно было "
+                            "быть осколком прошлого" % (seed, calamity.name))
+            break
+
+    peak = int(world.notes.get(upheaval_mod.PEAK_NOTE) or 0)
+    if peak and world.world_population() * 200 < peak:
+        problems.append("сид «%s»: мир опустел — от лучшего века осталась "
+                        "двухсотая доля" % seed)
+
+    return problems
+
+
 def check_faiths(world, seed: str) -> list:
     """Проверяет устройство веры."""
     problems = []
@@ -808,6 +1104,9 @@ def main() -> int:
         failures.extend(check_nations(first, seed))
         failures.extend(check_tongues(first, seed))
         failures.extend(check_embassies(first, seed))
+        failures.extend(check_things(first, seed))
+        failures.extend(check_lore(first, seed))
+        failures.extend(check_upheavals(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -847,6 +1146,9 @@ def main() -> int:
             failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_tongues(first, "карта/" + seed))
             failures.extend(check_embassies(first, "карта/" + seed))
+            failures.extend(check_things(first, "карта/" + seed))
+            failures.extend(check_lore(first, "карта/" + seed))
+            failures.extend(check_upheavals(first, "карта/" + seed))
             failures.extend(check_map_world(first, None, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "

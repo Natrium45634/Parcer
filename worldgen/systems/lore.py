@@ -161,7 +161,9 @@ def _handover(ctx, codex, city, year: int, rng) -> None:
     if codex.keepers:
         codex.keepers[-1]["to"] = year
     if rng.chance(BREAK_CHANCE):
-        date = ctx.date_in(rng, year)
+        # Свод, заведённый в этом же году, нельзя оборвать до его первой
+        # записи: летопись не бывает короче одного дня.
+        date = ctx.date_in(rng, year, after=codex.started)
         world.close_codex(codex, date, lore.BROKEN)
         title, text = texts.codex_broken(rng, codex, codex.span)
         world.add_event(
@@ -237,7 +239,7 @@ def _pick_event(world, codex, year: int, rng):
 
 def _lose(ctx, codex, year: int, rng) -> None:
     world = ctx.world
-    date = ctx.date_in(rng, year)
+    date = ctx.date_in(rng, year, after=codex.started)
     if codex.keepers:
         codex.keepers[-1]["to"] = year
     world.close_codex(codex, date, lore.LOST)

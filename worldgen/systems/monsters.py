@@ -211,7 +211,9 @@ def _hunt(ctx, monster, year: int, rng) -> None:
     hero, race = _hero(ctx, monster, polity, year, rng)
     if hero is None:
         return
-    date = ctx.date_in(rng, year)
+    # Чудовище, заведшееся в этом же году, нельзя убить до того, как оно
+    # завелось: охота идёт после, а не раньше.
+    date = ctx.date_in(rng, year, after=monster.born)
 
     host = 1.0 + rng.uniform(0.0, 1.6)
     if polity is not None:
@@ -315,7 +317,8 @@ def _night_tick(ctx, monster, year: int, period: int, rng) -> None:
             monster.region_id = settlement.region_id
             monster.notes.append("перебрался в город %s" % settlement.name)
     if settlement is None:
-        world.end_monster(monster, ctx.date_in(rng, year), mon.DRIVEN)
+        world.end_monster(monster, ctx.date_in(rng, year, after=monster.born),
+                          mon.DRIVEN)
         monster.notes.append("ушёл, когда город опустел")
         return
     if rng.chance(FEED_RATE * scale):
@@ -340,7 +343,7 @@ def _expose(ctx, monster, settlement, year: int, rng) -> None:
     race = races_mod.RACES_BY_ID.get(settlement.race_id)
     if race is None:
         return
-    date = ctx.date_in(rng, year)
+    date = ctx.date_in(rng, year, after=monster.born)
     sex = "f" if rng.chance(0.4) else "m"
     hunter = ctx.make_figure(
         rng, race, year, role="охотник на нечисть",

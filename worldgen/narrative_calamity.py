@@ -87,7 +87,8 @@ def make_host(rng, spec, style_adjectives) -> tuple:
     words = spec.host_words or ("Воинство",)
     noun = rng.choice(words)
     gender = "n" if noun in ("Воинство", "Полчище", "Скопище", "Гнездо") else \
-             ("f" if noun in ("Стая", "Орда", "Туча") else "m")
+             ("f" if noun in ("Стая", "Орда", "Туча", "Тень", "Тьма",
+                              "Пасть", "Погибель", "Свора") else "m")
     adjectives = spec.adjectives or style_adjectives or ("Чёрный",)
     return rng.choice(adjectives), noun, gender
 
