@@ -227,6 +227,47 @@ def faith_line(world, faith_id: str) -> str:
     return "; ".join(bits)
 
 
+def polity_block(world, polity, year: int, population: int, cities: int,
+                 out) -> None:
+    """Держава в подробностях: кто правит, чем правит и во что верит."""
+    capital = world.settlements.get(polity.capital_id)
+    out("   основана %s — держава стоит %d-й год"
+        % (polity.founded.long(), year - polity.founded.year + 1))
+    out("   население %d в %d городах; столица: %s" % (
+        population, cities, capital.full_name if capital else "—"))
+    lands = ", ".join("%s (%s)" % (world.regions[r].name,
+                                   world.regions[r].terrain)
+                      for r in polity.region_ids if r in world.regions)
+    if lands:
+        out("   земли: %s" % lands)
+    out("   правитель: %s" % ruler_line(world, polity, year))
+    reign = reign_at(world, polity, year)
+    if reign is not None:
+        out("   правит %d-й год; до него правлений %d"
+            % (year - reign.start.year + 1, max(0, len(polity.reign_ids) - 1)))
+    out("   знать: %s" % nobility_line(world, polity, year))
+    out("   политика: %s" % politics_line(world, polity, year))
+    out("   наследование: %s" % SUCCESSION_NAMES.get(polity.succession,
+                                                     polity.succession))
+    if polity.peoples:
+        out("   народы: %s" % pol.describe(polity, world))
+    if polity.policy:
+        out("   закон о народах: %s" % pol.POLICY_NAMES.get(polity.policy,
+                                                            polity.policy))
+    out("   вера: %s" % faith_line(world, polity.faith_id))
+    out("   язык двора: %s" % tongue_line(world, polity))
+    guilds = world.guilds_of(polity)
+    if guilds:
+        out("   гильдии: %s" % "; ".join(
+            "%s (%s, казна %d)" % (item.name, item.kind, int(item.wealth))
+            for item in guilds))
+    union = world.unions.get(polity.union_id)
+    if union is not None:
+        other = world.polities.get(union.other(polity.id))
+        out("   уния с державой: %s (с %d года)"
+            % (other.full_name if other else "?", union.started.year))
+
+
 def snapshot(world, year: int, out) -> None:
     era = world.era_at(year)
     out("=" * 78)
@@ -273,12 +314,33 @@ def snapshot(world, year: int, out) -> None:
                                             or item.end.year >= year)]
     if live:
         out("ИДУЩИЕ БЕДСТВИЯ (%d):" % len(live))
-        for item in sorted(live, key=lambda c: -c.severity)[:5]:
-            leader = world.figures.get(item.leader_id)
-            out("   • %s [%s, %s] с %d г.%s" % (
+        for item in sorted(live, key=lambda c: -c.severity)[:6]:
+            out("   • %s [%s, %s], идёт %d-й год" % (
                 item.name, KIND_NAMES.get(item.kind, item.kind),
-                SEVERITY_NAMES.get(item.severity), item.start.year,
-                "; вождь %s" % leader.name if leader is not None else ""))
+                SEVERITY_NAMES.get(item.severity), year - item.start.year + 1))
+            lands = ", ".join(world.regions[rid].name
+                              for rid in item.region_ids[:5]
+                              if rid in world.regions)
+            rest = len(item.region_ids) - 5
+            if rest > 0:
+                lands += " и ещё %d" % rest
+            if lands:
+                out("       земли: %s" % lands)
+            marks = []
+            leader = world.figures.get(item.leader_id)
+            if leader is not None:
+                marks.append("во главе %s" % leader.name)
+            if item.host_size:
+                marks.append("врагов %s" % _souls(item.host_size))
+            if item.deaths:
+                marks.append("уже унесло %s" % _souls(item.deaths))
+            if item.settlements_lost:
+                marks.append("городов потеряно %d" % item.settlements_lost)
+            if item.parent_id in world.calamities:
+                marks.append("выросло из беды «%s»"
+                             % world.calamities[item.parent_id].name)
+            if marks:
+                out("       %s" % "; ".join(marks))
     else:
         out("Идущих бедствий нет.")
 
@@ -313,55 +375,45 @@ def snapshot(world, year: int, out) -> None:
 
     if not active:
         out("Стран ещё нет — мир племенной.")
-        tribes = sorted((world.tribes[t] for t in world.active_tribes),
-                        key=lambda t: -t.population)[:5]
+    else:
+        heads = ("КРУПНЕЙШАЯ ДЕРЖАВА", "ВТОРАЯ ДЕРЖАВА МИРА",
+                 "ТРЕТЬЯ ДЕРЖАВА МИРА")
+        for index, (population, cities, polity) in enumerate(active[:3]):
+            out("")
+            out("%s: %s — %s" % (heads[index], polity.full_name,
+                                 race_name(polity.race_id)))
+            polity_block(world, polity, year, population, cities, out)
+        if len(active) > 3:
+            out("")
+            out("ОСТАЛЬНЫЕ ДЕРЖАВЫ (всего %d):" % len(active))
+            for population, cities, polity in active[3:9]:
+                faith = world.faiths.get(polity.faith_id)
+                out("   • %s (%s) — %d душ, %d городов; %s; вера: %s" % (
+                    polity.full_name, race_name(polity.race_id), population,
+                    cities, ruler_line(world, polity, year).split(";")[0],
+                    "«%s»" % faith.name if faith else "нет"))
+
+    tribes = sorted((world.tribes[t] for t in world.active_tribes),
+                    key=lambda t: -t.population)[:5]
+    if tribes:
+        out("")
+        out("КРУПНЕЙШИЕ ПЛЕМЕНА (всего %d):" % len(world.active_tribes))
         for tribe in tribes:
             region = world.regions.get(tribe.region_id)
             chief = world.figures.get(tribe.chief_id)
-            out("   • %s (%s), %d душ, земля %s, вождь %s" % (
+            folk = world.folks.get(tribe.folk_id)
+            out("   • %s (%s), %d душ, земля %s" % (
                 tribe.full_name, race_name(tribe.race_id), tribe.population,
-                region.name if region else "?",
-                chief.name if chief else "—"))
-    else:
-        population, cities, polity = active[0]
-        capital = world.settlements.get(polity.capital_id)
-        out("КРУПНЕЙШАЯ СТРАНА: %s — %s" % (polity.full_name,
-                                            race_name(polity.race_id)))
-        out("   основана %s" % polity.founded.long())
-        out("   население %d в %d городах; столица: %s" % (
-            population, cities, capital.full_name if capital else "—"))
-        out("   земли: %s" % ", ".join(
-            "%s (%s)" % (world.regions[r].name, world.regions[r].terrain)
-            for r in polity.region_ids if r in world.regions))
-        out("   правитель: %s" % ruler_line(world, polity, year))
-        out("   знать: %s" % nobility_line(world, polity, year))
-        out("   политика: %s" % politics_line(world, polity, year))
-        out("   наследование: %s" % SUCCESSION_NAMES.get(polity.succession,
-                                                         polity.succession))
-        if polity.peoples:
-            out("   народы: %s" % pol.describe(polity, world))
-        if polity.policy:
-            out("   закон о народах: %s" % pol.POLICY_NAMES.get(polity.policy,
-                                                                polity.policy))
-        out("   вера: %s" % faith_line(world, polity.faith_id))
-        out("   язык двора: %s" % tongue_line(world, polity))
-        guilds = world.guilds_of(polity)
-        if guilds:
-            out("   гильдии: %s" % "; ".join(
-                "%s (%s, казна %d)" % (item.name, item.kind, int(item.wealth))
-                for item in guilds))
-        union = world.unions.get(polity.union_id)
-        if union is not None:
-            other = world.polities.get(union.other(polity.id))
-            out("   уния с державой: %s (с %d года)"
-                % (other.full_name if other else "?", union.started.year))
-        out("ОСТАЛЬНЫЕ ДЕРЖАВЫ (всего %d):" % len(active))
-        for population, cities, polity in active[1:7]:
-            faith = world.faiths.get(polity.faith_id)
-            out("   • %s (%s) — %d душ, %d городов; %s; вера: %s" % (
-                polity.full_name, race_name(polity.race_id), population, cities,
-                ruler_line(world, polity, year).split(";")[0],
-                "«%s»" % faith.name if faith else "нет"))
+                region.name if region else "?"))
+            marks = ["стоит %d-й год" % (year - tribe.founded.year + 1)]
+            if chief is not None:
+                marks.append("вождь %s%s" % (
+                    chief.name,
+                    ", возраст %d" % (year - chief.birth.year)
+                    if chief.birth else ""))
+            if folk is not None:
+                marks.append("народ «%s»" % folk.name)
+            out("       %s" % "; ".join(marks))
 
     events = [e for e in world.events
               if year - 70 <= e.date.year <= year and e.importance >= 4]
