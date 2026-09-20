@@ -21,7 +21,8 @@ from .chronicle_map import MapRecorder
 from .context import GenContext
 from .eras import build_eras
 from .rng import normalize_seed, seed_to_int
-from .systems import (aristocracy, artifacts, calamity, diplomacy, embassy,
+from .systems import (aristocracy, artifacts, calamity, crafts, diplomacy,
+                      embassy,
                       era_events,
                       exploration, founding, geography, guilds, houses,
                       lives, monsters, nations, notables, peoples, religion,
@@ -140,6 +141,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             trade.upkeep(ctx, year, UPKEEP_PERIOD)
             guilds.upkeep(ctx, year, UPKEEP_PERIOD)
             artifacts.upkeep(ctx, year, UPKEEP_PERIOD)
+            crafts.upkeep(ctx, year, UPKEEP_PERIOD)
             monsters.upkeep(ctx, year, UPKEEP_PERIOD)
             sites.upkeep(ctx, year, UPKEEP_PERIOD)
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)

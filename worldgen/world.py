@@ -13,8 +13,9 @@ import heapq
 from . import artifacts as artifacts_mod
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
-                     Artifact, Battle, Calamity, Camp, Company, Deity, Embassy,
-                     Event, Expedition, Faith, Feud, Figure, Folk, Fortress,
+                     Artifact, Battle, Calamity, Camp, Company, Deity,
+                     Discovery, Embassy, Event, Expedition, Faith, Feud, Figure,
+                     Folk, Fortress,
                      Guild, House, League, Monster, Pact, Plot, Polity, Region,
                      Reign,
                      Relic, Settlement, Site, Temple, Tongue, TradeRoute, Tribe,
@@ -90,6 +91,7 @@ class World:
         self.sites = {}
         self.monsters = {}
         self.living_monsters = []
+        self.discoveries = {}
         self.active_unions = []
         self.fortresses = {}
         self.active_fortresses = []
@@ -380,6 +382,17 @@ class World:
         site = Site(id=self.next_id("Z"), **kwargs)
         self.sites[site.id] = site
         return site
+
+    def add_discovery(self, **kwargs) -> Discovery:
+        discovery = Discovery(id=self.next_id("O"), **kwargs)
+        self.discoveries[discovery.id] = discovery
+        return discovery
+
+    def discovery_of(self, key: str):
+        for item in self.discoveries.values():
+            if item.key == key:
+                return item
+        return None
 
     def add_monster(self, **kwargs) -> Monster:
         monster = Monster(id=self.next_id("B"), **kwargs)

@@ -12,7 +12,7 @@ import io
 import json
 
 from .models import (ACTIVE, ONGOING, Artifact, Battle, Calamity, Camp,
-                     Company, Deity,
+                     Company, Deity, Discovery,
                      Embassy, EraSpan, Event, Expedition, Faith, Feud, Figure,
                      Folk, Fortress, Guild, House, League, Monster, Pact, Plot,
                      Polity,
@@ -122,6 +122,8 @@ def world_to_dict(world: World) -> dict:
                   for item in world.sites.values()],
         "monsters": [_compact(Monster, item.to_dict())
                      for item in world.monsters.values()],
+        "discoveries": [_compact(Discovery, item.to_dict())
+                        for item in world.discoveries.values()],
         "fortresses": [_compact(Fortress, item.to_dict())
                        for item in world.fortresses.values()],
         "companies": [_compact(Company, item.to_dict())
@@ -225,6 +227,9 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("artifacts", ()):
         artifact = Artifact(**_clean(Artifact, item))
         world.artifacts[artifact.id] = artifact
+    for item in data.get("discoveries", ()):
+        discovery = Discovery(**_clean(Discovery, item))
+        world.discoveries[discovery.id] = discovery
     for item in data.get("monsters", ()):
         monster = Monster(**_clean(Monster, item))
         world.monsters[monster.id] = monster

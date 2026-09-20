@@ -300,6 +300,9 @@ class Polity:
     union_id: str = ""                               # династическая уния
     intrigue: float = 0.0      # оплаченная соседом смута при дворе, 0…1
 
+    # --- умения (блок 12) ---
+    known: list = field(default_factory=list)        # открытия, какими владеет
+
     # --- обиды (блок 11) ---
     # держава -> {повод: год}. Кровь посла, пойманный соглядатай, яд при
     # дворе: то, что помнят поимённо и припоминают при объявлении войны.
@@ -669,6 +672,28 @@ class Artifact:
         data = asdict(self)
         data["made"] = _date_out(self.made)
         data["lost"] = _date_out(self.lost)
+        return data
+
+
+@dataclass
+class Discovery:
+    """Открытие: что, где, кем и когда сделано и кто это перенял."""
+
+    id: str
+    key: str                   # ключ из каталога ремёсел
+    name: str
+    family: str
+    made: Date
+    polity_id: str = ""
+    settlement_id: str = ""
+    figure_id: str = ""
+    race_id: str = ""
+    known_by: list = field(default_factory=list)     # державы, перенявшие его
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["made"] = _date_out(self.made)
         return data
 
 

@@ -764,6 +764,61 @@ def render_sites(world) -> str:
     return "\n".join(rows)
 
 
+def render_crafts(world) -> str:
+    """Открытия: что, когда, кем сделано и кто успел это перенять."""
+    from . import crafts as crafts_mod
+
+    rows = ["РЕМЁСЛА И ОТКРЫТИЯ", ""]
+    if not world.discoveries:
+        rows.append("  Этот мир так ничего и не придумал.")
+        return "\n".join(rows)
+
+    items = sorted(world.discoveries.values(),
+                   key=lambda item: item.made.ordinal)
+    rows.append("  Сделано открытий: %d из %d возможных."
+                % (len(items), len(crafts_mod.CRAFTS)))
+    rows.append("")
+
+    header = "  %-8s %-26s %-18s %-28s %s" % (
+        "Год", "Открытие", "Дело", "Где", "Переняли")
+    rows.append(header)
+    rows.append("  " + "-" * (len(header) - 2))
+    for item in items:
+        city = world.settlements.get(item.settlement_id)
+        polity = world.polities.get(item.polity_id)
+        maker = world.figures.get(item.figure_id)
+        rows.append("  %-8d %-26s %-18s %-28s %d"
+                    % (item.made.year, item.name[:26],
+                       crafts_mod.FAMILY_NAMES.get(item.family,
+                                                   item.family)[:18],
+                       (city.name if city is not None else
+                        (polity.name if polity is not None else "—"))[:28],
+                       len(item.known_by)))
+        if maker is not None:
+            rows.append("        придумал: %s%s"
+                        % (maker.name,
+                           "; держава: %s" % polity.full_name
+                           if polity is not None else ""))
+    rows.append("")
+
+    living = [world.polities[pid] for pid in world.active_polities]
+    if living:
+        living.sort(key=lambda item: (-len(item.known), item.name))
+        rows.append("  КТО ЧТО УМЕЕТ НА КОНЕЦ ИСТОРИИ")
+        for polity in living[:8]:
+            names = [crafts_mod.CRAFTS_BY_KEY[key].name for key in polity.known
+                     if key in crafts_mod.CRAFTS_BY_KEY]
+            rows.append("    %-34s открытий %2d: %s"
+                        % (polity.full_name[:34], len(names),
+                           ", ".join(names[:6]) + ("…" if len(names) > 6 else "")))
+        if len(living) > 8:
+            backward = living[-1]
+            rows.append("    …отстают: %s — открытий %d"
+                        % (backward.full_name, len(backward.known)))
+        rows.append("")
+    return "\n".join(rows)
+
+
 def render_monsters(world) -> str:
     """Чудовища с именами: логова, счёт убитых и те, кто их прикончил."""
     rows = ["ЧУДОВИЩА, У КОТОРЫХ ЕСТЬ ИМЯ", ""]
@@ -1524,6 +1579,7 @@ def full_text(world) -> str:
         render_folks(world),
         render_tongues(world),
         render_trade(world),
+        render_crafts(world),
         render_guilds(world),
         render_expeditions(world),
         render_politics(world),

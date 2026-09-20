@@ -27,6 +27,7 @@ from . import houses as houses_mod
 from . import nations as nations_mod
 from . import soldiery
 from . import spies
+from .. import crafts as crafts_mod
 from .. import espionage
 from .. import narrative_soldiery as fort_texts
 from .. import narrative_spies as spy_texts
@@ -912,6 +913,11 @@ def _tick_sieges(ctx, war, attacker, defender, year: int, rng) -> None:
         # Под стенами решают машины и сапёры, а не конница.
         power *= troops_mod.worth(races_mod.get_race(besieger.race_id),
                                   under_walls=True)
+        # Осадная башня и требушет решают под стенами больше, чем число;
+        # кладка на растворе, наоборот, держит удар.
+        power *= crafts_mod.bonus(besieger.known, "siege")
+        power /= max(0.6, crafts_mod.bonus(target.known, "siege")
+                     if target is not None else 1.0)
         # Гарнизон невелик, но за стенами каждый стоит нескольких.
         garrison = warfare.host_power(
             max(warfare.LEVY_MIN, int(settlement.population * 0.07)), 1.65)

@@ -562,8 +562,13 @@ def quality(world, polity, race, general=None) -> float:
     """Выучка войска: от ополчения до дружины, что ходила двадцать лет."""
     from . import rulers as rulers_mod
 
+    from . import crafts as crafts_mod
+
     value = 0.75 + 0.35 * martial(race)
     value *= rulers_mod.war_edge(world, polity)
+    # Стремя, сталь и самострел стоят выучки: держава, отставшая на век,
+    # выходит в поле хуже вооружённой — и это видно по исходу.
+    value *= crafts_mod.bonus(polity.known, "war")
     if general is not None:
         value *= 0.85 + 0.06 * _general_skill(general)
     # Обиженные народы воюют хуже: их держат в тылу и не доверяют оружия.
@@ -807,8 +812,13 @@ def fleet(world, polity, race, era_index: int = 2) -> int:
     if not harbours:
         return 0
     souls = sum(settlement.population for settlement in harbours)
+    from . import crafts as crafts_mod
+
     ships = souls / SHIP_PER_SOULS * seafaring(race)
     ships *= 0.75 + 0.12 * max(0, era_index)
+    # Киль, компас и океанский корабль: держава, знающая их, выводит
+    # в море больше и дальше.
+    ships *= crafts_mod.bonus(polity.known, "sea")
     if polity.hunger:
         ships *= max(0.4, 1.0 - polity.hunger)
     return max(1, int(ships))
