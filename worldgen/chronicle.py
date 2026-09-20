@@ -764,6 +764,77 @@ def render_sites(world) -> str:
     return "\n".join(rows)
 
 
+def render_lore(world) -> str:
+    """Своды и легенды: что мир записал о себе и что об этом поёт."""
+    from . import lore as lore_mod
+
+    rows = ["СВОДЫ И ЛЕГЕНДЫ", ""]
+    if not world.codices and not world.legends:
+        rows.append("  Этот мир о себе ничего не записал.")
+        return "\n".join(rows)
+
+    if world.codices:
+        # Заголовки событий нужны по их id: без указателя каждый свод
+        # перебирал бы всю летопись заново.
+        titles = {event.id: event.title for event in world.events}
+        codices = sorted(world.codices.values(),
+                         key=lambda item: item.started.ordinal)
+        rows.append("  Сводов заведено: %d, ведётся доныне: %d."
+                    % (len(codices), len(world.active_codices)))
+        rows.append("")
+        for codex in codices:
+            city = world.settlements.get(codex.seat_id)
+            span = codex.span or (
+                (codex.ended.year if codex.ended else world.total_years)
+                - codex.started.year)
+            rows.append("  «%s» — %s, %s"
+                        % (codex.name,
+                           lore_mod.BIAS_NAMES.get(codex.bias, codex.bias),
+                           codex.status))
+            rows.append("      где: %s; начат в %d году; охватывает %d лет; "
+                        "летописцев: %d"
+                        % (city.name if city is not None else "—",
+                           codex.started.year, max(0, span),
+                           len(codex.keepers)))
+            names = []
+            for item in codex.keepers:
+                figure = world.figures.get(item.get("figure", ""))
+                if figure is None:
+                    continue
+                names.append("%s (%d—%s)" % (figure.name, item.get("from", 0),
+                                             item.get("to") or "…"))
+            if names:
+                rows.append("      вели: %s" % "; ".join(names[:5]))
+            wrong = [item for item in codex.entries
+                     if item.get("kind") not in ("верно", None)]
+            rows.append("      записей: %d, из них неверных: %d (точность "
+                        "%.0f%%)" % (len(codex.entries), len(wrong),
+                                     codex.accuracy * 100))
+            for item in wrong[:3]:
+                rows.append("          %d — %s: «%s»"
+                            % (item.get("year", 0), item.get("kind", ""),
+                               titles.get(item.get("event"), "—")))
+            rows.append("")
+
+    if world.legends:
+        legends = sorted(world.legends.values(),
+                         key=lambda item: item.born.ordinal)
+        rows.append("  ЛЕГЕНДЫ")
+        rows.append("  Сложено песен: %d." % len(legends))
+        rows.append("")
+        for legend in legends:
+            rows.append("  «%s»" % legend.name)
+            rows.append("      сложена в %d году; пересказов: %d"
+                        % (legend.born.year, legend.tellings))
+            if legend.truth:
+                rows.append("      как было: %s" % legend.truth)
+            for item in legend.shifts[:4]:
+                rows.append("      %d — %s" % (item.get("year", 0),
+                                               item.get("shift", "")))
+            rows.append("")
+    return "\n".join(rows)
+
+
 def render_crafts(world) -> str:
     """Открытия: что, когда, кем сделано и кто успел это перенять."""
     from . import crafts as crafts_mod
@@ -1580,6 +1651,7 @@ def full_text(world) -> str:
         render_tongues(world),
         render_trade(world),
         render_crafts(world),
+        render_lore(world),
         render_guilds(world),
         render_expeditions(world),
         render_politics(world),

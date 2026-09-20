@@ -12,8 +12,8 @@ import io
 import json
 
 from .models import (ACTIVE, ONGOING, Artifact, Battle, Calamity, Camp,
-                     Company, Deity, Discovery,
-                     Embassy, EraSpan, Event, Expedition, Faith, Feud, Figure,
+                     Codex, Company, Deity, Discovery,
+                     Embassy, EraSpan, Legend, Event, Expedition, Faith, Feud, Figure,
                      Folk, Fortress, Guild, House, League, Monster, Pact, Plot,
                      Polity,
                      Region, Reign, Relic, Settlement, Site, Temple, Tongue,
@@ -27,6 +27,7 @@ FORMAT_VERSION = 1
 _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
                 "created", "awakened", "revealed", "born", "opened",
                 "sent", "returned", "started", "made", "lost", "opened",
+                "signed_at",
                 "closed", "married", "signed", "built"}
 
 
@@ -124,6 +125,10 @@ def world_to_dict(world: World) -> dict:
                      for item in world.monsters.values()],
         "discoveries": [_compact(Discovery, item.to_dict())
                         for item in world.discoveries.values()],
+        "codices": [_compact(Codex, item.to_dict())
+                    for item in world.codices.values()],
+        "legends": [_compact(Legend, item.to_dict())
+                    for item in world.legends.values()],
         "fortresses": [_compact(Fortress, item.to_dict())
                        for item in world.fortresses.values()],
         "companies": [_compact(Company, item.to_dict())
@@ -227,6 +232,14 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("artifacts", ()):
         artifact = Artifact(**_clean(Artifact, item))
         world.artifacts[artifact.id] = artifact
+    for item in data.get("codices", ()):
+        codex = Codex(**_clean(Codex, item))
+        world.codices[codex.id] = codex
+        if codex.status == "ведётся":
+            world.active_codices.append(codex.id)
+    for item in data.get("legends", ()):
+        legend = Legend(**_clean(Legend, item))
+        world.legends[legend.id] = legend
     for item in data.get("discoveries", ()):
         discovery = Discovery(**_clean(Discovery, item))
         world.discoveries[discovery.id] = discovery

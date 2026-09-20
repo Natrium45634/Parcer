@@ -25,7 +25,8 @@ from .systems import (aristocracy, artifacts, calamity, citylife, crafts,
                       diplomacy, embassy,
                       era_events,
                       exploration, founding, geography, guilds, houses,
-                      lives, monsters, nations, notables, peoples, religion,
+                      lives, lore, monsters, nations, notables, peoples,
+                      religion,
                       sites, soldiery, spies, succession, tongues, trade,
                       unions, war)
 from .timeline import Date
@@ -145,6 +146,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             citylife.upkeep(ctx, year, UPKEEP_PERIOD)
             monsters.upkeep(ctx, year, UPKEEP_PERIOD)
             sites.upkeep(ctx, year, UPKEEP_PERIOD)
+            lore.upkeep(ctx, year, UPKEEP_PERIOD)
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)
             religion.upkeep(ctx, year, UPKEEP_PERIOD)
 

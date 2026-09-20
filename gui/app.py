@@ -316,6 +316,9 @@ class ChronicleApp(tk.Tk):
         self.guilds_text = self._add_text_tab(
             "Гильдии", lambda: self._set_text(
                 self.guilds_text, chronicle.render_guilds(self.world)))
+        self.lore_text = self._add_text_tab(
+            "Своды и легенды", lambda: self._set_text(
+                self.lore_text, chronicle.render_lore(self.world)))
         self.crafts_text = self._add_text_tab(
             "Ремёсла", lambda: self._set_text(
                 self.crafts_text, chronicle.render_crafts(self.world)))

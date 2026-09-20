@@ -13,10 +13,11 @@ import heapq
 from . import artifacts as artifacts_mod
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
-                     Artifact, Battle, Calamity, Camp, Company, Deity,
+                     Artifact, Battle, Calamity, Camp, Codex, Company, Deity,
                      Discovery, Embassy, Event, Expedition, Faith, Feud, Figure,
                      Folk, Fortress,
-                     Guild, House, League, Monster, Pact, Plot, Polity, Region,
+                     Guild, House, League, Legend, Monster, Pact, Plot, Polity,
+                     Region,
                      Reign,
                      Relic, Settlement, Site, Temple, Tongue, TradeRoute, Tribe,
                      Union, War)
@@ -92,6 +93,9 @@ class World:
         self.monsters = {}
         self.living_monsters = []
         self.discoveries = {}
+        self.codices = {}
+        self.active_codices = []
+        self.legends = {}
         self.active_unions = []
         self.fortresses = {}
         self.active_fortresses = []
@@ -382,6 +386,23 @@ class World:
         site = Site(id=self.next_id("Z"), **kwargs)
         self.sites[site.id] = site
         return site
+
+    def add_codex(self, **kwargs) -> Codex:
+        codex = Codex(id=self.next_id("L"), **kwargs)
+        self.codices[codex.id] = codex
+        self.active_codices.append(codex.id)
+        return codex
+
+    def close_codex(self, codex, date: Date, status: str) -> None:
+        if codex.id in self.active_codices:
+            self.active_codices.remove(codex.id)
+        codex.status = status
+        codex.ended = date
+
+    def add_legend(self, **kwargs) -> Legend:
+        legend = Legend(id=self.next_id("J"), **kwargs)
+        self.legends[legend.id] = legend
+        return legend
 
     def add_discovery(self, **kwargs) -> Discovery:
         discovery = Discovery(id=self.next_id("O"), **kwargs)

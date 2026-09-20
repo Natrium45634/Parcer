@@ -679,6 +679,57 @@ class Artifact:
 
 
 @dataclass
+class Codex:
+    """Летописный свод: кто ведёт, как долго и насколько врёт."""
+
+    id: str
+    name: str
+    seat_id: str               # город, где его пишут
+    region_id: str
+    started: Date
+    polity_id: str = ""
+    faith_id: str = ""
+    bias: str = "сухой"
+    accuracy: float = 0.8
+    keeper_id: str = ""        # нынешний летописец
+    keepers: list = field(default_factory=list)   # [{figure, from, to}]
+    entries: list = field(default_factory=list)   # [{year, event, kind}]
+    span: int = 0              # сколько лет охватывает
+    status: str = "ведётся"
+    ended: Date = None
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["started"] = _date_out(self.started)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
+class Legend:
+    """Легенда: то, что рассказывают о событии, а не то, что было."""
+
+    id: str
+    name: str
+    born: Date
+    event_id: str = ""
+    about: str = ""            # чудовище / герой / вещь / битва
+    subject_id: str = ""
+    race_id: str = ""
+    region_id: str = ""
+    truth: str = ""            # как было на самом деле, одной строкой
+    shifts: list = field(default_factory=list)    # [{year, shift}]
+    tellings: int = 1
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["born"] = _date_out(self.born)
+        return data
+
+
+@dataclass
 class Discovery:
     """Открытие: что, где, кем и когда сделано и кто это перенял."""
 
