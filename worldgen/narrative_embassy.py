@@ -30,10 +30,20 @@ SENT_TEMPLATES = (
     "наказ — %(errand)s. %(gift_line)s",
     "%(envoy)s принимает грамоту с печатью и едет ко двору %(host_gen)s: "
     "там ему %(errand)s. %(gift_line)s",
-    "Дорога посольства занимает не одну неделю. %(envoy)s везёт ко двору "
-    "%(host_gen)s наказ %(errand)s. %(gift_line)s",
     "%(sender)s снаряжает посольство ко двору %(host_gen)s. Послу велено "
     "%(errand)s. %(gift_line)s",
+    "Грамоту пишут набело трижды, пока не сходятся на словах. Везёт её "
+    "%(envoy)s ко двору %(host_gen)s: %(errand)s. %(gift_line)s",
+    "Посольство собирают спешно: %(envoy)s едет ко двору %(host_gen)s, "
+    "и наказ ему — %(errand)s. %(gift_line)s",
+    "Ко двору %(host_gen)s снаряжают не воина, а человека со словом: "
+    "%(envoy)s. Велено ему %(errand)s. %(gift_line)s",
+    "%(envoy)s берёт свиту, толмача и грамоту и едет ко двору "
+    "%(host_gen)s. Дело его — %(errand)s. %(gift_line)s",
+    "Через межу идёт посольство %(sender_gen)s. Посол — %(envoy)s, "
+    "наказ — %(errand)s. %(gift_line)s",
+    "Дорога посольства занимает не одну неделю. %(envoy)s везёт ко двору "
+    "%(host_gen)s наказ %(errand)s. %(gift_line)s",
 )
 
 GIFT_LINES = (

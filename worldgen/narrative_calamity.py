@@ -93,14 +93,36 @@ def make_host(rng, spec, style_adjectives) -> tuple:
     return rng.choice(adjectives), noun, gender
 
 
+# У каждого вида беды свои четыре-пять прилагательных, и на десять миров
+# этого не хватало: «Долгая Война» выпадала в каждом. Свои остаются
+# главными — они про суть беды, — но к ним подмешивается общий запас.
+# Все формы мужские: род подбирается под слово беды сам.
+COMMON_ADJECTIVES = (
+    "Великий", "Чёрный", "Долгий", "Тихий", "Багровый", "Горький",
+    "Серый", "Немой", "Холодный", "Жестокий", "Страшный", "Проклятый",
+    "Голодный", "Дикий", "Медный", "Ржавый", "Мутный", "Глухой",
+    "Слепой", "Пёстрый", "Бледный", "Жгучий", "Костяной", "Пепельный",
+    "Смутный", "Лютый", "Сухой", "Мёрзлый", "Тяжёлый", "Последний",
+    "Безымянный", "Гиблый", "Тусклый", "Злой", "Нечистый", "Полынный",
+    "Волчий", "Соляной", "Свинцовый", "Кривой", "Дымный", "Осиный",
+)
+
+
+def calamity_adjective(rng, spec) -> str:
+    """Прилагательное для имени беды: сперва своё, иначе из общего запаса."""
+    own = spec.adjectives or ()
+    pairs = [(word, 3.0) for word in own]
+    pairs += [(word, 1.0) for word in COMMON_ADJECTIVES if word not in own]
+    return rng.weighted(pairs) if pairs else "Великий"
+
+
 def calamity_name(rng, spec, host=None, polity=None) -> str:
     if spec.kind == INVASION and host is not None:
         adj, noun, gender = host
         return "%s %s" % (spec.noun[0], genitive_phrase(adj, noun, gender))
     if polity is not None:
         return "%s %s" % (spec.noun[0], polity_gen(polity))
-    adj = rng.choice(spec.adjectives or ("Великий",))
-    return phrase(adj, spec.noun[0], spec.noun[1])
+    return phrase(calamity_adjective(rng, spec), spec.noun[0], spec.noun[1])
 
 
 def polity_gen(polity) -> str:

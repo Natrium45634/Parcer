@@ -701,11 +701,26 @@ MARRIAGE_NOTES_COMMON = (
 )
 
 
+# Откуда взялась вторая половина. Одна фраза на все браки мира
+# превращала летопись в опись.
+SPOUSE_HOUSE_LINES = (
+    "Вторая половина — из %(house)s.",
+    "Невесту (или жениха) дают %(house)s.",
+    "Родня с той стороны — %(house)s, и это в грамоте на первом месте.",
+    "Кровь вторая — %(house)s.",
+    "Этим браком двор роднится с %(house)s.",
+    "Герб второй стороны — герб %(house)s.",
+    "За спиной у второй половины стоят %(house)s.",
+    "Приданое и родню дают %(house)s.",
+)
+
+
 def marriage(rng, polity, ruler, spouse, spouse_house):
     note = rng.choice(MARRIAGE_NOTES_HOUSE if spouse_house is not None
                       else MARRIAGE_NOTES_COMMON)
     if spouse_house is not None:
-        note = "%s Вторая половина — из %s." % (note, house_gen(spouse_house))
+        note = "%s %s" % (note, rng.choice(SPOUSE_HOUSE_LINES)
+                          % {"house": house_gen(spouse_house)})
     data = {
         "ruler": with_title(ruler),
         "spouse": spouse.name,

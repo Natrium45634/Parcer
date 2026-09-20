@@ -37,8 +37,14 @@ def proto_for(ctx, race, folk, year: int, date, rng):
         tongue = world.tongues[tongue_id]
         if tongue.race_id == race.id and not tongue.parent_id:
             return tongue
+    cradle = world.regions.get(folk.cradle_region) if folk is not None else None
+    # Две расы, проснувшиеся в одной земле, не могут звать свой праязык
+    # одинаково: имя берётся через кузницу, а она повторов не отдаёт.
+    name = ctx.forge.unique(
+        "tongue",
+        lambda: tng.proto_name(rng, race, cradle.name if cradle else ""), rng)
     tongue = world.add_tongue(
-        name=tng.proto_name(rng, race), race_id=race.id, born=date,
+        name=name, race_id=race.id, born=date,
         laws=tng.pick_laws(rng, count=rng.randint(1, 2)))
     title, text = texts.proto_born(rng, tongue, race)
     world.add_event(
