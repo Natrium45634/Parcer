@@ -230,6 +230,9 @@ class Settlement:
     faith_id: str = ""             # во что верят жители
     hex_index: int = -1            # гекс карты, если мир построен по карте
     folk_id: str = ""              # народ внутри расы
+    landmarks: list = field(default_factory=list)   # чем город отличается
+                                                    # от соседнего: стена,
+                                                    # мост, маяк, ярмарка
 
     @property
     def full_name(self) -> str:

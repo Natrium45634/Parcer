@@ -901,6 +901,7 @@ class ChronicleApp(tk.Tk):
                 ("Страна", name_of(entity.polity_id)),
                 ("Столица", "да" if entity.is_capital else "нет"),
                 ("Население", entity.population),
+                ("Приметы города", ", ".join(entity.landmarks) or "—"),
                 ("Из племени", name_of(entity.origin_tribe_id)),
                 ("Состояние", entity.status),
                 ("Конец", entity.ended.long() if entity.ended else "—"),
