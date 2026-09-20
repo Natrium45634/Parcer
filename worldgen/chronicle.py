@@ -1739,13 +1739,16 @@ def render_upheavals(world) -> str:
               if site.kind in (sites_mod.SUNKEN, sites_mod.SEALED)]
     if sunken:
         rows.append("  Места, куда не ходят")
-        for site in sorted(sunken, key=lambda s: s.created.ordinal):
+        ordered = sorted(sunken, key=lambda s: s.created.ordinal)
+        for site in ordered[:12]:
             region = world.regions.get(site.region_id)
             rows.append("    %s (%s, %s), %d год" % (
                 site.name, site.kind, region.name if region else "—",
                 site.created.year))
             if site.story:
                 rows.append("        %s" % site.story)
+        if len(ordered) > 12:
+            rows.append("    …и ещё %d таких же" % (len(ordered) - 12))
         rows.append("")
 
     gone = world.notes.get(upheaval_mod.GONE_NOTE) or {}

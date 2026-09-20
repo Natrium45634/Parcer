@@ -265,18 +265,25 @@ def _pick_spec(ctx, year: int, rng):
             gap = year - last
             weight *= min(1.0, (gap / 400.0) ** 0.8 + 0.05)
         if spec.key in upheaval.GREAT:
-            # Великие беды делят одну память на всех: мир, который только
-            # что тонул, не раскалывается назавтра. Иначе конец света
-            # перестаёт быть концом света и становится погодой.
-            last_great = ctx.calamity_last.get(GREAT_MEMORY)
-            if last_great is not None:
-                gap = year - last_great
-                weight *= min(1.0, (gap / 1500.0) ** 1.2 + 0.02)
+            weight *= _great_memory(ctx, year)
         if weight > 0:
             pairs.append((spec, weight))
     if not pairs:
         return None
     return rng.weighted(pairs)
+
+
+def _great_memory(ctx, year: int) -> float:
+    """Насколько мир готов к ещё одной великой беде: 0 — совсем не готов.
+
+    Великие беды делят одну память на всех: мир, который только что тонул,
+    не раскалывается назавтра. Иначе конец света перестаёт быть концом
+    света и становится погодой.
+    """
+    last = ctx.calamity_last.get(GREAT_MEMORY)
+    if last is None:
+        return 1.0
+    return min(1.0, ((year - last) / 1800.0) ** 1.5)
 
 
 # Великое бедствие должно коснуться людей: извержение в пустой глуши —
@@ -1378,7 +1385,8 @@ def _deep_waking(ctx, relic, origin, rng, year: int) -> bool:
         return False
     if year - relic.created.year < DEEP_AGE:
         return False
-    if not rng.chance(DEEP_CHANCE):
+    # Осколок прошлого тоже считается великой бедой и делит с ними память.
+    if not rng.chance(DEEP_CHANCE * _great_memory(ctx, year)):
         return False
     spec = cat.CATALOG_BY_KEY.get("deep_waking")
     if spec is None:

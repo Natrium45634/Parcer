@@ -117,8 +117,12 @@ def _sink_city(ctx, calamity, settlement, region, date, year: int, rng) -> None:
     world = ctx.world
     riches = int(world.settlement_realm(settlement) * rng.uniform(0.1, 0.4))
     world.end_settlement(settlement, date, "ушёл под воду", RUINED)
+    # Слово при имени должно согласовываться само с собой: «Затонувший
+    # Утренняя Заря» — это не название, а рассогласование.
     name = ctx.forge.unique(
-        "site", lambda: "Затонувший %s" % settlement.name, rng)
+        "site",
+        lambda: "%s %s" % (rng.choice(sites_mod.SUNKEN_WORDS),
+                           settlement.name), rng)
     site = world.add_site(
         kind=sites_mod.SUNKEN, name=name, region_id=region.id, created=date,
         settlement_id=settlement.id, polity_id=settlement.polity_id,
