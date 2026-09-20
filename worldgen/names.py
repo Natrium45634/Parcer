@@ -887,6 +887,16 @@ class NameForge:
 
         return self._unique("artifact", make, rng)
 
+    def monster(self, rng, race) -> str:
+        """Имя чудовища: звучит чужеродно и запоминается с первого раза."""
+        st = self.style_of(race)
+
+        def make():
+            return _assemble(rng, st.starts, st.middles, st.male_ends,
+                             min(0.9, st.middle_chance + 0.2), st.apostrophe)
+
+        return self._unique("monster", make, rng)
+
     def deity(self, rng, race, sex: str = "m") -> str:
         """Имя божества: длиннее и звучнее смертного.
 

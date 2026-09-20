@@ -673,6 +673,37 @@ class Artifact:
 
 
 @dataclass
+class Monster:
+    """Чудовище с именем: логово, счёт убитых и тот, кто его прикончил."""
+
+    id: str
+    name: str
+    breed: str                 # ключ породы: dragon, wyrm, vampire …
+    word: str                  # «Дракон», «Кровопийца»
+    gender: str
+    family: str                # чудовище / ночная тварь
+    born: Date
+    region_id: str = ""
+    settlement_id: str = ""    # где прячется ночная тварь
+    site_id: str = ""          # логово
+    power: float = 1.0
+    kills: int = 0
+    raids: int = 0
+    hoard: int = 0
+    heroes_eaten: list = field(default_factory=list)
+    status: str = "жив"
+    slayer_id: str = ""
+    ended: Date = None
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["born"] = _date_out(self.born)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
 class Site:
     """Место, у которого есть содержимое и история.
 

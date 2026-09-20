@@ -764,6 +764,51 @@ def render_sites(world) -> str:
     return "\n".join(rows)
 
 
+def render_monsters(world) -> str:
+    """Чудовища с именами: логова, счёт убитых и те, кто их прикончил."""
+    rows = ["ЧУДОВИЩА, У КОТОРЫХ ЕСТЬ ИМЯ", ""]
+    if not world.monsters:
+        rows.append("  Таких этот мир не знал.")
+        return "\n".join(rows)
+
+    items = sorted(world.monsters.values(), key=lambda item: item.born.ordinal)
+    alive = [item for item in items if item.id in world.living_monsters]
+    rows.append("  Всего чудовищ: %d, живы доныне: %d. Убито людей ими: %d."
+                % (len(items), len(alive),
+                   sum(item.kills for item in items)))
+    rows.append("")
+
+    header = "  %-8s %-26s %-18s %8s %7s %s" % (
+        "Год", "Имя", "Порода", "Убито", "Клад", "Судьба")
+    rows.append(header)
+    rows.append("  " + "-" * (len(header) - 2))
+    for item in items:
+        region = world.regions.get(item.region_id)
+        slayer = world.figures.get(item.slayer_id)
+        fate = item.status
+        if slayer is not None:
+            fate = "%s — %s" % (item.status, slayer.name)
+        rows.append("  %-8d %-26s %-18s %8d %7d %s"
+                    % (item.born.year, item.name[:26], item.word[:18],
+                       item.kills, item.hoard, fate))
+        line = "        земля: %s" % (region.name if region is not None else "—")
+        site = world.sites.get(item.site_id)
+        if site is not None:
+            line += "; логово: %s" % site.name
+        home = world.settlements.get(item.settlement_id)
+        if home is not None:
+            line += "; прячется в городе %s" % home.name
+        rows.append(line)
+        if item.heroes_eaten:
+            names = [world.figures[fid].name for fid in item.heroes_eaten
+                     if fid in world.figures]
+            if names:
+                rows.append("        погибли на охоте: %s"
+                            % ", ".join(names[:5]))
+    rows.append("")
+    return "\n".join(rows)
+
+
 def render_soldiery(world) -> str:
     """Крепости и вольные роты: то, что остаётся от войны между войнами."""
     from .models import ACTIVE as ACTIVE_STATE
@@ -1491,6 +1536,7 @@ def full_text(world) -> str:
         render_pantheon(world),
         render_faiths(world),
         render_calamities(world),
+        render_monsters(world),
         render_artifacts(world),
         render_sites(world),
         render_stats(world),

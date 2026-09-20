@@ -14,7 +14,8 @@ import json
 from .models import (ACTIVE, ONGOING, Artifact, Battle, Calamity, Camp,
                      Company, Deity,
                      Embassy, EraSpan, Event, Expedition, Faith, Feud, Figure,
-                     Folk, Fortress, Guild, House, League, Pact, Plot, Polity,
+                     Folk, Fortress, Guild, House, League, Monster, Pact, Plot,
+                     Polity,
                      Region, Reign, Relic, Settlement, Site, Temple, Tongue,
                      TradeRoute, Tribe, Union, War)
 from .timeline import Date
@@ -119,6 +120,8 @@ def world_to_dict(world: World) -> dict:
                       for item in world.artifacts.values()],
         "sites": [_compact(Site, item.to_dict())
                   for item in world.sites.values()],
+        "monsters": [_compact(Monster, item.to_dict())
+                     for item in world.monsters.values()],
         "fortresses": [_compact(Fortress, item.to_dict())
                        for item in world.fortresses.values()],
         "companies": [_compact(Company, item.to_dict())
@@ -222,6 +225,11 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("artifacts", ()):
         artifact = Artifact(**_clean(Artifact, item))
         world.artifacts[artifact.id] = artifact
+    for item in data.get("monsters", ()):
+        monster = Monster(**_clean(Monster, item))
+        world.monsters[monster.id] = monster
+        if monster.status in ("жив", "спит"):
+            world.living_monsters.append(monster.id)
     for item in data.get("sites", ()):
         site = Site(**_clean(Site, item))
         world.sites[site.id] = site

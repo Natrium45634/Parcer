@@ -15,7 +15,8 @@ from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Artifact, Battle, Calamity, Camp, Company, Deity, Embassy,
                      Event, Expedition, Faith, Feud, Figure, Folk, Fortress,
-                     Guild, House, League, Pact, Plot, Polity, Region, Reign,
+                     Guild, House, League, Monster, Pact, Plot, Polity, Region,
+                     Reign,
                      Relic, Settlement, Site, Temple, Tongue, TradeRoute, Tribe,
                      Union, War)
 
@@ -87,6 +88,8 @@ class World:
         self.active_guilds = []
         self.artifacts = {}
         self.sites = {}
+        self.monsters = {}
+        self.living_monsters = []
         self.active_unions = []
         self.fortresses = {}
         self.active_fortresses = []
@@ -377,6 +380,21 @@ class World:
         site = Site(id=self.next_id("Z"), **kwargs)
         self.sites[site.id] = site
         return site
+
+    def add_monster(self, **kwargs) -> Monster:
+        monster = Monster(id=self.next_id("B"), **kwargs)
+        self.monsters[monster.id] = monster
+        self.living_monsters.append(monster.id)
+        return monster
+
+    def end_monster(self, monster, date: Date, status: str,
+                    slayer=None) -> None:
+        if monster.id not in self.living_monsters:
+            return
+        monster.status = status
+        monster.ended = date
+        monster.slayer_id = slayer.id if slayer is not None else ""
+        self.living_monsters.remove(monster.id)
 
     def artifacts_of(self, figure) -> list:
         return [item for item in self.artifacts.values()
