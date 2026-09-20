@@ -69,6 +69,8 @@ def _spawn(ctx, year: int, rng) -> None:
     # Чудовище заводится в глуши: там, где мало людей и много места.
     pairs = []
     for region in world.regions.values():
+        if region.drowned:
+            continue
         souls = _souls_in(world, region.id)
         wild = 1.0 + getattr(region, "savagery", 0.0) * 2.0
         pairs.append((region, wild / (1.0 + souls / 4000.0)))

@@ -280,7 +280,8 @@ def upkeep(ctx, year: int, period: int) -> None:
         tribe = world.tribes[tribe_id]
         race = races_mod.get_race(tribe.race_id)
         region = world.regions.get(tribe.region_id)
-        capacity = TRIBE_CAPACITY * (region.capacity if region else 1.0)
+        capacity = max(1.0, TRIBE_CAPACITY
+                       * (region.capacity if region else 1.0))
         if race.category == races_mod.BEASTFOLK:
             capacity *= 1.4          # зверолюдам города не нужны, племена крупнее
 

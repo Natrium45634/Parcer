@@ -75,6 +75,34 @@ FIELD_TEMPLATES = (
 )
 
 
+# Имя поля битвы строится не из имени сражения, а из самого места:
+# «Битва за чертог X» даёт «Поле за чертог X», а это уже не по-русски.
+FIELD_AT_CITY = (
+    "Поле у стен города %s",
+    "Поле под городом %s",
+    "Поле у города по имени %s",
+    "Поле, что зовут по городу %s",
+)
+
+FIELD_AT_REGION = (
+    "Поле в земле по имени %s",
+    "Поле на рубежах земли по имени %s",
+    "Поле в краю по имени %s",
+    "Поле, что зовут по земле %s",
+)
+
+
+def field_name(rng, world, battle) -> str:
+    """Как назовут это поле через сто лет."""
+    settlement = world.settlements.get(battle.settlement_id)
+    if settlement is not None:
+        return rng.choice(FIELD_AT_CITY) % settlement.name
+    region = world.regions.get(battle.region_id)
+    if region is not None:
+        return rng.choice(FIELD_AT_REGION) % region.name
+    return "Поле битвы"
+
+
 def field_left(rng, site, battle) -> tuple:
     text = rng.choice(FIELD_TEMPLATES) % {"place": site.name}
     return ("Поле битвы: %s" % site.name), cap(text)

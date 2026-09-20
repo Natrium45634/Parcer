@@ -13,6 +13,7 @@ from __future__ import annotations
 from . import houses as houses_mod
 from . import peoples
 from . import succession
+from . import upheaval
 from .. import crafts as crafts_mod
 from .. import laws as laws_mod
 from .. import narrative
@@ -360,7 +361,8 @@ def tick_camps(ctx, year: int) -> None:
     if not rng.chance(ctx.spread_rate(spec.camp_rate)):
         return
 
-    evil = [race for race in ctx.awakened if race.is_evil]
+    evil = [race for race in ctx.awakened
+            if race.is_evil and not upheaval.is_gone(world, race.id)]
     if not evil:
         return
     race = rng.weighted([(race, race.expansion) for race in evil])
@@ -418,7 +420,7 @@ def upkeep(ctx, year: int, period: int) -> None:
         settlement = world.settlements[settlement_id]
         race = races_mod.get_race(settlement.race_id)
         region = world.regions.get(settlement.region_id)
-        capacity = 7000.0 * (region.capacity if region else 1.0)
+        capacity = max(1.0, 7000.0 * (region.capacity if region else 1.0))
         if ctx.map is not None and region is not None and region.from_map:
             # Урожайные годы и рыбный ход кормят больше ртов, чем голая земля.
             capacity *= 0.85 + 0.5 * ctx.map.bounty(region.id)

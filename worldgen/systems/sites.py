@@ -140,8 +140,8 @@ def _mark_fields(ctx, year: int, rng) -> None:
         known.add(battle.id)
         if battle.deaths < 900 or not rng.chance(FIELD_CHANCE):
             continue
-        name = _unique_name(ctx, rng, "Поле %s" % battle.name.replace(
-            "Битва ", "").replace("Сражение ", ""))
+        name = _unique_name(ctx, rng,
+                            lambda: texts.field_name(rng, world, battle))
         site = world.add_site(
             kind=sites_mod.FIELD, name=name, region_id=battle.region_id,
             created=battle.date, battle_id=battle.id,
@@ -311,8 +311,10 @@ def _hex_of(ctx, region_id: str, rng) -> int:
     return ctx.map.place(region_id, rng, kind="site")
 
 
-def _unique_name(ctx, rng, name: str) -> str:
-    return ctx.forge.unique("site", lambda: name, rng)
+def _unique_name(ctx, rng, name) -> str:
+    """name — либо готовая строка, либо способ придумать ещё одну."""
+    maker = name if callable(name) else (lambda: name)
+    return ctx.forge.unique("site", maker, rng)
 
 
 __all__ = ["upkeep", "bury", "hide_hoard"]

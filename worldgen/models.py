@@ -156,6 +156,8 @@ class Region:
     coastal: bool = False
     river: bool = False
     island: bool = False
+    drowned: bool = False       # земля ушла под воду и больше не земля
+    sundered: bool = False      # по ней прошёл разлом, и связи порваны
     elev_m: int = 0
     temp: float = 0.0
     moist: float = 0.0

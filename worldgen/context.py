@@ -116,6 +116,8 @@ class GenContext:
         for race in races_mod.RACES:
             pairs = []
             for region in world.regions.values():
+                if region.drowned:
+                    continue          # под водой не селятся
                 if region.terrain in race.terrains:
                     rank = race.terrains.index(region.terrain)
                     weight = 10.0 / (1.0 + rank)
@@ -162,6 +164,9 @@ class GenContext:
         """
         world = self.world
         pairs = self.region_weights.get(race.id) or []
+        # Землю могло затопить уже после того, как веса посчитали.
+        pairs = [(region_id, weight) for region_id, weight in pairs
+                 if not world.regions[region_id].drowned]
         if known_only:
             pairs = [(region_id, weight) for region_id, weight in pairs
                      if world.regions[region_id].known]

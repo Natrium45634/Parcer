@@ -60,7 +60,8 @@ def _maybe_launch(ctx, year: int) -> None:
         return
     rng = ctx.rng("expedition", year)
 
-    unknown = [region for region in world.regions.values() if not region.known]
+    unknown = [region for region in world.regions.values()
+               if not region.known and not region.drowned]
     # Чем позже эпоха и чем больше белых пятен, тем чаще снаряжают корабли.
     urge = 0.4 + 0.22 * world.era_index_at(year)
     if not unknown:

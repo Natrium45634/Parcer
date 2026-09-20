@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from . import houses as houses_mod
 from . import succession
+from . import upheaval
 from .. import catastrophe as cat
 from .. import narrative
 from .. import narrative_calamity as texts
@@ -30,6 +31,7 @@ from ..timeline import Date
 from ..world import RURAL_FACTOR
 
 CALAMITY_RATE = 0.011          # годовой шанс, что где-то начнётся беда
+GREAT_MEMORY = "великое"       # общая память всех великих бед
 RELIC_WAKE_RATE = 0.0013       # годовой шанс пробуждения на один спящий след
 MIN_SETTLEMENT = 45            # ниже этого поселение считается погибшим
 
@@ -248,6 +250,8 @@ def _pick_spec(ctx, year: int, rng):
             continue
         if spec.needs_polity and not world.active_polities:
             continue
+        if spec.from_relic_only:
+            continue          # такую беду поднимает не время, а чужая память
         if spec.kind == cat.INVASION and not world.active_settlements:
             continue
         weight = spec.weight * ctx.calamity_bias.get(spec.key, 1.0)
@@ -260,6 +264,14 @@ def _pick_spec(ctx, year: int, rng):
         if last is not None:
             gap = year - last
             weight *= min(1.0, (gap / 400.0) ** 0.8 + 0.05)
+        if spec.key in upheaval.GREAT:
+            # Великие беды делят одну память на всех: мир, который только
+            # что тонул, не раскалывается назавтра. Иначе конец света
+            # перестаёт быть концом света и становится погодой.
+            last_great = ctx.calamity_last.get(GREAT_MEMORY)
+            if last_great is not None:
+                gap = year - last_great
+                weight *= min(1.0, (gap / 1500.0) ** 1.2 + 0.02)
         if weight > 0:
             pairs.append((spec, weight))
     if not pairs:
@@ -281,7 +293,7 @@ def _pick_regions(ctx, rng, spec, count: int, victim=None, severity: int = 0):
             chosen = _grow_regions(world, rng, chosen, count)
         return chosen[:max(1, count)]
 
-    pool = list(world.regions.values())
+    pool = [region for region in world.regions.values() if not region.drowned]
     if spec.terrains:
         fitting = [region for region in pool if region.terrain in spec.terrains]
         if fitting:
@@ -384,6 +396,12 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
         victim = _pick_victim_polity(ctx, rng, spec, severity)
         if victim is None:
             return None
+    if spec.worldwide:
+        # Всемирная беда не выбирает земель: спрятаться от неё негде.
+        # Под водой прятаться тоже негде, но там уже некому.
+        region_ids = [region.id for region in world.regions.values()
+                      if not region.drowned]
+        count = len(region_ids)
     if not region_ids:
         region_ids = _pick_regions(ctx, rng, spec, count, victim,
                                    severity)
@@ -419,6 +437,8 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
         calamity.notes.append(phrase(host[0], host[1], host[2]))
     calamity.notes.append("длительность: %d" % duration)
     ctx.calamity_last[spec.key] = year
+    if spec.key in upheaval.GREAT:
+        ctx.calamity_last[GREAT_MEMORY] = year
 
     _bind_polities(ctx, calamity)
     _plan(ctx, calamity, spec, rng, duration, severity)
@@ -427,7 +447,8 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
         # Но ледник ползёт от полюсов, а не накрывает всё разом: тяжесть
         # ложится на те земли, которые выбрала карта, и только по-настоящему
         # всемирная беда достаёт до каждого.
-        everywhere = severity >= 5 and len(region_ids) >= len(world.regions) * 0.7
+        everywhere = spec.worldwide or (
+            severity >= 5 and len(region_ids) >= len(world.regions) * 0.7)
         world.add_dark_age(calamity.id, year, year + duration, region_ids,
                            min(0.85, 0.16 * severity), worldwide=everywhere)
     _check_compound(ctx, calamity, rng, year)
@@ -443,6 +464,11 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     )
     if relic is not None:
         calamity.notes.append("пробуждение следа: %s" % relic.name)
+    # Великие беды меняют не только летопись, но и саму карту: землю
+    # топит, рвёт надвое или запечатывает. Делается это сразу, в день
+    # прихода беды, — остальное (гибель людей) идёт обычным ходом.
+    if spec.key in upheaval.GREAT:
+        upheaval.aftermath(ctx, calamity, spec, rng, year, date)
     return calamity
 
 
@@ -666,7 +692,8 @@ LINGER_SHARE = 0.12        # какая доля давления остаётс
 def _damage(ctx, calamity, spec, plan, rng, year: int) -> None:
     world = ctx.world
     duration = max(1, plan["duration"])
-    total = min(0.92, plan["toll"] * calamity.strength)
+    # Мир бьют полной мерой ровно до тех пор, пока ему есть куда падать.
+    total = min(0.92, plan["toll"] * calamity.strength * upheaval.mercy(ctx))
     window = min(duration, COLLAPSE_WINDOW)
     annual = 1.0 - (1.0 - total) ** (1.0 / window)
     if year - calamity.start.year > window:
@@ -1312,6 +1339,8 @@ def _maybe_wake_relic(ctx, year: int) -> None:
     # Опасный след даёт начало новой, уже меньшей беде.
     if relic.kind in FAITH_RELICS:
         return            # забытую веру поднимает система религии
+    if _deep_waking(ctx, relic, origin, rng, year):
+        return
     if relic.kind in LIVING_RELICS and relic.potency >= 2 and rng.chance(0.45):
         spec = cat.get_spec(origin.key) if origin is not None else None
         if spec is not None:
@@ -1328,3 +1357,41 @@ def _maybe_wake_relic(ctx, year: int) -> None:
             title=title, text=text, importance=2,
             subjects=[relic.id], region_id=relic.region_id)
         relic.status = "исчерпан"
+
+
+# Пробуждение в глубине само не случается. Это не новое зло, а остаток
+# старого: то, что уцелело после великого нашествия и всё это время лежало
+# под землёй. Поэтому его будит только след давнего вторжения — и чем
+# древнее след, тем страшнее то, что из него поднимается.
+DEEP_RELICS = ("спящая матка", "кладка", "кладка яиц", "печать", "прореха",
+               "логово", "гробница", "недобитый военачальник",
+               "уцелевшая тварь")
+DEEP_AGE = 700              # сколько лет след должен пролежать
+DEEP_CHANCE = 0.5
+
+
+def _deep_waking(ctx, relic, origin, rng, year: int) -> bool:
+    """Осколок древнего нашествия поднимается из-под земли."""
+    if origin is None or origin.kind != cat.INVASION:
+        return False
+    if relic.kind not in DEEP_RELICS or relic.potency < 2:
+        return False
+    if year - relic.created.year < DEEP_AGE:
+        return False
+    if not rng.chance(DEEP_CHANCE):
+        return False
+    spec = cat.CATALOG_BY_KEY.get("deep_waking")
+    if spec is None:
+        return False
+    # Чем древнее и сильнее след, тем тяжелее пробуждение.
+    age_bonus = 1 if year - relic.created.year >= 2000 else 0
+    severity = max(3, min(5, relic.potency + age_bonus))
+    child = _start_calamity(ctx, year, spec, rng, severity=severity,
+                            parent=origin, relic=relic,
+                            region_ids=[relic.region_id])
+    if child is None:
+        return False
+    child.notes.append("осколок нашествия «%s»" % origin.name)
+    child.notes.append("поднялось из следа: %s" % relic.name)
+    relic.status = "исчерпан"
+    return True
