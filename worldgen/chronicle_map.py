@@ -16,6 +16,13 @@
 Владение считается так: каждый живой город тянет к себе округу по числу
 жителей, гекс отходит ближайшему городу, а через него — его державе.
 Земли, до которых не дотянулся никто, остаются ничьими.
+
+Тянется город не куда легче, а **куда хочется**. Цена шага делится на
+желание народа (``homelands.py``): дворф идёт в горы и в ближние долины,
+эльф держится леса, человек берёт всё, где родится хлеб. Без этого
+граница ложилась лентой — волна шла вдоль рек и по равнинам, и держава
+дворфов вытягивалась через степь на пол-материка просто потому, что по
+степи идти дешевле, чем по своим же горам.
 """
 
 from __future__ import annotations
@@ -23,13 +30,16 @@ from __future__ import annotations
 import heapq
 import json
 
+from . import homelands
 from . import races as races_mod
+from .mapregions import BIOME_TERRAIN
+from . import worldmap as wm
 
 DEFAULT_INTERVAL = 50          # как часто снимать кадр границ
 # Округа города меряется не в гексах по прямой, а в цене пути: за хребтом
 # она обрывается, вдоль реки тянется далеко. Так держава на карте получает
 # настоящие очертания, а не круг.
-BASE_REACH = 7.0               # округа даже у самого малого города
+BASE_REACH = 8.5               # округа даже у самого малого города
 REACH_PER_SOUL = 0.0014        # насколько дальше тянется город за жителя
 MAX_REACH = 30.0
 
@@ -108,6 +118,7 @@ class MapRecorder:
         self.frames = []            # [{"y": год, "key": веха, "rle": [...]}]
         self.slots = {}             # polity_id -> номер державы на карте
         self.city_seen = {}         # settlement_id -> последняя известная держава
+        self._terrain_cache = None  # местность каждого гекса, считается раз
 
     # ------------------------------------------------------------------
 
@@ -142,6 +153,7 @@ class MapRecorder:
         owner = [-1] * size
         best = [1e18] * size
         costs = self.travel.land if self.travel is not None else None
+        ground = self._ground()
 
         heap = []
         for settlement_id in self.world.active_settlements:
@@ -156,24 +168,53 @@ class MapRecorder:
                         BASE_REACH + settlement.population * REACH_PER_SOUL)
             owner[index] = slot
             best[index] = 0.0
-            heapq.heappush(heap, (0.0, index, reach, slot))
+            heapq.heappush(heap, (0.0, index, reach, slot,
+                                  settlement.race_id))
 
         while heap:
-            spent, index, reach, slot = heapq.heappop(heap)
+            spent, index, reach, slot, race_id = heapq.heappop(heap)
             if spent > best[index] or spent >= reach:
                 continue
+            race = races_mod.RACES_BY_ID.get(race_id)
             for neighbor in wmap.neighbors(index):
                 if not wmap.is_land(neighbor):
                     continue
                 step = costs[neighbor] if costs is not None else 1.0
                 if step >= 1e8:
                     continue        # через пики держава не тянется
+                # Своя земля даётся даром, чужая — втрое-впятеро дороже.
+                terrain, fertility, river = ground[neighbor]
+                step *= homelands.cost_scale(race, terrain, fertility, river)
                 fresh = spent + step
                 if fresh < reach and fresh < best[neighbor]:
                     best[neighbor] = fresh
                     owner[neighbor] = slot
-                    heapq.heappush(heap, (fresh, neighbor, reach, slot))
+                    heapq.heappush(heap, (fresh, neighbor, reach, slot,
+                                          race_id))
         return owner
+
+    def _ground(self) -> list:
+        """Что за земля в каждом гексе: местность, плодородие, река.
+
+        Считается один раз на весь прогон: слои карты не меняются.
+        """
+        if self._terrain_cache is not None:
+            return self._terrain_cache
+        wmap = self.link.wmap
+        size = wmap.size
+        biome = wmap.layer(wm.L_BIOME)
+        fert = wmap.layer(wm.L_FERTILITY)
+        flags = wmap.layer(wm.L_FLAGS)
+        rows = []
+        for index in range(size):
+            terrain = races_mod.PLAIN
+            if biome is not None:
+                terrain = BIOME_TERRAIN.get(biome[index], races_mod.PLAIN)
+            value = float(fert[index]) if fert is not None else 0.4
+            river = bool(flags[index] & 4) if flags is not None else False
+            rows.append((terrain, value, river))
+        self._terrain_cache = rows
+        return rows
 
     # ------------------------------------------------------------------
 
