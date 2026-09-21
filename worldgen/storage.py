@@ -11,7 +11,8 @@ import dataclasses
 import io
 import json
 
-from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Calamity, Camp,
+from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
+                     Camp,
                      Codex, Company, Deity, Discovery,
                      Embassy, EraSpan, Legend, Event, Expedition, Fact, Faith,
                      Feud, Figure,
@@ -19,7 +20,8 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Calamity, Camp,
                      Migration, Monster, Pact,
                      Plot,
                      Polity,
-                     Region, Reign, Relic, Seed, Settlement, Site, Temple,
+                     Region, Reign, Relic, Seed, Settlement, Site, Strife,
+                     Temple,
                      Tongue,
                      TradeRoute, Tribe, Union, War)
 from .timeline import Date
@@ -156,6 +158,10 @@ def world_to_dict(world: World) -> dict:
         "bonds": [_compact(Bond, item.to_dict()) for item in world.bonds.values()],
         "migrations": [_compact(Migration, item.to_dict())
                        for item in world.migrations.values()],
+        "strifes": [_compact(Strife, item.to_dict())
+                    for item in world.strifes.values()],
+        "cabals": [_compact(Cabal, item.to_dict())
+                   for item in world.cabals.values()],
         "seeds": [_compact(Seed, item.to_dict()) for item in world.seeds.values()],
         "race_awakening": world.race_awakening,
         "counters": world._counters,
@@ -342,6 +348,16 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("migrations", ()):
         moving = Migration(**_clean(Migration, item))
         world.migrations[moving.id] = moving
+    for item in data.get("strifes", ()):
+        strife = Strife(**_clean(Strife, item))
+        world.strifes[strife.id] = strife
+        if strife.status == ONGOING:
+            world.active_strifes.append(strife.id)
+    for item in data.get("cabals", ()):
+        cabal = Cabal(**_clean(Cabal, item))
+        world.cabals[cabal.id] = cabal
+        if not cabal.outcome:
+            world.live_cabals.append(cabal.id)
     world.rebuild_fact_index()
     world.rebuild_people_index()
     world.race_awakening = dict(data.get("race_awakening") or {})

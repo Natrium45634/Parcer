@@ -21,7 +21,8 @@ from .chronicle_map import MapRecorder
 from .context import GenContext
 from .eras import build_eras
 from .rng import normalize_seed, seed_to_int
-from .systems import (aristocracy, artifacts, calamity, causes, citylife,
+from .systems import (aristocracy, artifacts, cabals, calamity, causes,
+                      citylife,
                       crafts, culture,
                       diplomacy, embassy,
                       era_events,
@@ -31,7 +32,8 @@ from .systems import (aristocracy, artifacts, calamity, causes, citylife,
                       notables,
                       peoples,
                       religion,
-                      sites, soldiery, spies, succession, tongues, trade,
+                      sites, soldiery, spies, strife, succession, tongues,
+                      trade,
                       unions, upheaval, war)
 from .timeline import Date
 from .world import World
@@ -124,6 +126,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         # Прежде чем мир начнёт новый год, он вспоминает старые долги:
         # созревшие последствия прошлого входят в него первыми.
         causes.tick(ctx, year)
+        strife.tick(ctx, year)
         war.tick(ctx, year)
         notables.tick(ctx, year)
         calamity.tick(ctx, year)
@@ -144,6 +147,8 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             unions.upkeep(ctx, year, UPKEEP_PERIOD)
             spies.upkeep(ctx, year, UPKEEP_PERIOD)
             war.upkeep(ctx, year, UPKEEP_PERIOD)
+            strife.upkeep(ctx, year, UPKEEP_PERIOD)
+            cabals.upkeep(ctx, year, UPKEEP_PERIOD)
             soldiery.upkeep(ctx, year, UPKEEP_PERIOD)
             tongues.upkeep(ctx, year, UPKEEP_PERIOD)
             exploration.upkeep(ctx, year, UPKEEP_PERIOD)

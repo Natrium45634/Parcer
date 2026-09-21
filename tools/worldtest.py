@@ -1329,6 +1329,45 @@ def audit(world) -> list:
             note("в мире есть многонародные державы, но ни один народ ни в "
                  "ком не растворился")
 
+    # 31. Смуты и заговоры: воюет ли держава сама с собой.
+    if world.strifes:
+        strifes = list(world.strifes.values())
+        causes = Counter(item.cause for item in strifes)
+        ends = Counter(item.outcome or "идёт" for item in strifes)
+        dead = sum(item.deaths for item in strifes)
+        longest = max(item.years for item in strifes)
+        found.append(("=", "смут: %d, полегло %s, самая долгая %d лет; "
+                      "из-за чего: %s; чем кончались: %s"
+                      % (len(strifes), _souls(dead), longest,
+                         ", ".join("%s — %d" % pair
+                                   for pair in causes.most_common(3)),
+                         ", ".join("%s — %d" % pair
+                                   for pair in ends.most_common(3)))))
+        if len(strifes) >= 6 and len(causes) < 2:
+            note("все смуты мира случились по одной причине")
+        for item in strifes:
+            if set(item.crown_cities) & set(item.rebel_cities):
+                bad("город смуты «%s» держат обе стороны разом" % item.name)
+                break
+    elif world.total_years >= 4000:
+        note("ни одна держава за всю историю не воевала сама с собой")
+
+    if world.cabals:
+        cabals = list(world.cabals.values())
+        ends = Counter(item.outcome or "зреет" for item in cabals)
+        aims = Counter(item.aim for item in cabals)
+        struck = sum(1 for item in cabals
+                     if item.outcome in ("удалось", "сорвалось"))
+        found.append(("=", "заговоров: %d, дошло до удара %d; ради чего: %s; "
+                      "чем кончились: %s"
+                      % (len(cabals), struck,
+                         ", ".join("%s — %d" % pair
+                                   for pair in aims.most_common(3)),
+                         ", ".join("%s — %d" % pair
+                                   for pair in ends.most_common(3)))))
+        if len(cabals) >= 10 and len(ends) < 3:
+            note("заговоры этого мира кончаются всегда одинаково")
+
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:
         biggest = max((world.polities[p].population

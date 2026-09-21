@@ -14,7 +14,8 @@ from . import artifacts as artifacts_mod
 from . import history
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
-                     Artifact, Battle, Bond, Calamity, Camp, Codex, Company,
+                     Artifact, Battle, Bond, Cabal, Calamity, Camp, Codex,
+                     Company,
                      Deity,
                      Discovery, Embassy, Event, Expedition, Fact, Faith, Feud,
                      Figure,
@@ -25,7 +26,8 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Polity,
                      Region,
                      Reign,
-                     Relic, Seed, Settlement, Site, Temple, Tongue, TradeRoute,
+                     Relic, Seed, Settlement, Site, Strife, Temple, Tongue,
+                     TradeRoute,
                      Tribe,
                      Union, War)
 
@@ -134,6 +136,11 @@ class World:
         self._memory_of = {}           # личность -> [id воспоминаний]
         self._bonds_of = {}            # личность -> [id связей]
         self.migrations = {}           # id -> Migration (переселения народов)
+        # --- смуты и заговоры (блоки 20 и 21) ---
+        self.strifes = {}              # id -> Strife
+        self.active_strifes = []       # смуты, которые идут прямо сейчас
+        self.cabals = {}               # id -> Cabal
+        self.live_cabals = []          # заговоры, ещё не кончившиеся
         self._events_by_id = {}        # id -> Event (для дерева причин)
         self.notes = {}                # свободные заметки для будущих блоков
         # Перепись мира раз в несколько лет: по ней видно, как мир рос,
@@ -946,6 +953,55 @@ class World:
         for bond in self.bonds_of(first_id, alive=alive):
             if bond.other(first_id) == second_id:
                 return bond
+        return None
+
+    # ------------------------------------------------------------------
+    # Смуты и заговоры
+    # ------------------------------------------------------------------
+
+    def add_strife(self, **kwargs) -> Strife:
+        strife = Strife(id=self.next_id("SF"), **kwargs)
+        self.strifes[strife.id] = strife
+        self.active_strifes.append(strife.id)
+        return strife
+
+    def end_strife(self, strife, date: Date, outcome: str) -> None:
+        if strife.status != ONGOING:
+            return
+        strife.status = ENDED
+        strife.end = date
+        strife.outcome = outcome
+        if strife.id in self.active_strifes:
+            self.active_strifes.remove(strife.id)
+
+    def strife_of(self, polity):
+        """Идущая смута этой державы, если она есть."""
+        for strife_id in self.active_strifes:
+            strife = self.strifes.get(strife_id)
+            if strife is not None and strife.polity_id == polity.id:
+                return strife
+        return None
+
+    def add_cabal(self, **kwargs) -> Cabal:
+        cabal = Cabal(id=self.next_id("CB"), **kwargs)
+        self.cabals[cabal.id] = cabal
+        self.live_cabals.append(cabal.id)
+        return cabal
+
+    def end_cabal(self, cabal, year: int, outcome: str) -> None:
+        if cabal.outcome:
+            return
+        cabal.outcome = outcome
+        cabal.ended = int(year)
+        if cabal.id in self.live_cabals:
+            self.live_cabals.remove(cabal.id)
+
+    def cabal_of(self, polity):
+        """Заговор, зреющий в этой державе."""
+        for cabal_id in self.live_cabals:
+            cabal = self.cabals.get(cabal_id)
+            if cabal is not None and cabal.polity_id == polity.id:
+                return cabal
         return None
 
     def add_migration(self, year: int, race_id: str, **kwargs) -> Migration:

@@ -2056,6 +2056,113 @@ def render_causes(world) -> str:
     return "\n".join(rows).rstrip()
 
 
+def render_strifes(world) -> str:
+    """Смуты: когда держава воевала сама с собой."""
+    from .narrative_war import lives_text
+    from .timeline import years_text
+
+    rows = ["СМУТЫ", ""]
+    if not world.strifes:
+        rows.append("  Ни одна держава этого мира не воевала сама с собой.")
+        return "\n".join(rows)
+
+    items = sorted(world.strifes.values(), key=lambda item: item.start.ordinal)
+    causes, outcomes = {}, {}
+    for item in items:
+        causes[item.cause] = causes.get(item.cause, 0) + 1
+        outcomes[item.outcome or "идёт"] = outcomes.get(item.outcome or "идёт",
+                                                        0) + 1
+    dead = sum(item.deaths for item in items)
+    longest = max(items, key=lambda item: item.years)
+    rows.append("  Смут: %d; всего в них полегло %s."
+                % (len(items), lives_text(dead)))
+    rows.append("  Из-за чего: %s."
+                % ", ".join("%s — %d" % pair for pair in
+                            sorted(causes.items(), key=lambda p: -p[1])))
+    rows.append("  Чем кончались: %s."
+                % ", ".join("%s — %d" % pair for pair in
+                            sorted(outcomes.items(), key=lambda p: -p[1])))
+    rows.append("  Самая долгая: %s (%d год, %s)."
+                % (longest.name, longest.start.year,
+                   years_text(longest.years)))
+    rows.append("")
+
+    for item in items[-12:]:
+        polity = world.polities.get(item.polity_id)
+        rebel = world.figures.get(item.rebel_id)
+        rows.append("  %5d  %-30s %s" % (item.start.year, item.name,
+                                         polity.name if polity else "?"))
+        rows.append("         причина: %s; длилась %s; исход: %s"
+                    % (item.cause, years_text(item.years),
+                       item.outcome or "ещё идёт"))
+        if rebel is not None:
+            rows.append("         знамя поднял: %s" % rebel.name)
+        if item.turns:
+            rows.append("         городов переходило из рук в руки: %d"
+                        % len(item.turns))
+        if item.deaths:
+            rows.append("         погибло: %s" % lives_text(item.deaths))
+        heir = world.polities.get(item.heir_polity_id)
+        if heir is not None:
+            rows.append("         из неё вышла держава: %s" % heir.name)
+    return "\n".join(rows).rstrip()
+
+
+def render_cabals(world) -> str:
+    """Заговоры: обиды, которые росли годами."""
+    from .timeline import years_text
+
+    rows = ["ЗАГОВОРЫ", ""]
+    if not world.cabals:
+        rows.append("  Дворы этого мира обошлись без тайных дел.")
+        return "\n".join(rows)
+
+    items = sorted(world.cabals.values(), key=lambda item: item.born)
+    outcomes, aims, stages = {}, {}, {}
+    for item in items:
+        key = item.outcome or "зреет"
+        outcomes[key] = outcomes.get(key, 0) + 1
+        aims[item.aim] = aims.get(item.aim, 0) + 1
+        stages[item.stage] = stages.get(item.stage, 0) + 1
+    rows.append("  Заговоров: %d." % len(items))
+    rows.append("  Ради чего: %s."
+                % ", ".join("%s — %d" % pair for pair in
+                            sorted(aims.items(), key=lambda p: -p[1])))
+    rows.append("  Чем кончились: %s."
+                % ", ".join("%s — %d" % pair for pair in
+                            sorted(outcomes.items(), key=lambda p: -p[1])))
+    rows.append("  Дальше всего доходили: %s."
+                % ", ".join("%s — %d" % pair for pair in
+                            sorted(stages.items(), key=lambda p: -p[1])))
+    longest = max(items, key=lambda item: (item.ended or item.born) - item.born)
+    span = (longest.ended or longest.born) - longest.born
+    if span > 0:
+        rows.append("  Самое долгое дело зрело %s." % years_text(span))
+    rows.append("")
+
+    told = [item for item in items
+            if item.outcome in ("удалось", "раскрыт", "сорвалось",
+                                "сбылось само")]
+    for item in told[-10:]:
+        polity = world.polities.get(item.polity_id)
+        leader = world.figures.get(item.leader_id)
+        target = world.figures.get(item.target_id)
+        rows.append("  %5d  %-26s ради: %-14s исход: %s"
+                    % (item.born, polity.name if polity else "?", item.aim,
+                       item.outcome))
+        if leader is not None:
+            rows.append("         вёл: %s" % leader.name)
+        if target is not None:
+            rows.append("         против: %s" % target.name)
+        rows.append("         участников: %d; зрело %s"
+                    % (len(item.members),
+                       years_text(max(0, (item.ended or item.born)
+                                      - item.born))))
+        for note in item.notes[:2]:
+            rows.append("         %s" % note)
+    return "\n".join(rows).rstrip()
+
+
 def render_culture(world) -> str:
     """Ассимиляция: кто в ком растворился и кто остался при своём.
 
@@ -2326,6 +2433,8 @@ def full_text(world) -> str:
         render_memory(world),
         render_migrations(world),
         render_culture(world),
+        render_strifes(world),
+        render_cabals(world),
         render_upheavals(world),
         render_monsters(world),
         render_artifacts(world),

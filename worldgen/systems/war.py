@@ -129,6 +129,8 @@ def _neighbours(world, polity) -> list:
 def _can_fight(world, polity, year: int) -> bool:
     if polity.status != ACTIVE:
         return False
+    if world.strife_of(polity) is not None:
+        return False            # в своей смуте не до чужой межи
     if len(_live_cities(world, polity)) < MIN_WAR_CITIES:
         return False
     if world.wars_of(polity, only_active=True):

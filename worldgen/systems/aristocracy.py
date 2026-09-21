@@ -236,7 +236,13 @@ def _fronda(ctx, polity, race, house, ruler, year: int, rng) -> None:
 
 
 def _civil_war(ctx, polity, race, house, year: int, rng) -> None:
-    """Междоусобица: дом идёт за венцом."""
+    """Междоусобица: дом идёт за венцом.
+
+    Если держава достаточно велика, чтобы её было на что делить, дело
+    не решается одним броском: поднимается настоящая смута с городами,
+    годами и перебежчиками (systems/strife.py). Малые державы, где
+    делить нечего, обходятся прежним коротким порядком.
+    """
     world = ctx.world
     leaders = house_adults(world, house, race, year)
     if not leaders:
@@ -245,6 +251,11 @@ def _civil_war(ctx, polity, race, house, year: int, rng) -> None:
     leader = world.figures.get(house.head_id) or leaders[0]
     if not leader.alive_at(year):
         leader = leaders[0]
+
+    from . import strife as strife_sys
+    if strife_sys.start(ctx, polity, strife_sys.NOBLES, year, rng,
+                        rebel=leader, house=house) is not None:
+        return
 
     reign = world.current_reign(polity)
     date = ctx.date_in(rng, year, reign.start if reign is not None else None)

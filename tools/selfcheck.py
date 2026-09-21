@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from worldgen import chronicle, espionage, storage, warfare   # noqa: E402
 from worldgen.engine import Settings, generate                # noqa: E402
-from worldgen.models import ACTIVE                             # noqa: E402
+from worldgen.models import ACTIVE, ONGOING as ONGOING_STATE                             # noqa: E402
 from worldgen.races import BEASTFOLK, EVIL, RACES, get_race   # noqa: E402
 
 RACE_IDS = {race.id for race in RACES}
@@ -897,6 +897,60 @@ def check_migrations(world, seed: str) -> list:
     return problems
 
 
+def check_strifes(world, seed: str) -> list:
+    """Смуты и заговоры: не воюет ли держава с тем, кого нет."""
+    problems = []
+    for item in world.strifes.values():
+        if item.polity_id not in world.polities:
+            problems.append("сид «%s»: смута в несуществующей державе" % seed)
+            break
+        if item.end is not None and item.end.ordinal < item.start.ordinal:
+            problems.append("сид «%s»: смута «%s» кончилась раньше, чем "
+                            "началась" % (seed, item.name))
+            break
+        if item.status != ONGOING_STATE and not item.outcome:
+            problems.append("сид «%s»: у смуты «%s» нет исхода"
+                            % (seed, item.name))
+            break
+        both = set(item.crown_cities) & set(item.rebel_cities)
+        if both:
+            problems.append("сид «%s»: город смуты «%s» держат обе стороны "
+                            "разом" % (seed, item.name))
+            break
+        if item.rebel_id and item.rebel_id not in world.figures:
+            problems.append("сид «%s»: смуту «%s» поднял тот, кого нет"
+                            % (seed, item.name))
+            break
+        if item.heir_polity_id and item.heir_polity_id not in world.polities:
+            problems.append("сид «%s»: из смуты «%s» вышла несуществующая "
+                            "держава" % (seed, item.name))
+            break
+
+    for item in world.cabals.values():
+        if item.polity_id not in world.polities:
+            problems.append("сид «%s»: заговор в несуществующей державе" % seed)
+            break
+        if item.leader_id not in world.figures:
+            problems.append("сид «%s»: заговор ведёт тот, кого нет" % seed)
+            break
+        if item.target_id and item.target_id not in world.figures:
+            problems.append("сид «%s»: заговор против того, кого нет" % seed)
+            break
+        if item.ended and item.ended < item.born:
+            problems.append("сид «%s»: заговор кончился раньше, чем начался"
+                            % seed)
+            break
+        if item.ended and not item.outcome:
+            problems.append("сид «%s»: у кончившегося заговора нет исхода"
+                            % seed)
+            break
+        if any(member not in world.figures for member in item.members):
+            problems.append("сид «%s»: в заговоре числится тот, кого нет"
+                            % seed)
+            break
+    return problems
+
+
 def check_things(world, seed: str) -> list:
     """Вещи, места и чудовища: всё ли на месте и ни у кого ли нет лишнего.
 
@@ -1297,6 +1351,7 @@ def main() -> int:
         failures.extend(check_causes(first, seed))
         failures.extend(check_people_memory(first, seed))
         failures.extend(check_migrations(first, seed))
+        failures.extend(check_strifes(first, seed))
         failures.extend(check_lore(first, seed))
         failures.extend(check_upheavals(first, seed))
         failures.extend(check_capitals(first, seed))
@@ -1343,6 +1398,7 @@ def main() -> int:
             failures.extend(check_causes(first, "карта/" + seed))
             failures.extend(check_people_memory(first, "карта/" + seed))
             failures.extend(check_migrations(first, "карта/" + seed))
+            failures.extend(check_strifes(first, "карта/" + seed))
             failures.extend(check_lore(first, "карта/" + seed))
             failures.extend(check_upheavals(first, "карта/" + seed))
             failures.extend(check_capitals(first, "карта/" + seed))

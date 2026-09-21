@@ -352,6 +352,12 @@ class ChronicleApp(tk.Tk):
         self.culture_text = self._add_text_tab(
             "Растворение народов", lambda: self._set_text(
                 self.culture_text, chronicle.render_culture(self.world)))
+        self.strife_text = self._add_text_tab(
+            "Смуты", lambda: self._set_text(
+                self.strife_text, chronicle.render_strifes(self.world)))
+        self.cabal_text = self._add_text_tab(
+            "Заговоры", lambda: self._set_text(
+                self.cabal_text, chronicle.render_cabals(self.world)))
         self.expeditions_text = self._add_text_tab("Походы")
         self.regions_text = self._add_text_tab("Земли")
         self.stats_text = self._add_text_tab("Итоги")

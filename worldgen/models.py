@@ -1438,6 +1438,76 @@ class Migration:
 
 
 @dataclass
+class Strife:
+    """Смута: война державы с самой собой."""
+
+    id: str
+    polity_id: str
+    cause: str                 # спор наследников, раскол веры, борьба знати …
+    start: Date
+    name: str = ""             # «Смута Двух Венцов»
+    end: Date = None
+    status: str = ONGOING
+    crown_id: str = ""         # кто держит престол
+    rebel_id: str = ""         # кто против
+    rebel_house_id: str = ""
+    crown_cities: list = field(default_factory=list)
+    rebel_cities: list = field(default_factory=list)
+    crown_power: float = 1.0
+    rebel_power: float = 1.0
+    battle_ids: list = field(default_factory=list)
+    turns: list = field(default_factory=list)   # [[год, город, сторона]]
+    deaths: int = 0
+    outcome: str = ""          # корона удержалась / престол взят / раскол / мир
+    heir_polity_id: str = ""   # держава, отколовшаяся по итогу
+    origin_id: str = ""        # запись летописи, с которой всё началось
+    notes: list = field(default_factory=list)
+
+    @property
+    def years(self) -> int:
+        if self.end is None:
+            return 0
+        return max(0, self.end.year - self.start.year)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["start"] = _date_out(self.start)
+        data["end"] = _date_out(self.end)
+        return data
+
+
+@dataclass
+class Cabal:
+    """Заговор: обида, которая растёт годами и однажды бьёт.
+
+    У заговора есть ступени: обида, первый разговор, вербовка, тайная
+    клятва, ожидание своего часа, удар — и награда или плаха. Пройти их
+    можно за десять лет, а можно за сто, и на каждой ступени заговор
+    могут раскрыть.
+    """
+
+    id: str
+    polity_id: str
+    target_id: str             # против кого: государь
+    leader_id: str             # кто ведёт
+    born: int = 0              # год, когда завязался
+    stage: str = "обида"       # обида / сговор / клятва / ожидание / удар
+    stage_year: int = 0
+    members: list = field(default_factory=list)      # id участников
+    houses: list = field(default_factory=list)       # роды, что в деле
+    aim: str = ""              # престол / месть / вера / воля городов
+    secrecy: float = 1.0       # насколько ещё не проболтались, 0…1
+    patron_id: str = ""        # чужая держава, если платит из-за межи
+    outcome: str = ""          # удалось / раскрыт / выдохся / опередили
+    ended: int = 0
+    strike_id: str = ""        # событие удара
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class Memory:
     """Что человек помнит о своей жизни.
 
