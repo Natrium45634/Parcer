@@ -205,6 +205,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         if should_stop is not None and year % 50 == 0 and should_stop():
             raise GenerationCancelled()
 
+    tongues.close(ctx, total)
     _finalize(world)
     if progress is not None:
         progress(1.0, "Готово")
