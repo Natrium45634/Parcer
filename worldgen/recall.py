@@ -165,10 +165,16 @@ def grievance(world, figure, about_id: str, year: int) -> float:
     return max(0.0, -attitude(world, figure, about_id, year))
 
 
-def strongest(world, figure, about_id: str, year: int):
-    """Самое тяжёлое воспоминание об этой стороне — для летописи."""
+def strongest(world, figure, about_id: str, year: int, cold: bool = False):
+    """Самое тяжёлое воспоминание об этой стороне — для летописи.
+
+    С cold=True берётся самое тяжёлое из недобрых: государь, у которого
+    с соседом связаны и победа, и гибель отца, на совете вспомнит второе.
+    """
     best, best_power = None, 0.0
     for memory in world.memories_of(figure.id, about_id=about_id):
+        if cold and SIGN.get(memory.kind, 0.0) >= 0:
+            continue
         value = power(memory, year, figure)
         if value > best_power:
             best, best_power = memory, value

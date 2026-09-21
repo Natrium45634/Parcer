@@ -453,8 +453,8 @@ def motives(world, attacker, defender, cause, options, year: int) -> dict:
 
     ruler = world.figures.get(attacker.ruler_id)
     if ruler is not None:
-        memory = recall.strongest(world, ruler, defender.id, year)
-        if memory is not None and recall.SIGN.get(memory.kind, 0.0) < 0 \
+        memory = recall.strongest(world, ruler, defender.id, year, cold=True)
+        if memory is not None \
                 and recall.power(memory, year, ruler) > 0.25:
             note = PERSONAL_NOTE.get(memory.kind, "")
             if note:
@@ -607,7 +607,8 @@ def reasons(ctx, attacker, defender, year: int) -> list:
     if ruler is not None:
         spite = recall.grievance(world, ruler, defender.id, year)
         if spite > 0.12:
-            memory = recall.strongest(world, ruler, defender.id, year)
+            memory = recall.strongest(world, ruler, defender.id, year,
+                                      cold=True)
             key = PERSONAL_CAUSE.get(memory.kind if memory else "", "insult")
             add(key, 1.2 + 3.4 * spite)
         warmth = recall.attitude(world, ruler, defender.id, year)
