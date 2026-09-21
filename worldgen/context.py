@@ -93,7 +93,8 @@ class GenContext:
     def growth(self, base: float, region_id: str = "") -> float:
         """Годовой прирост населения. В тёмные века он уходит в минус."""
         gloom = self.gloom(region_id)
-        return base * self.growth_scale * max(-0.35, 1.0 - 1.15 * gloom)
+        return base * self.growth_scale * races_mod.GROWTH_SCALE \
+            * max(-0.35, 1.0 - 1.15 * gloom)
 
     def gloom(self, region_id: str = "") -> float:
         """Насколько тяжело живётся в этой земле прямо сейчас."""

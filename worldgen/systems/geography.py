@@ -46,7 +46,11 @@ NEIGHBOR_BONUS = 1.8       # тяготение одинаковых земел�
 
 
 def build(ctx) -> None:
-    """Создаёт земли мира — из файла карты либо процедурно."""
+    """Создаёт земли мира — по карте (своей или чужой) либо процедурно."""
+    make = dict(getattr(ctx.settings, "map_make", None) or {})
+    if make:
+        _build_from_map(ctx, "", make=make)
+        return
     path = str(getattr(ctx.settings, "map_path", "") or "")
     if path:
         _build_from_map(ctx, path)
@@ -54,11 +58,18 @@ def build(ctx) -> None:
     _build_grid(ctx)
 
 
-def _build_from_map(ctx, path: str) -> None:
-    """Земли берутся из гексовой карты .world."""
+def _build_from_map(ctx, path: str, make=None) -> None:
+    """Земли берутся из гексовой карты: своей или файла .world."""
     world = ctx.world
     rng = ctx.rng("geography")
-    wmap = wmod.load(path)
+    if make:
+        from .. import mapforge
+        options = dict(make)
+        seed = str(options.pop("seed", "") or ctx.world.seed_text)
+        wmap = mapforge.forge(seed, **options)
+        path = "карта «%s»" % seed
+    else:
+        wmap = wmod.load(path)
     roads = travel.TravelMap(wmap)
     link = mapworld.MapLink(wmap, path, travel=roads)
 
@@ -74,7 +85,7 @@ def _build_from_map(ctx, path: str) -> None:
     world.map_link = link
     world.map_source = path
     world.notes["карта"] = {
-        "файл": path.rsplit("/", 1)[-1],
+        "файл": path.rsplit("/", 1)[-1] if not make else path,
         "сид карты": wmap.seed_text,
         "размер": "%d×%d" % (wmap.width, wmap.height),
         "земель": len(world.regions),

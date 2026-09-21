@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 from .chronicle_map import MapRecorder
 from .context import GenContext
@@ -37,6 +37,7 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       unions, upheaval, war)
 from .timeline import Date
 from .world import World
+from . import tuning
 from . import narrative
 
 UPKEEP_PERIOD = 10          # раз во столько лет пересчитываются население и упадок
@@ -56,17 +57,32 @@ class Settings:
     density: float = 1.0
     map_path: str = ""          # файл .world; пусто — процедурная карта
     map_interval: int = 50      # раз во столько лет снимается кадр границ
+    # Положения шкал настроек: ключ -> деление 0…100. Пусто — движок
+    # работает так, как задуман.
+    tuning: dict = field(default_factory=dict)
+    # Своя карта: если заполнено, гексовая карта делается на месте, а не
+    # берётся файлом. Ключи — как у mapforge.forge: seed, size, land_share,
+    # roughness, warmth, wetness, magic.
+    map_make: dict = field(default_factory=dict)
 
     def normalized(self) -> "Settings":
         years = max(50, min(100000, int(self.years)))
         regions = max(6, min(60, int(self.regions)))
         density = max(0.2, min(3.0, float(self.density)))
+        knobs = {}
+        for key, value in (self.tuning or {}).items():
+            try:
+                knobs[str(key)] = max(0, min(100, int(value)))
+            except (TypeError, ValueError):
+                continue
         # Код сида приводится к единому виду: «kr7m93xd» и «KR7M-93XD» —
         # один и тот же мир. Обычные слова остаются как написаны.
         return Settings(seed=normalize_seed(self.seed), years=years,
                         regions=regions,
                         density=density, map_path=str(self.map_path or ""),
-                        map_interval=max(5, min(1000, int(self.map_interval))))
+                        map_interval=max(5, min(1000, int(self.map_interval))),
+                        tuning=knobs,
+                        map_make=dict(self.map_make or {}))
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -75,6 +91,10 @@ class Settings:
 def generate(settings: Settings, progress=None, should_stop=None) -> World:
     """Создаёт мир целиком. progress(доля, подпись) вызывается по ходу дела."""
     settings = settings.normalized()
+    # Числа движка расставляются по шкалам настроек целиком, даже если
+    # настроек нет: так одно и то же положение шкал всегда даёт один и
+    # тот же мир, что бы ни крутили в этом окне до него.
+    tuning.apply(settings.tuning)
     world = World(
         seed_text=str(settings.seed),
         seed_value=seed_to_int(settings.seed),

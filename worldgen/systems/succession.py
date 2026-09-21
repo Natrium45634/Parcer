@@ -789,7 +789,7 @@ def _instability(ctx, world, polity, year: int) -> float:
     все перевороты мира подряд.
     """
     race = races_mod.get_race(polity.race_id)
-    value = race.coup_propensity
+    value = race.coup_propensity * races_mod.COUP_SCALE
     reign = world.current_reign(polity)
     if reign is not None:
         reign_age = max(0, year - reign.start.year)
