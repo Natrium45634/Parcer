@@ -40,7 +40,8 @@ MAP_RANDOM = "случайная"
 MAP_FILE = "файл"
 MAP_NONE = "без карты"
 
-PREVIEW_MAX = 520          # во сколько точек шириной показывать карту
+PREVIEW_MIN = 520          # уже этого предпросмотр карты не делаем
+PREVIEW_CELL = 9           # больше этого гекс в предпросмотре не растёт
 
 
 class Wizard(ttk.Frame):
@@ -366,15 +367,26 @@ class Wizard(ttk.Frame):
         self.make_map()
 
     def _draw_map(self, wmap) -> None:
+        """Карта во всю ширину окна, гексовыми рядами вразбежку."""
         grid = mapforge.color_grid(wmap)
-        image = tk.PhotoImage(width=wmap.width, height=wmap.height)
+        self.map_canvas.update_idletasks()
+        room_w = max(PREVIEW_MIN, self.map_canvas.winfo_width() - 16)
+        room_h = max(300, self.map_canvas.winfo_height() - 16)
+        cell = max(2, min(PREVIEW_CELL,
+                          room_w // max(1, wmap.width + 1),
+                          room_h // max(1, wmap.height)))
+        half = cell // 2
+        image = tk.PhotoImage(width=wmap.width * cell + half,
+                              height=wmap.height * cell)
         for y, row in enumerate(grid):
-            image.put("{%s}" % " ".join(row), to=(0, y))
-        zoom = max(1, min(6, PREVIEW_MAX // max(1, wmap.width)))
-        image = image.zoom(zoom, zoom)
+            # Каждый гекс — квадратик в cell точек; нечётные ряды сдвинуты
+            # на полгекса вправо, как оно и есть на гексовой сетке.
+            line = " ".join(colour for colour in row for _ in range(cell))
+            block = " ".join("{%s}" % line for _ in range(cell))
+            image.put(block, to=(half if y % 2 else 0, y * cell))
         self._photo = image                    # иначе картинку соберёт сборщик
         self.map_canvas.delete("all")
-        self.map_canvas.config(height=min(360, wmap.height * zoom))
+        self.map_canvas.config(height=max(300, wmap.height * cell + 12))
         self.map_canvas.create_image(6, 6, image=image, anchor="nw")
 
     def save_map(self) -> None:
