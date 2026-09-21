@@ -14,8 +14,15 @@
     --density X       плотность событий, 0.2…3.0 (по умолчанию 1.0)
     --importance N    что попадёт в текст: 1 — всё, 5 — только эпохальное
     --out ФАЙЛ        куда сохранить летопись (.txt) или мир (.json)
-    --map ФАЙЛ        карта .world из TECTONIC WORLDFORGE; тогда история
-                      опирается на настоящую географию, а не на выдумку
+    --map ФАЙЛ        готовая карта .world; тогда история опирается на
+                      настоящую географию, а не на выдумку
+    --map-random РАЗМЕР  сделать свою гексовую карту: малая, средняя,
+                      большая или огромная
+    --map-seed СИД    сид карты (по умолчанию — сид мира)
+    --save-map ФАЙЛ   записать сделанную карту в .world
+    --tune ШКАЛЫ      настройки генератора: «war_rate=20,calamity_rate=80»;
+                      шкала от 0 до 100, 50 — как задумано
+    --tune-list       показать все шкалы настроек и выйти
     --map-interval N  раз во столько лет снимать кадр границ (по умолчанию 50)
     --chronicle ФАЙЛ  записать chronicle.json — политическую карту по годам
                       для вкладки «Страны» картогенератора
@@ -35,7 +42,9 @@ def run_cli(argv) -> int:
 
     options = {"--seed": "Начало", "--years": "10000", "--regions": "18",
                "--density": "1.0", "--out": "", "--importance": "3",
-               "--map": "", "--map-interval": "50", "--chronicle": ""}
+               "--map": "", "--map-interval": "50", "--chronicle": "",
+               "--map-random": "", "--map-seed": "", "--save-map": "",
+               "--tune": ""}
     index = 0
     while index < len(argv):
         key = argv[index]
@@ -50,11 +59,39 @@ def run_cli(argv) -> int:
         print("Карта не найдена: %s" % map_path)
         return 2
 
+    knobs = {}
+    for pair in options["--tune"].replace(";", ",").split(","):
+        if "=" not in pair:
+            continue
+        key, _, value = pair.partition("=")
+        try:
+            knobs[key.strip()] = max(0, min(100, int(float(value))))
+        except ValueError:
+            print("Не понял настройку: %s" % pair)
+            return 2
+
+    make = {}
+    if options["--map-random"]:
+        from worldgen import mapforge
+        size = options["--map-random"]
+        if size not in mapforge.SIZES:
+            print("Размер карты бывает такой: %s" % ", ".join(mapforge.SIZES))
+            return 2
+        make = {"size": size,
+                "seed": options["--map-seed"] or options["--seed"]}
+
     settings = Settings(seed=options["--seed"], years=int(float(options["--years"])),
                         regions=int(float(options["--regions"])),
                         density=float(options["--density"]),
                         map_path=map_path,
-                        map_interval=int(float(options["--map-interval"])))
+                        map_interval=int(float(options["--map-interval"])),
+                        tuning=knobs, map_make=make)
+
+    if options["--save-map"] and make:
+        from worldgen import mapforge
+        wmap = mapforge.forge(make["seed"], size=make["size"])
+        mapforge.save(wmap, options["--save-map"])
+        print("Карта записана в %s" % options["--save-map"])
 
     def progress(part, note):
         sys.stdout.write("\r  %3d%%  %-42s" % (int(part * 100), note))
@@ -112,8 +149,25 @@ def run_gui() -> int:
     return 0
 
 
+def show_knobs() -> int:
+    """Список всех шкал настроек — чтобы было что писать в --tune."""
+    from worldgen import tuning
+    for group, knobs in tuning.groups():
+        print()
+        print(group.upper())
+        for knob in knobs:
+            print("  %-18s %s" % (knob.key, knob.name))
+            print("  %-18s   %s" % ("", knob.hint))
+    print()
+    print("Шкала от 0 до 100, 50 — как задумано. Пример:")
+    print("  python main.py --cli --tune war_rate=15,calamity_rate=85")
+    return 0
+
+
 def main() -> int:
     argv = sys.argv[1:]
+    if "--tune-list" in argv:
+        return show_knobs()
     if "--cli" in argv or "--help" in argv or "-h" in argv:
         if "--help" in argv or "-h" in argv:
             print(__doc__)

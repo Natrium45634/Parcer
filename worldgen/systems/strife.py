@@ -540,6 +540,12 @@ def _rebel_wins(ctx, strife, polity, rebel, year: int, date, rng) -> None:
     if rebel is None:
         return
     reign = world.current_reign(polity)
+    # Новое правление не может начаться раньше того, которое оно
+    # сменяет: если нынешний государь сел на престол в этом же году,
+    # день смены отсчитываем от его воцарения.
+    if reign is not None and reign.start.year == year \
+            and date.ordinal < reign.start.ordinal:
+        date = ctx.date_in(rng, year, reign.start)
     old_ruler = world.figures.get(polity.ruler_id)
     old_house = world.houses.get(polity.house_id)
     succession.close_reign(ctx, reign, date, "смута")

@@ -355,7 +355,11 @@ def _strike(ctx, cabal, polity, year: int, rng) -> None:
     if leader is None or ruler is None:
         return
     reign = world.current_reign(polity)
-    date = ctx.date_in(rng, year, reign.start if reign is not None else None)
+    # Удар не может лечь в летопись раньше, чем началось правление, по
+    # которому бьют.
+    date = ctx.date_in(rng, year,
+                       reign.start if reign is not None
+                       and reign.start.year == year else None)
     span = year - cabal.born
 
     edge = 0.35 + 0.08 * len(cabal.members) + 0.25 * cabal.secrecy

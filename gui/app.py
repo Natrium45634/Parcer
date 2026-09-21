@@ -4,21 +4,37 @@
 from __future__ import annotations
 
 import os
+import sys
 import queue
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
+from gui.wizard import Wizard
 from worldgen import chronicle, storage
-from worldgen.engine import GenerationCancelled, Settings, generate
+from worldgen.engine import GenerationCancelled, generate
 from worldgen.models import ACTIVE
 from worldgen.races import RACES, RACES_BY_ID, get_race
-from worldgen.rng import normalize_seed, random_seed_text
 from worldgen.timeline import years_text
 
 APP_TITLE = "Хронист — генератор фэнтезийных историй"
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _root_dir() -> str:
+    """Где лежат значки и карты.
+
+    Собранная программа распаковывает их во временную папку, и путь к ней
+    лежит в sys._MEIPASS; при запуске из исходников это просто папка
+    проекта.
+    """
+    packed = getattr(sys, "_MEIPASS", "")
+    if packed:
+        return packed
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+ROOT_DIR = _root_dir()
 ASSETS_DIR = os.path.join(ROOT_DIR, "assets")
 
 DENSITY_CHOICES = (
@@ -76,10 +92,14 @@ class ChronicleApp(tk.Tk):
         self._set_icon()
         self._setup_style()
         self._build_menu()
-        self._build_settings()
+        self._build_topbar()
+        self.body = ttk.Frame(self)
+        self.body.pack(fill="both", expand=True)
+        self._build_wizard()
         self._build_tabs()
         self._build_status()
         self._show_welcome()
+        self.show_wizard()
 
     # ------------------------------------------------------------------
     # Оформление
@@ -169,70 +189,48 @@ class ChronicleApp(tk.Tk):
     # Панель настроек
     # ------------------------------------------------------------------
 
-    def _build_settings(self) -> None:
-        panel = ttk.Frame(self, style="Panel.TFrame", padding=10)
-        panel.pack(fill="x", side="top")
+    def _build_topbar(self) -> None:
+        """Верхняя строка: куда идти и как вернуться."""
+        bar = ttk.Frame(self, style="Panel.TFrame", padding=8)
+        bar.pack(fill="x", side="top")
+        ttk.Label(bar, text="ХРОНИСТ", style="Head.TLabel").pack(side="left")
+        self.where_var = tk.StringVar(value="создание мира")
+        ttk.Label(bar, textvariable=self.where_var,
+                  style="Panel.TLabel").pack(side="left", padx=12)
+        ttk.Button(bar, text="Новый мир",
+                   command=self.show_wizard).pack(side="right")
+        self.to_chronicle = ttk.Button(bar, text="К летописи",
+                                       command=self.show_viewer)
+        self.to_chronicle.pack(side="right", padx=6)
+        self.to_chronicle.config(state="disabled")
 
-        ttk.Label(panel, text="Настройки мира", style="Head.TLabel").grid(
-            row=0, column=0, columnspan=8, sticky="w", pady=(0, 8))
+    def _build_wizard(self) -> None:
+        self.wizard = Wizard(self.body, on_start=self.start_generation,
+                             fonts={"ui": self.ui_font, "mono": self.mono})
 
-        self.seed_var = tk.StringVar(value=random_seed_text())
-        self.years_var = tk.StringVar(value="10000")
-        self.regions_var = tk.StringVar(value="18")
-        self.density_var = tk.StringVar(value=DENSITY_CHOICES[1][0])
-        self.map_path = ""
-        self.map_label_var = tk.StringVar(value="нет — земли придумает движок")
+    # ------------------------------------------------------------------
+    # Два вида окна: мастер и летопись
+    # ------------------------------------------------------------------
 
-        ttk.Label(panel, text="Сид:", style="Panel.TLabel").grid(
-            row=1, column=0, sticky="e", padx=(0, 6))
-        seed_entry = ttk.Entry(panel, textvariable=self.seed_var, width=28)
-        seed_entry.grid(row=1, column=1, sticky="w")
-        ttk.Button(panel, text="Случайный", command=self.randomize_seed).grid(
-            row=1, column=2, sticky="w", padx=6)
+    def show_wizard(self) -> None:
+        self.tabs.pack_forget()
+        self.wizard.pack(fill="both", expand=True)
+        self.where_var.set("создание мира")
 
-        ttk.Label(panel, text="Длительность, лет:", style="Panel.TLabel").grid(
-            row=1, column=3, sticky="e", padx=(18, 6))
-        ttk.Spinbox(panel, from_=50, to=100000, increment=500, width=10,
-                    textvariable=self.years_var).grid(row=1, column=4, sticky="w")
-
-        ttk.Label(panel, text="Земель на карте:", style="Panel.TLabel").grid(
-            row=1, column=5, sticky="e", padx=(18, 6))
-        ttk.Spinbox(panel, from_=6, to=60, increment=1, width=6,
-                    textvariable=self.regions_var).grid(row=1, column=6, sticky="w")
-
-        ttk.Label(panel, text="Плотность событий:", style="Panel.TLabel").grid(
-            row=2, column=0, sticky="e", padx=(0, 6), pady=(8, 0))
-        ttk.Combobox(panel, textvariable=self.density_var, state="readonly",
-                     width=38,
-                     values=[name for name, _ in DENSITY_CHOICES]).grid(
-            row=2, column=1, columnspan=2, sticky="w", pady=(8, 0))
-
-        ttk.Label(panel, text="Карта мира:", style="Panel.TLabel").grid(
-            row=3, column=0, sticky="e", padx=(0, 6), pady=(8, 0))
-        ttk.Label(panel, textvariable=self.map_label_var, style="Panel.TLabel",
-                  width=44, anchor="w").grid(
-            row=3, column=1, columnspan=2, sticky="w", pady=(8, 0))
-        ttk.Button(panel, text="Выбрать .world…", command=self.choose_map).grid(
-            row=3, column=3, sticky="w", padx=(18, 6), pady=(8, 0))
-        ttk.Button(panel, text="Убрать", command=self.clear_map).grid(
-            row=3, column=4, sticky="w", pady=(8, 0))
-
-        self.go_button = ttk.Button(panel, text="Сгенерировать мир",
-                                    style="Go.TButton", command=self.start_generation)
-        self.go_button.grid(row=2, column=4, columnspan=3, sticky="w",
-                            padx=(18, 0), pady=(8, 0))
-
-        self.progress = ttk.Progressbar(panel, mode="determinate", maximum=1000)
-        self.progress.grid(row=4, column=0, columnspan=8, sticky="we", pady=(10, 0))
-        panel.columnconfigure(7, weight=1)
+    def show_viewer(self) -> None:
+        if self.world is None:
+            return
+        self.wizard.pack_forget()
+        self.tabs.pack(fill="both", expand=True, padx=8, pady=8)
+        self.where_var.set("летопись мира «%s»" % self.world.seed_text)
+        self.to_chronicle.config(state="normal")
 
     # ------------------------------------------------------------------
     # Вкладки
     # ------------------------------------------------------------------
 
     def _build_tabs(self) -> None:
-        self.tabs = ttk.Notebook(self)
-        self.tabs.pack(fill="both", expand=True, padx=8, pady=8)
+        self.tabs = ttk.Notebook(self.body)
         # Таблицы заполняются лениво: на десять тысяч лет истории их строки
         # считаются десятками тысяч, и заполнять всё сразу — значит заставить
         # человека ждать впустую.
@@ -458,46 +456,17 @@ class ChronicleApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def randomize_seed(self) -> None:
-        self.seed_var.set(random_seed_text())
-
-    def _read_settings(self) -> Settings:
-        try:
-            years = int(float(self.years_var.get()))
-        except ValueError:
-            years = 10000
-        try:
-            regions = int(float(self.regions_var.get()))
-        except ValueError:
-            regions = 18
-        density = dict(DENSITY_CHOICES).get(self.density_var.get(), 1.0)
-        # Код сида приводится к единому виду прямо в поле: человек видит,
-        # под каким именем мир уйдёт в летопись.
-        seed = normalize_seed(self.seed_var.get()) or random_seed_text()
-        self.seed_var.set(seed)
-        return Settings(seed=seed, years=years, regions=regions, density=density,
-                        map_path=self.map_path)
+        self.wizard.roll_seed()
 
     def choose_map(self) -> None:
-        """Выбирает файл .world — карту из TECTONIC WORLDFORGE."""
-        path = filedialog.askopenfilename(
-            title="Карта мира",
-            filetypes=[("Карта мира", "*.world"), ("Все файлы", "*.*")])
-        if not path:
-            return
-        try:
-            from worldgen import worldmap
-            wmap = worldmap.load(path)
-        except Exception as error:
-            messagebox.showerror("Карта не читается", str(error))
-            return
-        self.map_path = path
-        self.map_label_var.set(_fit(
-            "%s — %d×%d гексов, сид «%s»" % (
-                os.path.basename(path), wmap.width, wmap.height, wmap.seed_text)))
+        """Выбор файла .world — теперь это шаг мастера."""
+        self.show_wizard()
+        self.wizard.choose_map()
 
     def clear_map(self) -> None:
-        self.map_path = ""
-        self.map_label_var.set("нет — земли придумает движок")
+        self.show_wizard()
+        self.wizard.map_mode.set("без карты")
+        self.wizard._map_mode_changed()
 
     def export_chronicle_map(self) -> None:
         """Пишет chronicle.json — политическую карту по годам."""
@@ -528,16 +497,14 @@ class ChronicleApp(tk.Tk):
             % (os.path.basename(path), len(section["frames"]),
                len(section["realmColors"]), len(section["cities"])))
 
-    def start_generation(self) -> None:
+    def start_generation(self, settings=None) -> None:
         if self.worker is not None and self.worker.is_alive():
             return
-        settings = self._read_settings().normalized()
-        self.seed_var.set(settings.seed)
-        self.years_var.set(str(settings.years))
-        self.regions_var.set(str(settings.regions))
-        self.go_button.config(state="disabled")
+        settings = (settings or self.wizard.settings()).normalized()
+        self.wizard.seed_var.set(settings.seed)
+        self.wizard.set_busy(True)
         self.status_var.set("Творение мира…")
-        self.progress["value"] = 0
+        self.wizard.set_progress(0.0)
         self.stop_flag = False
 
         def work():
@@ -561,20 +528,21 @@ class ChronicleApp(tk.Tk):
             while True:
                 kind, payload, note = self.progress_queue.get_nowait()
                 if kind == "step":
-                    self.progress["value"] = payload * 1000
+                    self.wizard.set_progress(payload)
                     self.status_var.set("Творение мира: %s" % note)
                 elif kind == "done":
-                    self.progress["value"] = 1000
-                    self.go_button.config(state="normal")
+                    self.wizard.set_progress(1.0)
+                    self.wizard.set_busy(False)
                     self.world = payload
                     self._fill_all()
+                    self.show_viewer()
                     return
                 elif kind == "cancelled":
-                    self.go_button.config(state="normal")
+                    self.wizard.set_busy(False)
                     self.status_var.set("Генерация прервана.")
                     return
                 else:
-                    self.go_button.config(state="normal")
+                    self.wizard.set_busy(False)
                     self.status_var.set("Ошибка генерации.")
                     messagebox.showerror("Ошибка", note)
                     return
@@ -1268,22 +1236,17 @@ class ChronicleApp(tk.Tk):
             messagebox.showerror("Не удалось открыть", str(error))
             return
         settings = self.world.settings or {}
-        self.seed_var.set(self.world.seed_text)
-        self.years_var.set(str(self.world.total_years))
-        self.regions_var.set(str(settings.get("regions", len(self.world.regions))))
+        self.wizard.seed_var.set(self.world.seed_text)
+        self.wizard.years_var.set(str(self.world.total_years))
+        self.wizard.regions_var.set(
+            str(settings.get("regions", len(self.world.regions))))
         # Карта мира сохраняется ссылкой на файл: он мог и переехать.
         source = self.world.map_source or ""
         if source and os.path.exists(source):
-            self.map_path = source
-            self.map_label_var.set(_fit(
-                "%s — карта этого мира" % os.path.basename(source)))
-        elif source:
-            self.map_path = ""
-            self.map_label_var.set(_fit(
-                "%s — файл не найден" % os.path.basename(source)))
-        else:
-            self.clear_map()
+            self.wizard.map_path = source
+            self.wizard.map_mode.set("файл")
         self._fill_all()
+        self.show_viewer()
 
     def export_text(self) -> None:
         if self.world is None:
