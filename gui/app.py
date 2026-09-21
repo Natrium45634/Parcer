@@ -11,6 +11,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
+from gui.sidetabs import SideTabs
 from gui.wizard import Wizard
 from worldgen import chronicle, storage
 from worldgen.engine import GenerationCancelled, generate
@@ -230,7 +231,7 @@ class ChronicleApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def _build_tabs(self) -> None:
-        self.tabs = ttk.Notebook(self.body)
+        self.tabs = SideTabs(self.body)
         # Таблицы заполняются лениво: на десять тысяч лет истории их строки
         # считаются десятками тысяч, и заполнять всё сразу — значит заставить
         # человека ждать впустую.

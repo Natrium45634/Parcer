@@ -2073,7 +2073,14 @@ def render_strifes(world) -> str:
         outcomes[item.outcome or "идёт"] = outcomes.get(item.outcome or "идёт",
                                                         0) + 1
     dead = sum(item.deaths for item in items)
-    longest = max(items, key=lambda item: item.years)
+
+    def span(item) -> int:
+        """Сколько смута длится: незаконченная считается по концу мира."""
+        if item.years:
+            return item.years
+        return max(1, world.total_years - item.start.year)
+
+    longest = max(items, key=span)
     rows.append("  Смут: %d; всего в них полегло %s."
                 % (len(items), lives_text(dead)))
     rows.append("  Из-за чего: %s."
@@ -2084,7 +2091,7 @@ def render_strifes(world) -> str:
                             sorted(outcomes.items(), key=lambda p: -p[1])))
     rows.append("  Самая долгая: %s (%d год, %s)."
                 % (longest.name, longest.start.year,
-                   years_text(longest.years)))
+                   years_text(span(longest))))
     rows.append("")
 
     for item in items[-12:]:
@@ -2092,8 +2099,10 @@ def render_strifes(world) -> str:
         rebel = world.figures.get(item.rebel_id)
         rows.append("  %5d  %-30s %s" % (item.start.year, item.name,
                                          polity.name if polity else "?"))
-        rows.append("         причина: %s; длилась %s; исход: %s"
-                    % (item.cause, years_text(item.years),
+        rows.append("         причина: %s; %s; исход: %s"
+                    % (item.cause,
+                       ("длилась %s" % years_text(item.years)) if item.outcome
+                       else ("идёт уже %s" % years_text(span(item))),
                        item.outcome or "ещё идёт"))
         if rebel is not None:
             rows.append("         знамя поднял: %s" % rebel.name)
@@ -2140,23 +2149,22 @@ def render_cabals(world) -> str:
         rows.append("  Самое долгое дело зрело %s." % years_text(span))
     rows.append("")
 
-    told = [item for item in items
-            if item.outcome in ("удалось", "раскрыт", "сорвалось",
-                                "сбылось само")]
-    for item in told[-10:]:
+    # Рассказываем и о тех делах, что ничем не кончились: заговор, который
+    # зреет третье десятилетие, — такая же часть истории, как удавшийся.
+    for item in items[-10:]:
         polity = world.polities.get(item.polity_id)
         leader = world.figures.get(item.leader_id)
         target = world.figures.get(item.target_id)
         rows.append("  %5d  %-26s ради: %-14s исход: %s"
                     % (item.born, polity.name if polity else "?", item.aim,
-                       item.outcome))
+                       item.outcome or "ещё зреет, дошёл до «%s»" % item.stage))
         if leader is not None:
             rows.append("         вёл: %s" % leader.name)
         if target is not None:
             rows.append("         против: %s" % target.name)
         rows.append("         участников: %d; зрело %s"
                     % (len(item.members),
-                       years_text(max(0, (item.ended or item.born)
+                       years_text(max(1, (item.ended or world.total_years)
                                       - item.born))))
         for note in item.notes[:2]:
             rows.append("         %s" % note)
