@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from . import memory as memory_sys
 from . import houses as houses_mod
 from .. import dynasty
 from .. import laws as laws_mod
@@ -62,10 +63,27 @@ def _check_throne(ctx, polity, year: int) -> None:
                                             ruler.death_cause,
                                             verdict=_verdict_text(rng, reign),
                                             byname=ruler.posthumous)
+            # Смерть государя на войне или от яда — не сама по себе:
+            # у неё есть событие-причина, и летопись о нём помнит.
+            roots = []
+            cause_text = ruler.death_cause or ""
+            if "битв" in cause_text or "войн" in cause_text:
+                # Нужна та война, которая шла в день его смерти, а не
+                # первая попавшаяся в списке.
+                for war in world.wars_of(polity):
+                    if war.start.ordinal > death_date.ordinal:
+                        continue
+                    if war.end is not None \
+                            and war.end.ordinal < death_date.ordinal:
+                        continue
+                    if war.origin_id:
+                        roots.append(war.origin_id)
+                    break
             world.add_event(
                 date=death_date, era_index=world.era_index_at(year),
                 kind="ruler_death", title=title, text=text, importance=2,
                 actors=[ruler.id], subjects=[polity.id], race_id=polity.race_id,
+                causes=roots,
             )
 
     after = ruler.death if (ruler is not None and ruler.death is not None) else None
@@ -209,6 +227,10 @@ def _succeed(ctx, polity, year: int, after: Date, rng) -> None:
     enthrone(ctx, polity, choice.figure, date, year, choice,
              legitimacy="избрание" if choice.law == races_mod.ELECTIVE else "законное",
              old_house=old_house, rng=rng)
+    # Престол достался одному, а желающих было несколько: обойдённые
+    # запоминают это, и через годы память возвращается заговором.
+    memory_sys.rivals_passed(ctx, polity, choice.figure, race, year,
+                             law=choice.law or law)
 
 
 UNION_KEEP = 0.55           # с какой охотой уния переживает смену государя
@@ -596,6 +618,10 @@ def _make_spouse(ctx, figure, race, marriage_year: int, rng):
     if spouse.death.year <= marriage_year:
         world.schedule_death(spouse, Date.random_in_year(
             rng, marriage_year + rng.randint(1, max(2, lifespan_mid // 3))))
+    # Брак — это ещё и связь между двумя людьми: где любовь, где расчёт,
+    # но в обоих случаях она потом отзовётся в политике.
+    memory_sys.wedded(ctx, figure, spouse, marriage_year,
+                      love=rng.chance(0.45))
     return spouse
 
 

@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from .. import history
 from .. import nations as pol
 from .. import narrative
 from .. import narrative_nations as texts
@@ -410,7 +411,6 @@ def _maybe_shift_titular(ctx, polity, rng, year: int, minorities) -> bool:
 
 def _maybe_revolt(ctx, polity, rng, year: int, minorities) -> None:
     """Накопленная обида поднимает народ."""
-    world = ctx.world
     pairs = []
     for race_id, souls in minorities:
         share = polity.share_of(race_id)
@@ -423,17 +423,42 @@ def _maybe_revolt(ctx, polity, rng, year: int, minorities) -> None:
     race_id, share, anger = rng.weighted(pairs)
     if not rng.chance(min(0.6, anger * share * REVOLT_RATE)):
         return
+    _revolt(ctx, polity, race_id, share, anger, rng, year)
 
+
+def stir_revolt(ctx, polity, race_id: str, year: int, note: str = "",
+                seed=None):
+    """Старая обида вскипает: город вспоминает, чей он был раньше.
+
+    Сюда приходит отложенное последствие — взятый когда-то силой город.
+    Восстание поднимается тем же порядком, что и всякое другое: если
+    народа в державе уже не осталось, вспоминать некому.
+    """
+    if polity.peoples.get(race_id, 0) <= 0:
+        return "угасло"
+    share = polity.share_of(race_id)
+    anger = min(1.0, polity.grievance.get(race_id, 0.0) + 0.22)
+    polity.grievance[race_id] = anger
+    if share < pol.REVOLT_SHARE * 0.6:
+        return None             # народа слишком мало: обида остаётся обидой
+    rng = ctx.rng("nations", "stir", polity.id, race_id, year)
+    return _revolt(ctx, polity, race_id, share, anger, rng, year, seed=seed)
+
+
+def _revolt(ctx, polity, race_id: str, share: float, anger: float, rng,
+            year: int, seed=None):
+    """Само восстание: кто поднял, чем кончилось, что после этого стало."""
+    world = ctx.world
     race = races_mod.RACES_BY_ID.get(race_id)
     if race is None:
-        return
+        return None
     cities = [world.settlements[sid] for sid in polity.settlement_ids
               if sid in world.settlements
               and world.settlements[sid].status == ACTIVE
               and world.settlements[sid].race_id == race_id]
     if not cities:
         polity.grievance[race_id] = 0.0
-        return
+        return "угасло"
 
     # Восстание не может случиться раньше, чем началось нынешнее правление:
     # иначе новое правление открывается задом наперёд.
@@ -477,12 +502,27 @@ def _maybe_revolt(ctx, polity, rng, year: int, minorities) -> None:
     title, text = texts.revolt(rng, polity, race, leader, region, outcome,
                                new_polity)
     subjects = [polity.id] + ([new_polity.id] if new_polity is not None else [])
-    world.add_event(
+    roots, facts = [], []
+    if seed is not None:
+        if seed.event_id:
+            roots.append(seed.event_id)
+        if seed.fact_id:
+            facts.append(seed.fact_id)
+    importance = 5 if outcome == "takeover" else 4
+    event = world.add_event(
         date=date, era_index=world.era_index_at(year), kind="revolt",
         title=title, text=text,
-        importance=5 if outcome == "takeover" else 4,
+        importance=importance,
         actors=[leader.id], subjects=subjects,
-        region_id=cities[0].region_id, race_id=race_id)
+        region_id=cities[0].region_id, race_id=race_id,
+        causes=roots, facts=facts, trace=history.trace_of(importance))
+    # Подавленный бунт помнят обе стороны: победители — как урок,
+    # побеждённые — как счёт, который ещё не закрыт.
+    if outcome == "crushed":
+        history.leave(world, history.GRUDGE, year, polity.id,
+                      about_id=race_id, weight=0.5,
+                      note="подавленный бунт", event_id=event.id)
+    return event
 
 
 def _break_away(ctx, polity, race, leader, cities, date, year, rng):

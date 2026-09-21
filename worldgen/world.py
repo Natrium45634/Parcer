@@ -11,22 +11,37 @@ from __future__ import annotations
 import heapq
 
 from . import artifacts as artifacts_mod
+from . import history
 from . import races as races_mod
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
-                     Artifact, Battle, Calamity, Camp, Codex, Company, Deity,
-                     Discovery, Embassy, Event, Expedition, Faith, Feud, Figure,
+                     Artifact, Battle, Bond, Calamity, Camp, Codex, Company,
+                     Deity,
+                     Discovery, Embassy, Event, Expedition, Fact, Faith, Feud,
+                     Figure,
                      Folk, Fortress,
-                     Guild, House, Law, League, Legend, Monster, Pact, Plot,
+                     Guild, House, Law, League, Legend, Memory, Migration,
+                     Monster, Pact,
+                     Plot,
                      Polity,
                      Region,
                      Reign,
-                     Relic, Settlement, Site, Temple, Tongue, TradeRoute, Tribe,
+                     Relic, Seed, Settlement, Site, Temple, Tongue, TradeRoute,
+                     Tribe,
                      Union, War)
 
 # Поселение в летописи — это город и кормящая его округа. Чтобы потери от
 # бедствий считались в людях, а не в условных единицах, население страны
 # считается с этим множителем.
 RURAL_FACTOR = 5.5
+
+# Насколько тяжела именная обида и как она называется в летописи.
+GRUDGE_WEIGHT = {"poison": 0.85, "envoy": 0.8, "spy": 0.45, "claim": 0.5,
+                 "oath": 0.7, "murder": 0.9, "insult": 0.4}
+GRUDGE_NOTE = {"poison": "яд, поднесённый при дворе",
+               "envoy": "кровь посла", "spy": "пойманный соглядатай",
+               "claim": "подложная грамота на престол",
+               "oath": "нарушенная клятва", "murder": "кровь без ответа",
+               "insult": "оскорбление"}
 from .timeline import Date
 
 
@@ -105,6 +120,21 @@ class World:
         self.active_companies = []
         self.leagues = {}
         self.active_leagues = []
+        # --- причинность (блок 15) ---
+        # След каждого крупного события и зёрна будущих событий. По ним
+        # летопись умеет отвечать на вопрос «почему так вышло».
+        self.facts = {}                # id -> Fact
+        self.seeds = {}                # id -> Seed
+        self.open_facts = []           # живые следы
+        self.waiting_seeds = []        # зёрна, ждущие своего года
+        self._facts_by_holder = {}     # кто помнит -> [id следов]
+        # --- память людей и связи между ними (блок 16) ---
+        self.memories = {}             # id -> Memory
+        self.bonds = {}                # id -> Bond
+        self._memory_of = {}           # личность -> [id воспоминаний]
+        self._bonds_of = {}            # личность -> [id связей]
+        self.migrations = {}           # id -> Migration (переселения народов)
+        self._events_by_id = {}        # id -> Event (для дерева причин)
         self.notes = {}                # свободные заметки для будущих блоков
         # Перепись мира раз в несколько лет: по ней видно, как мир рос,
         # когда он проваливался и какой век стоил ему дороже всего.
@@ -392,6 +422,11 @@ class World:
         if not other_id or polity is None:
             return
         polity.grudges.setdefault(other_id, {})[key] = int(year)
+        # Та же обида ложится и в общий счёт держав: оттуда её читают
+        # отношения, выбор жертвы и отложенные последствия.
+        history.leave(self, history.GRUDGE, year, polity.id, other_id,
+                      weight=GRUDGE_WEIGHT.get(key, 0.5),
+                      note=GRUDGE_NOTE.get(key, key))
 
     # --- вещи и места ----------------------------------------------------
 
@@ -742,19 +777,211 @@ class World:
 
     def add_event(self, date: Date, era_index: int, kind: str, title: str,
                   text: str, importance: int = 2, actors=None, subjects=None,
-                  region_id: str = "", race_id: str = "") -> Event:
+                  region_id: str = "", race_id: str = "",
+                  causes=None, facts=None, motives=None,
+                  trace: float = 0.0) -> Event:
+        # Причина не может случиться позже следствия. Внутри одного года
+        # дни выпадают случайно, и ссылка на «причину», датированную
+        # позднее, — не связь, а ошибка; такие отбрасываем молча.
+        roots = []
+        for event_id in (causes or ()):
+            if not event_id:
+                continue
+            earlier = self._events_by_id.get(event_id)
+            if earlier is not None and earlier.date.ordinal > date.ordinal:
+                continue
+            roots.append(event_id)
         event = Event(
             id=self.next_id("V"), date=date, era_index=era_index, kind=kind,
             title=title, text=text, importance=importance,
             actors=list(actors or ()), subjects=list(subjects or ()),
             region_id=region_id, race_id=race_id,
+            causes=roots,
+            facts=[item for item in (facts or ()) if item],
+            motives=dict(motives or {}),
+            trace=float(trace),
         )
         self.events.append(event)
+        self._events_by_id[event.id] = event
         for actor_id in event.actors:
             figure = self.figures.get(actor_id)
             if figure is not None:
                 figure.deeds.append(event.id)
+        # Раз повод пригодился — отмечаем, что след сработал: по этим
+        # отметкам видно, какие следы двигали историю, а какие пролежали зря.
+        for fact_id in event.facts:
+            fact = self.facts.get(fact_id)
+            if fact is not None:
+                fact.uses += 1
+                fact.last_use = date.year
         return event
+
+    def event(self, event_id: str):
+        """Событие по номеру — без перебора всей летописи."""
+        found = self._events_by_id.get(event_id)
+        if found is not None:
+            return found
+        for item in self.events:          # мир, поднятый из файла
+            self._events_by_id[item.id] = item
+        return self._events_by_id.get(event_id)
+
+    # ------------------------------------------------------------------
+    # Следы событий и отложенные последствия (блок 15)
+    # ------------------------------------------------------------------
+
+    def add_fact(self, kind: str, year: int, **kwargs) -> Fact:
+        fact = Fact(id=self.next_id("FA"), kind=kind, year=int(year), **kwargs)
+        self.facts[fact.id] = fact
+        self.open_facts.append(fact)
+        self._facts_by_holder.setdefault(fact.holder_id, []).append(fact.id)
+        event = self._events_by_id.get(fact.event_id)
+        if event is not None and fact.id not in event.marks:
+            event.marks.append(fact.id)
+        return fact
+
+    def close_fact(self, fact, year: int, reason: str = "") -> None:
+        if fact is None or fact.closed:
+            return
+        fact.closed = int(year)
+        fact.close_reason = reason
+        if fact in self.open_facts:
+            self.open_facts.remove(fact)
+
+    def live_facts(self, holder_id: str):
+        """Живые следы держателя без сортировки — для частых подсчётов."""
+        for fact_id in self._facts_by_holder.get(holder_id, ()):
+            fact = self.facts.get(fact_id)
+            if fact is not None and not fact.closed:
+                yield fact
+
+    def facts_of(self, holder_id: str, year: int = 0, kind: str = "",
+                 about_id: str = "", least: float = 0.0) -> list:
+        """Живые следы этого держателя, от сильного к слабому."""
+        rows = []
+        for fact_id in self._facts_by_holder.get(holder_id, ()):
+            fact = self.facts.get(fact_id)
+            if fact is None or fact.closed:
+                continue
+            if kind and fact.kind != kind:
+                continue
+            if about_id and fact.about_id != about_id:
+                continue
+            power = fact.power(year) if year else fact.weight
+            if power <= least:
+                continue
+            rows.append((power, fact))
+        rows.sort(key=lambda pair: (-pair[0], pair[1].id))
+        return [fact for _, fact in rows]
+
+    def fact_power(self, holder_id: str, kind: str, year: int,
+                   about_id: str = "") -> float:
+        """Сколько всего силы в следах одного разбора."""
+        total = 0.0
+        for fact in self.facts_of(holder_id, year, kind, about_id):
+            total += fact.power(year)
+        return total
+
+    def rebuild_fact_index(self) -> None:
+        """После загрузки из файла — восстановить быстрые списки."""
+        self.open_facts = []
+        self._facts_by_holder = {}
+        for fact in self.facts.values():
+            self._facts_by_holder.setdefault(fact.holder_id, []).append(fact.id)
+            if not fact.closed:
+                self.open_facts.append(fact)
+        self.waiting_seeds = [seed for seed in self.seeds.values()
+                              if seed.state == "ждёт"]
+        self._events_by_id = {item.id: item for item in self.events}
+
+    # ------------------------------------------------------------------
+    # Память людей и связи между ними (блок 16)
+    # ------------------------------------------------------------------
+
+    def add_memory(self, figure_id: str, kind: str, year: int, **kwargs) -> Memory:
+        item = Memory(id=self.next_id("ME"), figure_id=figure_id, kind=kind,
+                      year=int(year), **kwargs)
+        self.memories[item.id] = item
+        self._memory_of.setdefault(figure_id, []).append(item.id)
+        return item
+
+    def memories_of(self, figure_id: str, kind: str = "",
+                    about_id: str = "") -> list:
+        rows = []
+        for memory_id in self._memory_of.get(figure_id, ()):
+            memory = self.memories.get(memory_id)
+            if memory is None:
+                continue
+            if kind and memory.kind != kind:
+                continue
+            if about_id and memory.about_id != about_id:
+                continue
+            rows.append(memory)
+        rows.sort(key=lambda item: (-item.weight, item.id))
+        return rows
+
+    def add_bond(self, a_id: str, b_id: str, kind: str, year: int,
+                 **kwargs) -> Bond:
+        bond = Bond(id=self.next_id("BN"), a_id=a_id, b_id=b_id, kind=kind,
+                    since=int(year), changed=int(year), **kwargs)
+        self.bonds[bond.id] = bond
+        self._bonds_of.setdefault(a_id, []).append(bond.id)
+        self._bonds_of.setdefault(b_id, []).append(bond.id)
+        return bond
+
+    def bonds_of(self, figure_id: str, kind: str = "", alive: bool = True) -> list:
+        rows = []
+        for bond_id in self._bonds_of.get(figure_id, ()):
+            bond = self.bonds.get(bond_id)
+            if bond is None:
+                continue
+            if alive and bond.ended:
+                continue
+            if kind and bond.kind != kind:
+                continue
+            rows.append(bond)
+        rows.sort(key=lambda item: (-abs(item.value), item.id))
+        return rows
+
+    def bond_between(self, first_id: str, second_id: str, alive: bool = True):
+        for bond in self.bonds_of(first_id, alive=alive):
+            if bond.other(first_id) == second_id:
+                return bond
+        return None
+
+    def add_migration(self, year: int, race_id: str, **kwargs) -> Migration:
+        item = Migration(id=self.next_id("MG"), year=int(year),
+                         race_id=race_id, **kwargs)
+        self.migrations[item.id] = item
+        return item
+
+    def rebuild_people_index(self) -> None:
+        """После загрузки из файла — восстановить память и связи."""
+        self._memory_of = {}
+        self._bonds_of = {}
+        for memory in self.memories.values():
+            self._memory_of.setdefault(memory.figure_id, []).append(memory.id)
+        for bond in self.bonds.values():
+            self._bonds_of.setdefault(bond.a_id, []).append(bond.id)
+            self._bonds_of.setdefault(bond.b_id, []).append(bond.id)
+
+    def add_seed(self, kind: str, due: int, born: int, **kwargs) -> Seed:
+        seed = Seed(id=self.next_id("SD"), kind=kind, due=int(due),
+                    born=int(born), **kwargs)
+        self.seeds[seed.id] = seed
+        self.waiting_seeds.append(seed)
+        event = self._events_by_id.get(seed.event_id)
+        if event is not None and seed.id not in event.seeds:
+            event.seeds.append(seed.id)
+        return seed
+
+    def settle_seed(self, seed, year: int, state: str, result_id: str = "") -> None:
+        if seed is None or seed.state != "ждёт":
+            return
+        seed.state = state
+        seed.settled = int(year)
+        seed.result_id = result_id
+        if seed in self.waiting_seeds:
+            self.waiting_seeds.remove(seed)
 
     # ------------------------------------------------------------------
     # Смерти по расписанию

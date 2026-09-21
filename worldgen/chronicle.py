@@ -1921,6 +1921,382 @@ def _chain_depth(kids, root) -> int:
     return 1 + max(_chain_depth(kids, child) for child in children)
 
 
+def _trace_owner(world, holder_id: str) -> str:
+    """Чьё это воспоминание: держава, земля, народ или человек."""
+    if not holder_id:
+        return "мир"
+    polity = world.polities.get(holder_id)
+    if polity is not None:
+        return polity.name
+    region = world.regions.get(holder_id)
+    if region is not None:
+        return "земля по имени %s" % region.name
+    settlement = world.settlements.get(holder_id)
+    if settlement is not None:
+        return "город по имени %s" % settlement.name
+    race = races_mod.RACES_BY_ID.get(holder_id)
+    if race is not None:
+        return race.name
+    figure = world.figures.get(holder_id)
+    if figure is not None:
+        return figure.name
+    return holder_id
+
+
+def polity_why(world, polity, year: int = 0) -> list:
+    """Почему эта держава такая: живые следы её прошлого."""
+    year = year or world.total_years
+    rows = []
+    for fact in world.facts_of(polity.id, year)[:8]:
+        about = _trace_owner(world, fact.about_id) if fact.about_id else ""
+        line = "%s (%d год, сила %.2f)" % (fact.kind, fact.year,
+                                           fact.power(year))
+        if about:
+            line += " — %s" % about
+        if fact.note:
+            line += ": %s" % fact.note
+        rows.append(line)
+    if not rows:
+        rows.append("Ничего тяжёлого за этой державой не числится.")
+    return rows
+
+
+def render_causes(world) -> str:
+    """Нити причин: что мир помнит и что из этого выросло.
+
+    Раздел отвечает на вопрос, которого прежде летопись не понимала:
+    почему случилось то, что случилось. Здесь видно и следы — обиды,
+    притязания, зависимости, с которыми живут державы, — и цепи: какое
+    событие выросло из какого и через сколько веков.
+    """
+    from . import history
+
+    year = world.total_years
+    rows = ["НИТИ ПРИЧИН", ""]
+    if not world.facts and not world.seeds:
+        rows.append("  Мир слишком молод: следов, из которых вырастают "
+                    "события, он ещё не накопил.")
+        return "\n".join(rows)
+
+    linked = [event for event in world.events if event.causes or event.facts]
+    sprouted = [item for item in world.seeds.values() if item.state == "сбылось"]
+    waiting = [item for item in world.seeds.values() if item.state == "ждёт"]
+    faded = [item for item in world.seeds.values() if item.state == "угасло"]
+
+    # Городской пожар и открытие ремесла причины иметь не обязаны;
+    # война, мир, бунт, договор и реформа — обязаны.
+    deeds = ("war_start", "war_end", "revolt", "betrayal", "titular_shift",
+             "supply_break", "famine", "reform", "calamity_begins",
+             "unfulfilled")
+    big = [event for event in world.events if event.kind in deeds]
+    big_linked = [event for event in big if event.causes or event.facts]
+    rows.append("  Событий, выросших из прежних: %d из %d; среди державных "
+                "дел — %d из %d (%.0f%%)."
+                % (len(linked), len(world.events),
+                   len(big_linked), len(big),
+                   100.0 * len(big_linked) / max(1, len(big))))
+    rows.append("  Следов оставлено: %d, из них к концу истории живы %d."
+                % (len(world.facts), len(world.open_facts)))
+    rows.append("  Отложенных последствий посеяно: %d — взошло %d, "
+                "угасло %d, ждёт своего часа %d."
+                % (len(world.seeds), len(sprouted), len(faded), len(waiting)))
+    rows.append("")
+
+    # --- чем живут державы ---
+    heavy = sorted(world.open_facts, key=lambda item: (-item.power(year),
+                                                       item.id))[:12]
+    if heavy:
+        rows.append("  Что мир помнит к концу истории")
+        for fact in heavy:
+            about = _trace_owner(world, fact.about_id) if fact.about_id else ""
+            line = "    %-16s %s" % (fact.kind,
+                                     _trace_owner(world, fact.holder_id))
+            if about:
+                line += " — на %s" % about
+            rows.append("%s, с %d года" % (line, fact.year))
+            if fact.note:
+                rows.append("        %s" % fact.note)
+        rows.append("")
+
+    # --- самые длинные нити ---
+    deep = []
+    for event in world.events:
+        if not (event.causes or event.facts):
+            continue
+        depth = history.depth_of(world, event, 6)
+        if depth >= 2:
+            deep.append((depth, event))
+    deep.sort(key=lambda pair: (-pair[0], pair[1].date.ordinal))
+    if deep:
+        rows.append("  Самые длинные нити")
+        for depth, event in deep[:3]:
+            rows.append("    Нить из %d звеньев, %d год:" % (depth + 1,
+                                                             event.date.year))
+            for line in history.tree_text(world, event, depth=6):
+                rows.append("      %s" % line)
+            rows.append("")
+
+    # --- что из чего выросло ---
+    by_kind = {}
+    for item in sprouted:
+        by_kind[item.kind] = by_kind.get(item.kind, 0) + 1
+    if by_kind:
+        rows.append("  Отложенные последствия, которые сбылись")
+        for kind, count in sorted(by_kind.items(), key=lambda pair: -pair[1]):
+            rows.append("    %-14s %d" % (kind, count))
+        rows.append("")
+
+    missed = [event for event in world.events if event.kind == "unfulfilled"]
+    if missed:
+        rows.append("  Несбывшегося записано: %d" % len(missed))
+        for event in missed[-3:]:
+            rows.append("    %d — %s" % (event.date.year, event.title))
+        rows.append("")
+
+    return "\n".join(rows).rstrip()
+
+
+def render_culture(world) -> str:
+    """Ассимиляция: кто в ком растворился и кто остался при своём.
+
+    Завоевание кончается не миром: через три поколения внуки
+    побеждённых говорят на языке победителей — или наоборот, если
+    победителей горстка, а побеждённых земля.
+    """
+    from .models import ACTIVE
+
+    rows = ["РАСТВОРЕНИЕ НАРОДОВ", ""]
+    kinds = {"assimilation": 0, "folk_blend": 0, "tongue_ban": 0,
+             "court_tongue": 0}
+    for event in world.events:
+        if event.kind in kinds:
+            kinds[event.kind] += 1
+    if not any(kinds.values()):
+        rows.append("  Народы этого мира не смешивались: каждый остался "
+                    "при своей речи.")
+        return "\n".join(rows)
+
+    rows.append("  Народов растворилось в чужих: %d." % kinds["assimilation"])
+    rows.append("  Смешанных народов родилось: %d." % kinds["folk_blend"])
+    rows.append("  Дворов, перешедших на речь покорённых: %d."
+                % kinds["court_tongue"])
+    rows.append("  Запретов на чужую речь: %d." % kinds["tongue_ban"])
+    rows.append("")
+
+    mixed = [folk for folk in world.folks.values()
+             if any(note.startswith("вышел из народов") for note in folk.notes)]
+    if mixed:
+        rows.append("  Народы, которых прежде не было")
+        for folk in sorted(mixed, key=lambda item: item.born.year)[:10]:
+            race = races_mod.RACES_BY_ID.get(folk.race_id)
+            rows.append("    %5d  %-28s %s" % (folk.born.year, folk.name,
+                                               race.name if race else ""))
+            for note in folk.notes[:1]:
+                rows.append("           %s" % note)
+        rows.append("")
+
+    # --- где двор говорит не так, как торг ---
+    split = []
+    for polity_id in world.active_polities:
+        polity = world.polities[polity_id]
+        court = world.tongues.get(polity.tongue_id)
+        if court is None:
+            continue
+        counts = {}
+        for settlement_id in polity.settlement_ids:
+            settlement = world.settlements.get(settlement_id)
+            if settlement is None or settlement.status != ACTIVE:
+                continue
+            folk = world.folks.get(settlement.folk_id)
+            if folk is None or not folk.tongue_id:
+                continue
+            counts[folk.tongue_id] = counts.get(folk.tongue_id, 0) \
+                + settlement.population
+        if not counts:
+            continue
+        common = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))[0][0]
+        if common != court.id:
+            other = world.tongues.get(common)
+            split.append((polity, court, other))
+    if split:
+        rows.append("  Державы, где двор говорит не так, как торг")
+        for polity, court, other in split[:8]:
+            rows.append("    %-26s двор: %-24s народ: %s"
+                        % (polity.name, court.name,
+                           other.name if other is not None else "?"))
+        rows.append("")
+
+    banned = []
+    for tongue in world.tongues.values():
+        for note in tongue.notes:
+            if note.startswith("под запретом"):
+                banned.append((tongue, note))
+                break
+    if banned:
+        rows.append("  Языки, побывавшие под запретом")
+        for tongue, note in banned[:8]:
+            rows.append("    %-30s %s" % (tongue.name, note))
+    return "\n".join(rows).rstrip()
+
+
+def render_migrations(world) -> str:
+    """Переселения народов: кто, откуда, почему и как его встретили.
+
+    Переселение — не переезд, а событие с причиной и последствиями:
+    людей сгоняет с места голод, война, мор, холода, теснота или чужой
+    закон, а на новом месте их или принимают, или встречают копьями.
+    """
+    from .narrative_war import lives_text
+
+    rows = ["ПЕРЕСЕЛЕНИЯ НАРОДОВ", ""]
+    if not world.migrations:
+        rows.append("  За всю историю никто не тронулся с места.")
+        return "\n".join(rows)
+
+    moves = sorted(world.migrations.values(), key=lambda item: item.year)
+    souls = sum(item.souls for item in moves)
+    taken = [item for item in moves if item.outcome == "приняли"]
+    by_cause = {}
+    for item in moves:
+        by_cause[item.cause] = by_cause.get(item.cause, 0) + 1
+    rows.append("  Переселений: %d, всего в дороге %s."
+                % (len(moves), lives_text(souls)))
+    rows.append("  Приняли: %d, отказали: %d."
+                % (len(taken), len(moves) - len(taken)))
+    rows.append("  Что гнало с места: %s."
+                % ", ".join("%s — %d" % (cause, count) for cause, count
+                            in sorted(by_cause.items(),
+                                      key=lambda pair: -pair[1])))
+    rows.append("")
+
+    # --- самые большие уходы ---
+    biggest = sorted(moves, key=lambda item: (-item.souls, item.id))[:10]
+    rows.append("  Самые большие уходы")
+    for item in biggest:
+        race = races_mod.RACES_BY_ID.get(item.race_id)
+        home = world.regions.get(item.from_region)
+        target = world.regions.get(item.to_region)
+        host = world.polities.get(item.to_polity)
+        rows.append("    %5d  %-16s %s -> %s, %s, %s"
+                    % (item.year, race.name if race else item.race_id,
+                       home.name if home else "—",
+                       target.name if target else "—",
+                       lives_text(item.souls), item.cause))
+        if host is not None:
+            rows.append("           %s: %s"
+                        % (host.name,
+                           "приняли" if item.outcome == "приняли"
+                           else "отказали"))
+    rows.append("")
+
+    # --- куда переселения изменили состав держав ---
+    mixed = []
+    for polity_id in world.active_polities:
+        polity = world.polities[polity_id]
+        if len(polity.peoples) > 1:
+            mixed.append(polity)
+    if mixed:
+        rows.append("  Многонародных держав к концу истории: %d из %d"
+                    % (len(mixed), len(world.active_polities)))
+    return "\n".join(rows).rstrip()
+
+
+def render_memory(world) -> str:
+    """Память людей и связи между ними.
+
+    История держав складывается из решений, а решения принимают люди,
+    у которых за плечами своя жизнь. Здесь видно, кто что помнит, кто с
+    кем сошёлся и кто с кем разошёлся — и какие войны начались не по
+    расчёту, а по памяти.
+    """
+    rows = ["ПАМЯТЬ И СВЯЗИ", ""]
+    if not world.memories and not world.bonds:
+        rows.append("  Личной памяти в этом мире ещё не накопилось.")
+        return "\n".join(rows)
+
+    by_kind = {}
+    for memory in world.memories.values():
+        by_kind[memory.kind] = by_kind.get(memory.kind, 0) + 1
+    rows.append("  Воспоминаний записано: %d у %d человек."
+                % (len(world.memories), len(world._memory_of)))
+    rows.append("  Из них переиначенных временем: %d."
+                % sum(1 for item in world.memories.values() if item.twisted))
+    order = sorted(by_kind.items(), key=lambda pair: (-pair[1], pair[0]))
+    rows.append("  Чаще всего помнят: %s."
+                % ", ".join("%s (%d)" % (kind, count)
+                            for kind, count in order[:6]))
+
+    bonds_kind = {}
+    for bond in world.bonds.values():
+        bonds_kind[bond.kind] = bonds_kind.get(bond.kind, 0) + 1
+    turned = [bond for bond in world.bonds.values() if bond.turns]
+    rows.append("  Связей между людьми: %d; из них переменились %d."
+                % (len(world.bonds), len(turned)))
+    order = sorted(bonds_kind.items(), key=lambda pair: (-pair[1], pair[0]))
+    rows.append("  Каких больше: %s."
+                % ", ".join("%s (%d)" % (kind, count)
+                            for kind, count in order[:6]))
+    rows.append("")
+
+    # --- те, кому память стоила дороже всего ---
+    heavy = []
+    for figure_id, ids in world._memory_of.items():
+        figure = world.figures.get(figure_id)
+        if figure is None or len(ids) < 3:
+            continue
+        weight = sum(item.weight for item in world.memories_of(figure_id))
+        heavy.append((weight, figure))
+    heavy.sort(key=lambda pair: (-pair[0], pair[1].id))
+    if heavy:
+        rows.append("  Люди с самой тяжёлой памятью")
+        for _, figure in heavy[:4]:
+            rows.append("    %s (%s)" % (figure.name, figure.lifespan_text()))
+            for memory in world.memories_of(figure.id)[:4]:
+                about = _trace_owner(world, memory.about_id) \
+                    if memory.about_id else ""
+                line = "      %d — %s" % (memory.year, memory.kind)
+                if about:
+                    line += ", %s" % about
+                if memory.note:
+                    line += ": %s" % memory.note
+                if memory.twisted:
+                    line += " (память переиначилась)"
+                rows.append(line)
+        rows.append("")
+
+    # --- связи, которые переменились ---
+    if turned:
+        rows.append("  Связи, которые переменились")
+        turned.sort(key=lambda bond: (-len(bond.turns), bond.id))
+        for bond in turned[:6]:
+            first = world.figures.get(bond.a_id)
+            second = world.figures.get(bond.b_id)
+            if first is None or second is None:
+                continue
+            path = " → ".join(item[1] for item in bond.turns) or bond.kind
+            rows.append("    %s и %s: %s (с %d года)"
+                        % (first.plain_name, second.plain_name, path,
+                           bond.since))
+        rows.append("")
+
+    # --- войны, начатые по памяти ---
+    personal = [event for event in world.events
+                if event.kind == "war_start" and event.motives.get("лично")]
+    if personal:
+        rows.append("  Войны, у которых была личная причина: %d"
+                    % len(personal))
+        for event in personal[:5]:
+            rows.append("    %d — %s" % (event.date.year, event.title))
+            rows.append("        гласно: %s"
+                        % event.motives.get("гласно", "—"))
+            if event.motives.get("расчёт"):
+                rows.append("        расчёт: %s" % event.motives["расчёт"])
+            rows.append("        лично: %s" % event.motives["лично"])
+        rows.append("")
+
+    return "\n".join(rows).rstrip()
+
+
 def full_text(world) -> str:
     """Полный экспорт: летопись + справочники."""
     return "\n\n".join((
@@ -1946,6 +2322,10 @@ def full_text(world) -> str:
         render_faiths(world),
         render_calamities(world),
         render_sagas(world),
+        render_causes(world),
+        render_memory(world),
+        render_migrations(world),
+        render_culture(world),
         render_upheavals(world),
         render_monsters(world),
         render_artifacts(world),

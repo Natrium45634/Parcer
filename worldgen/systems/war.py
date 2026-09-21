@@ -33,13 +33,18 @@ from .. import narrative_soldiery as fort_texts
 from .. import narrative_spies as spy_texts
 from .. import diplomacy as dip
 from .. import narrative
+from .. import narrative_causes as cause_texts
 from .. import narrative_diplomacy as dip_texts
 from .. import narrative_war as texts
 from .. import races as races_mod
 from .. import rulers as rulers_mod
 from .. import troops as troops_mod
+from .. import history
+from .. import recall
 from .. import warfare
 from ..models import ACTIVE, MINOR, ONGOING, RUINED
+from . import causes as causes_sys
+from . import memory as memory_sys
 
 WAR_RATE = 0.055            # годовая вероятность, что где-то вспыхнет война
 MIN_WAR_CITIES = 2          # с чем не воюют: слишком мало городов
@@ -230,6 +235,13 @@ def _pick_target(ctx, world, attacker, year: int, rng):
         # Старая вражда тянет сильнее свежего расчёта: к тому, с кем уже
         # воевали деды, возвращаются охотнее, чем ищут нового врага.
         weight *= 1.0 + 0.9 * _feud_weight(world, attacker, other, year)
+        # А личная обида государя тянет сильнее всякой вражды.
+        ruler = world.figures.get(attacker.ruler_id)
+        if ruler is not None:
+            weight *= 1.0 + 1.4 * recall.grievance(world, ruler, other.id, year)
+        # Державе, с которой связаны старые следы, достаётся первой.
+        weight *= 1.0 + 0.5 * min(2.0, history.hostility(world, attacker.id,
+                                                         other.id, year))
         options.append((other, weight))
     if not options:
         return None
@@ -287,10 +299,48 @@ def _war_title(rng, ctx, attacker, defender, cause, year: int) -> str:
     return "%s (%d год)" % (base, year)
 
 
-def _declare(ctx, attacker, defender, year: int, rng) -> None:
+# Какой повод на каком следе стоит.
+CAUSE_TRACES = {
+    "reclaim": (history.CLAIM, history.LOSS),
+    "revenge": (history.GRUDGE, history.SHAME),
+    "yoke": (history.YOKE,),
+    "claim": (history.CLAIM,),
+    "border": (history.CLAIM,),
+    "insult": (history.GRUDGE,),
+    "murder": (history.GRUDGE,),
+    "oath": (history.OATH, history.GRUDGE),
+    "spy": (history.GRUDGE,),
+    "poison": (history.GRUDGE,),
+    "envoy": (history.GRUDGE,),
+    "kin": (history.GRUDGE,),
+    "shrine": (history.SACRILEGE,),
+    "bread": (history.HUNGER,),
+    "tolls": (history.DEPENDENCE,),
+    "mines": (history.DEPENDENCE,),
+    "salt": (history.DEPENDENCE,),
+    "port": (history.DEPENDENCE,),
+}
+
+
+def _declare(ctx, attacker, defender, year: int, rng, forced: str = "",
+             roots=None, facts=None):
+    """Объявление войны. Возвращает запись летописи.
+
+    forced — ключ повода, если войну поднимает старый счёт, а не расчёт
+    нынешнего дня; roots и facts — события и следы, из которых она выросла.
+    """
     world = ctx.world
-    causes = warfare.reasons(ctx, attacker, defender, year)
-    cause = rng.weighted(causes)
+    reasons = warfare.reasons(ctx, attacker, defender, year)
+    cause = None
+    if forced:
+        for item, _ in reasons:
+            if item.key == forced:
+                cause = item
+                break
+        if cause is None:
+            cause = warfare.CAUSES_BY_KEY.get(forced)
+    if cause is None:
+        cause = rng.weighted(reasons)
 
     attacker_race = races_mod.get_race(attacker.race_id)
     defender_race = races_mod.get_race(defender.race_id)
@@ -332,17 +382,92 @@ def _declare(ctx, attacker, defender, year: int, rng) -> None:
     title, text = texts.declare(rng, war, attacker, defender, cause,
                                 attacker_men, defender_men,
                                 leader=leader if leads else None)
+    # У войны редко одна причина: объявленная, расчётливая и личная
+    # сходятся не всегда — и летопись пишет все три.
+    reckoning = warfare.motives(world, attacker, defender, cause, reasons, year)
+    said = cause_texts.motive_line(rng, reckoning)
+    if said:
+        text = "%s %s" % (text, said)
     for side in (joined_attack, joined_defence):
         line = dip_texts.allies_joined(rng, war, "", side)
         if line:
             text = "%s %s" % (text, line)
+    # Повод почти всегда на чём-то стоит: на отнятом городе, на дани,
+    # на крови посла. Если такой след у державы есть — война растёт из него.
+    roots = list(roots or ())
+    facts = list(facts or ())
+    for kind in CAUSE_TRACES.get(cause.key, ()):
+        for fact in world.facts_of(attacker.id, year, kind, defender.id)[:1]:
+            if fact.id not in facts:
+                facts.append(fact.id)
+            if fact.event_id and fact.event_id not in roots:
+                roots.append(fact.event_id)
+
     region_id = attacker.region_ids[0] if attacker.region_ids else ""
-    world.add_event(
+    event = world.add_event(
         date=date, era_index=era_index, kind="war_start", title=title,
         text=text, importance=3 + min(2, scale // 2),
         actors=[leader.id] if leader is not None else [],
         subjects=[war.id, attacker.id, defender.id], region_id=region_id,
-        race_id=attacker.race_id)
+        race_id=attacker.race_id,
+        causes=list(roots or ()), facts=list(facts or ()),
+        motives=reckoning,
+        trace=history.trace_of(3 + min(2, scale // 2)))
+    war.origin_id = event.id
+    return event
+
+
+# ---------------------------------------------------------------------------
+# Война по старому счёту
+# ---------------------------------------------------------------------------
+
+def settle_score(ctx, attacker, defender, year: int, cause_key: str,
+                 seed=None, fact=None):
+    """Войну поднимает не расчёт, а память: обида, притязание, иго.
+
+    Если поднять войско сейчас не выйдет — нет сил, идёт другая война,
+    связаны словом, — счёт остаётся неоплаченным и ждёт лучшего года.
+    """
+    world = ctx.world
+    if not _can_fight(world, attacker, year):
+        return None
+    if not _live_cities(world, defender):
+        return "угасло"
+    if world.war_between(attacker.id, defender.id) is not None:
+        return None
+    if world.pact_between(attacker.id, defender.id) is not None:
+        return None
+    if attacker.league_id and attacker.league_id == defender.league_id:
+        return None
+    if attacker.union_id and attacker.union_id == defender.union_id:
+        return "угасло"
+    if not _reaches(ctx, world, attacker, defender):
+        return None             # до врага попросту не дотянуться
+    edge = (attacker.population + 1.0) / (defender.population + 1.0)
+    edge *= (rulers_mod.war_edge(world, attacker)
+             / max(0.5, rulers_mod.war_edge(world, defender)))
+    if edge < MIN_EDGE * 0.8:
+        return None             # силы не те: счёт подождёт
+    rng = ctx.rng("war", "score", attacker.id, defender.id, year)
+    roots = []
+    facts = []
+    if seed is not None:
+        if seed.event_id:
+            roots.append(seed.event_id)
+        if seed.fact_id:
+            facts.append(seed.fact_id)
+    if fact is not None:
+        if fact.event_id and fact.event_id not in roots:
+            roots.append(fact.event_id)
+        if fact.id not in facts:
+            facts.append(fact.id)
+    return _declare(ctx, attacker, defender, year, rng, forced=cause_key,
+                    roots=roots, facts=facts)
+
+
+def _reaches(ctx, world, attacker, defender) -> bool:
+    return any(other.id == defender.id
+               for other in _reachable(ctx, world, attacker))
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +539,9 @@ def _betray(ctx, war, pact, ally, polity, year: int, rng) -> None:
     date = ctx.date_in(rng, year,
                        pact.signed if pact.signed.year == year else None)
     world.end_pact(pact, date, "клятву не исполнили")
+    causes_sys.after_broken_pact(ctx, ally, polity, year,
+                                 note="на зов о помощи не пришли")
+    memory_sys.betrayed(ctx, polity, ally, year)
     title, text = dip_texts.betrayal(rng, pact, ally, polity, war.name)
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="betrayal",
@@ -756,6 +884,7 @@ def _battle_fates(ctx, war, battle, attacker, defender, a_general, d_general,
     winner_general = a_general if attacker_wins else d_general
     winner = attacker if attacker_wins else defender
 
+    loser = defender if attacker_wins else attacker
     if loser_general is not None:
         risk = 0.30 if big else 0.14
         if rng.chance(risk):
@@ -764,10 +893,15 @@ def _battle_fates(ctx, war, battle, attacker, defender, a_general, d_general,
                 % battle.name)
             battle.fallen_ids.append(loser_general.id)
             war.fallen_ids.append(loser_general.id)
+            # Родня погибшего теперь имеет счёт к чужой державе.
+            memory_sys.fallen(ctx, loser_general, winner.id, year,
+                              note="гибель родича в битве по имени %s"
+                                   % battle.name)
         elif rng.chance(0.18):
             war.captured_ids.append(loser_general.id)
             battle.captured_ids.append(loser_general.id)
             loser_general.notes.append("в плену с %d года" % year)
+            memory_sys.captured(ctx, loser_general, winner.id, year)
             notes.append(texts.capture_text(rng, loser_general))
     if winner_general is not None and rng.chance(0.06):
         world.schedule_death(winner_general, battle.date, narrative.fate(
@@ -775,6 +909,9 @@ def _battle_fates(ctx, war, battle, attacker, defender, a_general, d_general,
             % battle.name)
         battle.fallen_ids.append(winner_general.id)
         war.fallen_ids.append(winner_general.id)
+        memory_sys.fallen(ctx, winner_general, loser.id, year,
+                          note="гибель родича в битве по имени %s"
+                               % battle.name)
 
     # Звезда из простых: решил битву — получил герб.
     if big and rng.chance(ENNOBLE_CHANCE):
@@ -805,6 +942,8 @@ def _ennoble(ctx, polity, year: int, battle, rng):
     houses_mod.found_house(ctx, hero, year, battle.date, seat=seat, rank=MINOR,
                            polity=polity, announce=False, importance=1)
     hero.deeds.append(battle.id)
+    memory_sys.raised(ctx, hero, world.figures.get(polity.ruler_id), year,
+                      note="герб за битву по имени %s" % battle.name)
     return hero
 
 
@@ -1016,6 +1155,27 @@ def _seize_city(ctx, war, winner, loser, settlement, date, year: int,
     for polity in (winner, loser):
         if polity.status == ACTIVE:
             nations_mod.ensure_titular(ctx, polity, year)
+    # Отнятый город — не просто число в казне: с этого дня у него два
+    # хозяина, прежний и нынешний, и оба это помнят.
+    causes_sys.after_seizure(ctx, war, winner, loser, settlement, year, rng)
+    # Знать, чей дом остался в этом городе, помнит день, когда над ним
+    # подняли чужое знамя.
+    homeless = []
+    for house in world.active_houses:
+        item = world.houses.get(house)
+        if item is None or item.seat_id != settlement.id:
+            continue
+        head = world.figures.get(item.head_id)
+        if head is not None and head.alive_at(year):
+            homeless.append(head)
+        if len(homeless) >= 3:
+            break
+    for figure in homeless:
+        memory_sys.remember(ctx, figure, recall.HOME_LOST, year,
+                            about_id=winner.id, weight=0.8,
+                            place_id=settlement.id,
+                            note="город по имени %s взят чужими"
+                                 % settlement.name)
 
 
 # ---------------------------------------------------------------------------
@@ -1172,13 +1332,32 @@ def _finish(ctx, war, year: int, outcome: str, note: str = "") -> None:
                                    defender or attacker, terms_map,
                                    war.deaths, note)
     subjects = [war.id] + [p.id for p in (attacker, defender) if p is not None]
-    world.add_event(
+    event = world.add_event(
         date=date, era_index=world.era_index_at(year), kind="war_end",
         title=title, text=text, importance=3 + min(2, war.scale // 2),
         subjects=subjects,
         region_id=(attacker.region_ids[0] if attacker is not None
                    and attacker.region_ids else ""),
-        race_id=(attacker.race_id if attacker is not None else ""))
+        race_id=(attacker.race_id if attacker is not None else ""),
+        causes=[war.origin_id] if war.origin_id else [],
+        trace=history.trace_of(3 + min(2, war.scale // 2)))
+    winner = loser = None
+    if outcome == warfare.ATTACKER_WON:
+        winner, loser = attacker, defender
+    elif outcome == warfare.DEFENDER_WON:
+        winner, loser = defender, attacker
+    causes_sys.after_war(ctx, war, event, winner, loser, terms_map, year, rng)
+    memory_sys.war_result(ctx, war, winner, loser, year, event.id)
+    # Кто вместе водил войско, тот вместе и вспоминает: одних война
+    # сдружила, других поссорила навсегда.
+    if winner is not None:
+        side = (war.attacker_generals if winner.id == war.attacker_id
+                else war.defender_generals)
+        memory_sys.comrades(ctx, side[:2], year, warm=True)
+    if loser is not None:
+        side = (war.attacker_generals if loser.id == war.attacker_id
+                else war.defender_generals)
+        memory_sys.comrades(ctx, side[:2], year, warm=False)
     _close_feud(ctx, war, year, rng)
 
 

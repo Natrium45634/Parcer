@@ -157,6 +157,7 @@ class Region:
     river: bool = False
     island: bool = False
     drowned: bool = False       # земля ушла под воду и больше не земля
+    drowned_year: int = 0       # в каком году её не стало
     sundered: bool = False      # по ней прошёл разлом, и связи порваны
     elev_m: int = 0
     temp: float = 0.0
@@ -895,6 +896,7 @@ class War:
     defender_id: str
     cause: str                 # ключ повода из warfare.py
     aim: str                   # чего хотел нападающий
+    origin_id: str = ""        # запись летописи, с которой война началась
     end: Date = None
     status: str = ONGOING
     scale: int = 1             # 1 — стычка, 5 — война империй
@@ -1333,6 +1335,165 @@ class Expedition:
         return data
 
 
+# --- причинность (блок 15) -------------------------------------------
+
+
+@dataclass
+class Fact:
+    """След, оставленный событием, — то, из чего вырастает будущее.
+
+    Факт живёт своей жизнью: он слабеет с годами, его можно закрыть
+    (вернуть землю, простить кровь, заполнить нехватку), а пока он жив,
+    подсистемы читают его как готовый повод.
+    """
+
+    id: str
+    kind: str                  # «обида», «притязание», «зависимость» …
+    year: int                  # когда появился
+    holder_id: str = ""        # кто с этим живёт: держава, род, народ, лицо
+    about_id: str = ""         # на кого или на что смотрит
+    place_id: str = ""         # земля или город, если след привязан к месту
+    event_id: str = ""         # событие-родитель
+    parent_id: str = ""        # факт, из которого этот вырос
+    weight: float = 1.0        # сила следа в год появления, 0…1
+    fade: float = 0.25         # сколько силы теряет за век
+    note: str = ""             # человеческая подпись для летописи
+    closed: int = 0            # год, когда след перестал действовать
+    close_reason: str = ""
+    uses: int = 0              # сколько раз стал причиной события
+    last_use: int = 0
+
+    def power(self, year: int) -> float:
+        """Сколько силы в следе к этому году."""
+        if year < self.year:
+            return 0.0
+        if self.closed and year >= self.closed:
+            return 0.0
+        age = (year - self.year) / 100.0
+        return max(0.0, self.weight * (1.0 - self.fade * age))
+
+    @property
+    def alive(self) -> bool:
+        return not self.closed
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class Seed:
+    """Отложенное последствие: событие, которое ещё может случиться.
+
+    Зерно ждёт своего года. Созрело — подсистема решает, сбылось оно или
+    сорвалось; не дождалось — тихо угасает, оставляя малый след.
+    """
+
+    id: str
+    kind: str                  # что может произойти
+    due: int                   # год, раньше которого не прорастёт
+    window: int = 60           # сколько лет ещё держится
+    born: int = 0              # когда посеяно
+    fact_id: str = ""
+    event_id: str = ""         # событие, из которого выросло
+    holder_id: str = ""        # чьё это будущее
+    about_id: str = ""
+    place_id: str = ""
+    chance: float = 0.5        # с какой охотой прорастает в свой год
+    note: str = ""
+    state: str = "ждёт"        # «ждёт» / «сбылось» / «сорвалось» / «угасло»
+    result_id: str = ""        # событие, которым обернулось
+    settled: int = 0           # год развязки
+
+    def ripe(self, year: int) -> bool:
+        return self.state == "ждёт" and self.due <= year <= self.due + self.window
+
+    def stale(self, year: int) -> bool:
+        return self.state == "ждёт" and year > self.due + self.window
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class Migration:
+    """Переселение народа: откуда, почему, куда и как встретили."""
+
+    id: str
+    year: int
+    race_id: str
+    cause: str = ""            # голод, война, мор, холода, теснота, гонения
+    kind: str = ""             # «племя ушло», «исход из города», «не приняли»
+    from_region: str = ""
+    to_region: str = ""
+    from_polity: str = ""
+    to_polity: str = ""
+    folk_id: str = ""
+    souls: int = 0
+    outcome: str = ""          # «приняли» / «отказали»
+    event_id: str = ""
+    note: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class Memory:
+    """Что человек помнит о своей жизни.
+
+    Память — не украшение биографии: государь, чей отец погиб на чужой
+    войне, иначе смотрит на посольство оттуда, чем государь, у которого
+    с той державой связаны только выгодные обозы.
+    """
+
+    id: str
+    figure_id: str
+    kind: str                  # «гибель родича», «предательство», «плен» …
+    year: int
+    tone: str = "скорбь"       # скорбь / гнев / долг / любовь / страх / гордость
+    about_id: str = ""         # человек, держава или народ
+    place_id: str = ""
+    event_id: str = ""
+    weight: float = 1.0        # насколько это въелось, 0…1
+    twisted: bool = False      # память переиначилась со временем
+    told: bool = False         # знают ли об этом другие
+    note: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class Bond:
+    """Связь между двумя людьми и её история.
+
+    Связь живёт: дружба портится политикой, соперничество перерастает в
+    вражду, спасённый остаётся должен спасителю до конца дней.
+    """
+
+    id: str
+    a_id: str
+    b_id: str
+    kind: str                  # «дружба», «вражда», «наставничество» …
+    value: float = 0.0         # −1 (ненависть) … 1 (любовь и верность)
+    since: int = 0
+    changed: int = 0
+    note: str = ""
+    turns: list = field(default_factory=list)   # [[год, вид]] — как менялась
+    ended: int = 0
+    end_reason: str = ""
+
+    @property
+    def alive(self) -> bool:
+        return not self.ended
+
+    def other(self, figure_id: str) -> str:
+        return self.b_id if figure_id == self.a_id else self.a_id
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
 @dataclass
 class Event:
     """Запись летописи."""
@@ -1348,6 +1509,14 @@ class Event:
     subjects: list = field(default_factory=list)  # id стран, городов и т.д.
     region_id: str = ""
     race_id: str = ""
+
+    # --- причинность (блок 15) ---
+    causes: list = field(default_factory=list)    # события, из которых выросло
+    facts: list = field(default_factory=list)     # следы, ставшие поводом
+    marks: list = field(default_factory=list)     # следы, которые оставило
+    seeds: list = field(default_factory=list)     # отложенные последствия
+    trace: float = 0.0         # сила исторического следа, 0…1
+    motives: dict = field(default_factory=dict)   # гласно / расчёт / лично
 
     def to_dict(self) -> dict:
         data = asdict(self)

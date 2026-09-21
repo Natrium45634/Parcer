@@ -11,13 +11,16 @@ import dataclasses
 import io
 import json
 
-from .models import (ACTIVE, ONGOING, Artifact, Battle, Calamity, Camp,
+from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Calamity, Camp,
                      Codex, Company, Deity, Discovery,
-                     Embassy, EraSpan, Legend, Event, Expedition, Faith, Feud, Figure,
-                     Folk, Fortress, Guild, House, Law, League, Monster, Pact,
+                     Embassy, EraSpan, Legend, Event, Expedition, Fact, Faith,
+                     Feud, Figure,
+                     Folk, Fortress, Guild, House, Law, League, Memory,
+                     Migration, Monster, Pact,
                      Plot,
                      Polity,
-                     Region, Reign, Relic, Settlement, Site, Temple, Tongue,
+                     Region, Reign, Relic, Seed, Settlement, Site, Temple,
+                     Tongue,
                      TradeRoute, Tribe, Union, War)
 from .timeline import Date
 from .world import World
@@ -69,7 +72,10 @@ def _clean(cls, data: dict) -> dict:
     for key, value in data.items():
         if key not in known:
             continue
-        if key in _DATE_FIELDS:
+        # Одно и то же имя поля у разных сущностей может значить дату
+        # («сделан» у вещи) и год числом («посеяно» у зерна). Превращаем
+        # в дату только то, что записано как дата.
+        if key in _DATE_FIELDS and isinstance(value, dict):
             value = Date.from_dict(value)
         result[key] = value
     return result
@@ -144,6 +150,13 @@ def world_to_dict(world: World) -> dict:
         "temples": [_compact(Temple, item.to_dict())
                     for item in world.temples.values()],
         "events": [_compact(Event, item.to_dict()) for item in world.events],
+        "facts": [_compact(Fact, item.to_dict()) for item in world.facts.values()],
+        "memories": [_compact(Memory, item.to_dict())
+                     for item in world.memories.values()],
+        "bonds": [_compact(Bond, item.to_dict()) for item in world.bonds.values()],
+        "migrations": [_compact(Migration, item.to_dict())
+                       for item in world.migrations.values()],
+        "seeds": [_compact(Seed, item.to_dict()) for item in world.seeds.values()],
         "race_awakening": world.race_awakening,
         "counters": world._counters,
         "notes": world.notes,
@@ -312,6 +325,25 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("events", ()):
         world.events.append(Event(**_clean(Event, item)))
 
+    # Следы событий и отложенные последствия. В старых сохранениях их нет —
+    # мир просто поднимается без памяти о причинах, ничего не ломая.
+    for item in data.get("facts", ()):
+        fact = Fact(**_clean(Fact, item))
+        world.facts[fact.id] = fact
+    for item in data.get("seeds", ()):
+        seed = Seed(**_clean(Seed, item))
+        world.seeds[seed.id] = seed
+    for item in data.get("memories", ()):
+        memory = Memory(**_clean(Memory, item))
+        world.memories[memory.id] = memory
+    for item in data.get("bonds", ()):
+        bond = Bond(**_clean(Bond, item))
+        world.bonds[bond.id] = bond
+    for item in data.get("migrations", ()):
+        moving = Migration(**_clean(Migration, item))
+        world.migrations[moving.id] = moving
+    world.rebuild_fact_index()
+    world.rebuild_people_index()
     world.race_awakening = dict(data.get("race_awakening") or {})
     world._counters = dict(data.get("counters") or {})
     world.notes = dict(data.get("notes") or {})

@@ -154,10 +154,20 @@ WAR_TOLL_LINES = (
 
 
 def numbered(title: str, index: int) -> str:
-    """«Война за межу» + 2 → «Вторая война за межу»."""
+    """«Война за межу» + 2 → «Вторая война за межу».
+
+    Если название уже начинается с числительного («Вторая война за
+    Дальний Берег»), старое числительное заменяется новым: «Вторая
+    вторая война» — не то, что пишут в летописях.
+    """
     if index < 2 or index - 2 >= len(WAR_ORDINALS):
         return title
-    head = title[0].lower() + title[1:] if title[:1].isupper() else title
+    head = title
+    for word in WAR_ORDINALS:
+        if head.lower().startswith(word.lower() + " "):
+            head = head[len(word) + 1:]
+            break
+    head = head[0].lower() + head[1:] if head[:1].isupper() else head
     return "%s %s" % (WAR_ORDINALS[index - 2], head)
 
 

@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from . import memory as memory_sys
 from . import diplomacy as dip_system
 from .. import diplomacy as dip
 from .. import espionage as spy
@@ -203,6 +204,9 @@ def _succeed(ctx, record, deed, sender, target, year: int, date, rng,
             world.schedule_death(ruler, date, narrative.fate(
                 ("отравлен", "отравлена"), ruler.sex))
             world.add_grudge(target, sender.id, "poison", year)
+            # Родня отравленного помнит это имя дольше, чем держава.
+            memory_sys.fallen(ctx, ruler, sender.id, year,
+                              note="яд, поднесённый родичу")
     return texts.aftermath(rng, key)
 
 

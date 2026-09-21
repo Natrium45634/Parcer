@@ -36,7 +36,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from worldgen import chronicle, espionage, storage, warfare   # noqa: E402
 from worldgen.engine import Settings, generate                # noqa: E402
 from worldgen.models import ACTIVE                             # noqa: E402
-from worldgen.races import BEASTFOLK, EVIL, get_race          # noqa: E402
+from worldgen.races import BEASTFOLK, EVIL, RACES, get_race   # noqa: E402
+
+RACE_IDS = {race.id for race in RACES}
 
 SEEDS = ("Ясень-7", "Первый мир", "проверка", "1234")
 MAP_SEEDS = ("карта-1", "карта-2")
@@ -739,6 +741,162 @@ def check_calamities(world, seed: str) -> list:
     return problems
 
 
+def check_causes(world, seed: str) -> list:
+    """Причинность: следы, зёрна и цепи событий.
+
+    Проверяем то, что ломается незаметно: след, ссылающийся на событие,
+    которого нет; зерно, взошедшее раньше, чем посеяно; причина, которая
+    случилась позже следствия; цепь причин, замкнутая в кольцо.
+    """
+    from worldgen import history
+
+    problems = []
+    events = {event.id: event for event in world.events}
+
+    for fact in world.facts.values():
+        if fact.event_id and fact.event_id not in events:
+            problems.append("сид «%s»: след «%s» ссылается на несуществующее "
+                            "событие" % (seed, fact.kind))
+            break
+        if fact.closed and fact.closed < fact.year:
+            problems.append("сид «%s»: след «%s» закрыт раньше, чем появился"
+                            % (seed, fact.kind))
+            break
+        if fact.holder_id and not (fact.holder_id in world.polities
+                                   or fact.holder_id in world.regions
+                                   or fact.holder_id in world.settlements
+                                   or fact.holder_id in world.figures
+                                   or fact.holder_id in RACE_IDS):
+            problems.append("сид «%s»: след «%s» принадлежит неизвестно кому"
+                            % (seed, fact.kind))
+            break
+
+    for item in world.seeds.values():
+        if item.due < item.born:
+            problems.append("сид «%s»: зерно «%s» созревает раньше, чем "
+                            "посеяно" % (seed, item.kind))
+            break
+        if item.state == "сбылось" and item.result_id \
+                and item.result_id not in events:
+            problems.append("сид «%s»: зерно «%s» взошло в несуществующее "
+                            "событие" % (seed, item.kind))
+            break
+        if item.settled and item.settled < item.born:
+            problems.append("сид «%s»: зерно «%s» разрешилось раньше, чем "
+                            "посеяно" % (seed, item.kind))
+            break
+        if item.state != "ждёт" and not history.known_seed(item.kind):
+            problems.append("сид «%s»: у зерна «%s» нет обработчика"
+                            % (seed, item.kind))
+            break
+
+    deep = 0
+    for event in world.events:
+        for parent_id in event.causes:
+            parent = events.get(parent_id)
+            if parent is None:
+                problems.append("сид «%s»: событие «%s» ссылается на "
+                                "несуществующую причину" % (seed, event.title))
+                break
+            if parent.date.ordinal > event.date.ordinal:
+                problems.append("сид «%s»: причина события «%s» случилась "
+                                "позже него" % (seed, event.title))
+                break
+        else:
+            deep = max(deep, history.depth_of(world, event, 30))
+            continue
+        break
+    if deep >= 29:
+        problems.append("сид «%s»: цепь причин не кончается — похоже на "
+                        "кольцо" % seed)
+    return problems
+
+
+def check_people_memory(world, seed: str) -> list:
+    """Память людей и связи: не помнит ли кто того, чего не было."""
+    problems = []
+    events = {event.id: event for event in world.events}
+
+    for memory in world.memories.values():
+        figure = world.figures.get(memory.figure_id)
+        if figure is None:
+            problems.append("сид «%s»: воспоминание принадлежит "
+                            "несуществующему человеку" % seed)
+            break
+        if figure.birth is not None and memory.year < figure.birth.year:
+            problems.append("сид «%s»: %s помнит то, что было до его "
+                            "рождения" % (seed, figure.plain_name))
+            break
+        if figure.death is not None and memory.year > figure.death.year:
+            problems.append("сид «%s»: %s помнит то, что случилось после "
+                            "его смерти" % (seed, figure.plain_name))
+            break
+        if memory.event_id and memory.event_id not in events:
+            problems.append("сид «%s»: воспоминание ссылается на событие, "
+                            "которого не было" % seed)
+            break
+        if memory.about_id and not (memory.about_id in world.figures
+                                    or memory.about_id in world.polities
+                                    or memory.about_id in RACE_IDS):
+            problems.append("сид «%s»: воспоминание о том, кого нет" % seed)
+            break
+
+    for bond in world.bonds.values():
+        if bond.a_id not in world.figures or bond.b_id not in world.figures:
+            problems.append("сид «%s»: связь с несуществующим человеком" % seed)
+            break
+        if bond.a_id == bond.b_id:
+            problems.append("сид «%s»: человек связан сам с собой" % seed)
+            break
+        if bond.ended and bond.ended < bond.since:
+            problems.append("сид «%s»: связь оборвалась раньше, чем "
+                            "завязалась" % seed)
+            break
+    return problems
+
+
+def check_migrations(world, seed: str) -> list:
+    """Переселения: не ушли ли люди в никуда и не пришли ли ниоткуда."""
+    problems = []
+    events = {event.id: event for event in world.events}
+    for item in world.migrations.values():
+        if item.from_region and item.from_region not in world.regions:
+            problems.append("сид «%s»: переселение из несуществующей земли"
+                            % seed)
+            break
+        if item.to_region and item.to_region not in world.regions:
+            problems.append("сид «%s»: переселение в несуществующую землю"
+                            % seed)
+            break
+        target = world.regions.get(item.to_region)
+        # Земля могла утонуть и после того, как в неё пришли: беда
+        # переселению не помеха, если она случилась позже.
+        if target is not None and target.drowned \
+                and target.drowned_year and item.year > target.drowned_year:
+            problems.append("сид «%s»: переселение в землю, ушедшую под воду"
+                            % seed)
+            break
+        if item.souls <= 0:
+            problems.append("сид «%s»: переселение без единой души" % seed)
+            break
+        if item.year < 1 or item.year > world.total_years:
+            problems.append("сид «%s»: переселение вне времени мира" % seed)
+            break
+        if item.event_id and item.event_id not in events:
+            problems.append("сид «%s»: переселение без записи в летописи"
+                            % seed)
+            break
+        if item.to_polity and item.to_polity not in world.polities:
+            problems.append("сид «%s»: переселение в несуществующую державу"
+                            % seed)
+            break
+        if item.race_id not in RACE_IDS:
+            problems.append("сид «%s»: переселение народа, которого нет"
+                            % seed)
+            break
+    return problems
+
+
 def check_things(world, seed: str) -> list:
     """Вещи, места и чудовища: всё ли на месте и ни у кого ли нет лишнего.
 
@@ -1136,6 +1294,9 @@ def main() -> int:
         failures.extend(check_tongues(first, seed))
         failures.extend(check_embassies(first, seed))
         failures.extend(check_things(first, seed))
+        failures.extend(check_causes(first, seed))
+        failures.extend(check_people_memory(first, seed))
+        failures.extend(check_migrations(first, seed))
         failures.extend(check_lore(first, seed))
         failures.extend(check_upheavals(first, seed))
         failures.extend(check_capitals(first, seed))
@@ -1179,6 +1340,9 @@ def main() -> int:
             failures.extend(check_tongues(first, "карта/" + seed))
             failures.extend(check_embassies(first, "карта/" + seed))
             failures.extend(check_things(first, "карта/" + seed))
+            failures.extend(check_causes(first, "карта/" + seed))
+            failures.extend(check_people_memory(first, "карта/" + seed))
+            failures.extend(check_migrations(first, "карта/" + seed))
             failures.extend(check_lore(first, "карта/" + seed))
             failures.extend(check_upheavals(first, "карта/" + seed))
             failures.extend(check_capitals(first, "карта/" + seed))

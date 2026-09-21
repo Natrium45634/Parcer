@@ -18,10 +18,12 @@
 
 from __future__ import annotations
 
+from . import causes as causes_sys
 from . import houses as houses_mod
 from . import succession
 from . import upheaval
 from .. import catastrophe as cat
+from .. import history
 from .. import narrative
 from .. import narrative_calamity as texts
 from .. import races as races_mod
@@ -283,7 +285,11 @@ def _great_memory(ctx, year: int) -> float:
     last = ctx.calamity_last.get(GREAT_MEMORY)
     if last is None:
         return 1.0
-    return min(1.0, ((year - last) / 1800.0) ** 1.5)
+    # Кривая крутая нарочно: первые века после конца света мир не годится
+    # для нового вовсе, а полная готовность приходит через два с лишним
+    # тысячелетия. Иначе в больших и людных мирах великие беды учащаются
+    # просто потому, что в них больше всего.
+    return min(1.0, ((year - last) / 2300.0) ** 2.0)
 
 
 # Великое бедствие должно коснуться людей: извержение в пустой глуши —
@@ -465,13 +471,24 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
 
     title, text = texts.begins(rng, world, calamity, spec, leader, generals, victim)
     importance = min(5, 2 + severity // 2 + (1 if spec.kind == cat.INVASION else 0))
-    world.add_event(
+    parent_event = ""
+    if parent is not None:
+        for item in reversed(world.events):
+            if item.kind == "calamity_begins" and parent.id in item.subjects:
+                parent_event = item.id
+                break
+    event = world.add_event(
         date=date, era_index=world.era_index_at(year), kind="calamity_begins",
         title=title, text=text, importance=max(3, importance),
         actors=[figure.id for figure in ([leader] if leader else []) + generals[:3]],
         subjects=[calamity.id] + ([victim.id] if victim is not None else []),
         region_id=region_ids[0], race_id=race.id if race is not None else "",
+        causes=[parent_event] if parent_event else [],
+        trace=history.trace_of(max(3, importance), extra=0.05 * severity),
     )
+    # Земля и державы запоминают беду: этот рубец переживёт всех, кто её
+    # застал, и однажды станет поводом для чего-нибудь ещё.
+    causes_sys.after_calamity(ctx, calamity, event, year)
     if relic is not None:
         calamity.notes.append("пробуждение следа: %s" % relic.name)
     # Великие беды меняют не только летопись, но и саму карту: землю

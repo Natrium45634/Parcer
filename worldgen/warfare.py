@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+from . import recall
 from dataclasses import dataclass
 
 from . import goods as goods_mod
@@ -363,6 +364,114 @@ def _relics_in(world, polity) -> int:
     return count
 
 
+# У войны три причины, и они не обязаны совпадать: та, что объявлена
+# народу; та, ради которой всё затеяно; и та, что сидит в самом государе.
+# Здесь — короткие имена для первых двух.
+PRETEXT = {
+    "border": "спорная межа",
+    "reclaim": "возвращение исконного",
+    "gate": "горный проход",
+    "port": "своя гавань",
+    "mines": "рудники за рекой",
+    "bread": "хлеб для голодных городов",
+    "salt": "соляные варницы",
+    "tolls": "пошлины на чужих дорогах",
+    "gems": "чужая сокровищница",
+    "crusade": "защита истинной веры",
+    "heresy": "искоренение ереси",
+    "shrine": "святыня в чужих руках",
+    "godword": "воля богов",
+    "kin": "защита единокровцев",
+    "oppression": "заступничество за угнетённых",
+    "slavers": "избавление невольников",
+    "claim": "право дома на чужой престол",
+    "succession": "пустой престол у соседа",
+    "insult": "оскорбление, которого не простили",
+    "murder": "кровь, за которую не ответили",
+    "prophecy": "пророчество",
+    "relic": "древняя вещь в чужой земле",
+    "leyline": "чародейные жилы",
+    "curse": "снятие чужой порчи",
+    "undeath": "нежить за межой",
+    "dragon": "чудовище в соседней земле",
+    "ancient": "спор, которому триста лет",
+    "sealanes": "морские пути",
+    "piracy": "разбой на море",
+    "isles": "острова у чужого берега",
+    "revenge": "отместка за прошлую войну",
+    "yoke": "свобода от дани",
+    "envoy": "кровь посла",
+    "spy": "пойманный соглядатай",
+    "poison": "яд, поднесённый при дворе",
+    "oath": "нарушенная клятва",
+    "greed": "добыча",
+}
+
+# Что за этим стоит на деле: поводы, за которыми виден не гнев, а выгода.
+# Отместка и оскорбление сюда не входят — это чувства, а не расчёт.
+GAINS = ("border", "reclaim", "gate", "port", "mines", "bread", "salt",
+         "tolls", "gems", "sealanes", "isles", "piracy", "claim",
+         "succession", "yoke", "relic", "leyline", "shrine")
+
+# Как звучит личное: что именно помнит государь.
+PERSONAL_NOTE = {
+    recall.KIN_DEATH: "гибель родича на прошлой войне",
+    recall.CAPTIVITY: "годы, проведённые в чужом плену",
+    recall.BETRAYAL: "предательство, которого не простили",
+    recall.DEFEAT: "поражение, которого он себе не простил",
+    recall.INSULT: "нанесённое когда-то оскорбление",
+    recall.HOME_LOST: "сожжённый родной город",
+    recall.PASSED_OVER: "престол, когда-то прошедший мимо",
+    recall.HATRED: "старая ненависть",
+    recall.FEAR: "страх перед этим соседом",
+    recall.COURT_FEUD: "давняя распря",
+}
+
+
+def motives(world, attacker, defender, cause, options, year: int) -> dict:
+    """Три причины войны: гласная, расчётливая и личная.
+
+    Совпадать они не обязаны. Гласно — защита единоверцев, на деле —
+    рудники за рекой, а государь помнит плен, в котором просидел
+    двадцать лет.
+    """
+    out = {}
+    said = PRETEXT.get(cause.key, "")
+    if said:
+        out["гласно"] = said
+
+    best, best_weight = None, 0.0
+    for item, weight in options:
+        if item.key == cause.key or item.key not in GAINS:
+            continue
+        if weight > best_weight:
+            best, best_weight = item, weight
+    if best is not None and best_weight >= 1.2:
+        gain = PRETEXT.get(best.key, "")
+        if gain and gain != said:
+            out["расчёт"] = gain
+
+    ruler = world.figures.get(attacker.ruler_id)
+    if ruler is not None:
+        memory = recall.strongest(world, ruler, defender.id, year)
+        if memory is not None and recall.SIGN.get(memory.kind, 0.0) < 0 \
+                and recall.power(memory, year, ruler) > 0.25:
+            note = PERSONAL_NOTE.get(memory.kind, "")
+            if note:
+                out["лично"] = note
+    return out
+
+
+# Какое воспоминание каким поводом оборачивается на совете.
+PERSONAL_CAUSE = {
+    recall.KIN_DEATH: "murder", recall.CAPTIVITY: "insult",
+    recall.BETRAYAL: "oath", recall.DEFEAT: "revenge",
+    recall.INSULT: "insult", recall.HOME_LOST: "reclaim",
+    recall.PASSED_OVER: "claim", recall.HATRED: "revenge",
+    recall.FEAR: "border",
+}
+
+
 def reasons(ctx, attacker, defender, year: int) -> list:
     """Все поводы, какие у этой державы есть против этой — с весами.
 
@@ -489,6 +598,23 @@ def reasons(ctx, attacker, defender, year: int) -> list:
         add("curse", 1.2)          # в тёмные века виноват всегда сосед
     if attacker.founded.year < year - 1500 and defender.founded.year < year - 1500:
         add("ancient", 1.0)
+
+    # --- личное ---
+    # Войну объявляет не держава, а человек. Государь, у которого на
+    # чужой войне погиб отец или который сам сидел в чужом плену,
+    # находит повод там, где расчётливый сосед его бы не искал.
+    ruler = world.figures.get(attacker.ruler_id)
+    if ruler is not None:
+        spite = recall.grievance(world, ruler, defender.id, year)
+        if spite > 0.12:
+            memory = recall.strongest(world, ruler, defender.id, year)
+            key = PERSONAL_CAUSE.get(memory.kind if memory else "", "insult")
+            add(key, 1.2 + 3.4 * spite)
+        warmth = recall.attitude(world, ruler, defender.id, year)
+        if warmth > 0.3:
+            # С тем, кому обязан, воюют неохотно: все поводы тускнеют.
+            out = [(cause, weight * max(0.25, 1.0 - warmth))
+                   for cause, weight in out]
 
     # --- обиды поимённо ---
     # Кровь посла, яд в кубке, пойманный соглядатай, нарушенная клятва:

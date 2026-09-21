@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from .. import history
+from . import causes as causes_sys
 from .. import goods as goods_mod
 from .. import narrative_trade as texts
 from ..models import ACTIVE
@@ -247,12 +249,23 @@ def _famine(ctx, polity, hunger: float, rng, year: int) -> None:
     if dead < 100:
         return
     title, text = texts.famine(rng, polity, dead)
-    world.add_event(
+    # Голод редко приходит ниоткуда: оборванный подвоз, разорённая войной
+    # округа, засушливые годы — всё это уже записано следами.
+    roots, marks = [], []
+    for kind in (history.HUNGER, history.DEPENDENCE, history.SCAR):
+        for fact in world.facts_of(polity.id, year, kind)[:1]:
+            marks.append(fact.id)
+            if fact.event_id:
+                roots.append(fact.event_id)
+    event = world.add_event(
         date=ctx.date_in(rng, year), era_index=world.era_index_at(year),
         kind="famine", title=title, text=text, importance=4,
         subjects=[polity.id],
         region_id=polity.region_ids[0] if polity.region_ids else "",
-        race_id=polity.race_id)
+        race_id=polity.race_id, causes=roots, facts=marks,
+        trace=history.trace_of(4))
+    history.leave(world, history.HUNGER, year, polity.id, weight=0.9,
+                  note="голод, унёсший %d душ" % dead, event_id=event.id)
 
 
 def _decay(ctx, year: int, period: int) -> None:
@@ -271,6 +284,9 @@ def _decay(ctx, year: int, period: int) -> None:
             continue
         date = ctx.date_in(rng, year)
         world.close_route(route, date, "торговля заглохла")
+        # Для того, кто на этот подвоз привык рассчитывать, это не конец
+        # пути, а начало нужды: последствие придёт через год-другой.
+        causes_sys.after_route_end(ctx, route, year)
         if seller is not None and buyer is not None:
             title, text = texts.trade_break(rng, seller, buyer, route.good)
             world.add_event(

@@ -340,6 +340,18 @@ class ChronicleApp(tk.Tk):
         self.upheaval_text = self._add_text_tab(
             "Как менялся мир", lambda: self._set_text(
                 self.upheaval_text, chronicle.render_upheavals(self.world)))
+        self.causes_text = self._add_text_tab(
+            "Нити причин", lambda: self._set_text(
+                self.causes_text, chronicle.render_causes(self.world)))
+        self.memory_text = self._add_text_tab(
+            "Память и связи", lambda: self._set_text(
+                self.memory_text, chronicle.render_memory(self.world)))
+        self.migration_text = self._add_text_tab(
+            "Переселения", lambda: self._set_text(
+                self.migration_text, chronicle.render_migrations(self.world)))
+        self.culture_text = self._add_text_tab(
+            "Растворение народов", lambda: self._set_text(
+                self.culture_text, chronicle.render_culture(self.world)))
         self.expeditions_text = self._add_text_tab("Походы")
         self.regions_text = self._add_text_tab("Земли")
         self.stats_text = self._add_text_tab("Итоги")
@@ -1092,6 +1104,12 @@ class ChronicleApp(tk.Tk):
             return out
 
         if kind == "Polity":
+            # «Почему эта держава такая»: живые следы её прошлого —
+            # обиды, притязания, зависимости, долги.
+            why = chronicle.polity_why(world, entity)
+            if why:
+                lines.extend(["", "ЧТО ЗА НЕЙ ЧИСЛИТСЯ", "-" * 60])
+                lines.extend("  %s" % row for row in why)
             reigns = [world.reigns[r] for r in entity.reign_ids if r in world.reigns]
             if reigns:
                 lines.extend(["", "ПРАВИТЕЛИ", "-" * 60])
@@ -1119,6 +1137,29 @@ class ChronicleApp(tk.Tk):
                         ", ".join(member.roles[:2]) or "—", mark))
 
         elif kind == "Figure":
+            # Что человек помнит и с кем связан: по этому видно, почему
+            # он поступал так, а не иначе.
+            memories = world.memories_of(entity.id)
+            if memories:
+                lines.extend(["", "ЧТО ПОМНИТ", "-" * 60])
+                for memory in memories[:10]:
+                    about = world.entity_name(memory.about_id) \
+                        if memory.about_id else ""
+                    lines.append("  %-5d %-22s %s%s" % (
+                        memory.year, memory.kind,
+                        (about + ": ") if about else "",
+                        memory.note or memory.tone))
+            bonds = world.bonds_of(entity.id, alive=False)
+            if bonds:
+                lines.extend(["", "С КЕМ СВЯЗАН", "-" * 60])
+                for bond in bonds[:10]:
+                    other = world.figures.get(bond.other(entity.id))
+                    path = " → ".join(item[1] for item in bond.turns) \
+                        or bond.kind
+                    lines.append("  %-32s %-28s с %d года%s" % (
+                        (other.plain_name if other else "?")[:32], path,
+                        bond.since,
+                        ", оборвалась в %d" % bond.ended if bond.ended else ""))
             reigns = [r for r in world.reigns.values() if r.ruler_id == entity.id]
             reigns.sort(key=lambda r: r.start.ordinal)
             if reigns:

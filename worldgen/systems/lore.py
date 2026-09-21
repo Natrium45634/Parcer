@@ -315,7 +315,8 @@ def _born(ctx, year: int, rng) -> None:
         date=date, era_index=world.era_index_at(year), kind="legend_born",
         title=title, text=text, importance=2,
         subjects=[legend.id, event.id], region_id=event.region_id,
-        race_id=event.race_id)
+        race_id=event.race_id,
+        causes=[event.id])          # песня всегда о чём-то, что было
 
 
 def _about_line(world, event, about: str) -> str:

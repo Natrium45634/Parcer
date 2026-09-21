@@ -19,6 +19,8 @@
 
 from __future__ import annotations
 
+from . import causes as causes_sys
+from .. import history
 from .. import diplomacy as dip
 from .. import narrative_diplomacy as texts
 from .. import races as races_mod
@@ -191,6 +193,15 @@ def make_pact(ctx, kind: str, first, second, reasons, year: int, rng):
     dip.set_relation(first, second,
                      dip.relation(first, second.id) + 0.10)
 
+    # Договор тоже на чём-то стоит: на родстве домов, на старом добре,
+    # на долге, который помнят обе стороны.
+    marks, roots = [], []
+    for kind in (history.KINSHIP, history.FAVOUR, history.DEBT):
+        for fact in world.facts_of(first.id, year, kind, second.id)[:1]:
+            marks.append(fact.id)
+            if fact.event_id:
+                roots.append(fact.event_id)
+    causes_sys.after_pact(ctx, pact, first, second, year)
     title, text = texts.pact_made(rng, pact, first, second, reasons)
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="pact",
@@ -198,7 +209,7 @@ def make_pact(ctx, kind: str, first, second, reasons, year: int, rng):
         importance=3 if kind in (dip.ALLIANCE, dip.MARRIAGE) else 2,
         subjects=[pact.id, first.id, second.id],
         region_id=first.region_ids[0] if first.region_ids else "",
-        race_id=first.race_id)
+        race_id=first.race_id, causes=roots, facts=marks)
     if kind == dip.ALLIANCE:
         _maybe_league(ctx, first, year, rng)
     return pact
@@ -257,6 +268,7 @@ def _break_pact(ctx, pact, first, second, reasons, year: int, rng) -> None:
     world = ctx.world
     date = _after_signing(ctx, pact, year, rng)
     world.end_pact(pact, date, "отношения испортились")
+    causes_sys.after_pact_end(ctx, first, second, year)
     league = world.leagues.get(pact.league_id)
     if league is not None and league.status == ACTIVE:
         _shrink_league(ctx, league, first, year, date, rng)

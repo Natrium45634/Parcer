@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from .. import history
 from .. import laws as laws_mod
 from .. import narrative_laws as texts
 from .. import nations as pol
@@ -54,6 +55,25 @@ def upkeep(ctx, year: int, period: int) -> None:
             _copy(ctx, polity, era_index, year, rng)
 
 
+# Беды, на которые отвечают порядком: свежая, но уже прожитая.
+TROUBLE_KINDS = (history.HUNGER, history.SHAME, history.YOKE, history.LOSS,
+                 history.DREAD)
+TROUBLE_AGE = 120
+
+
+def _trouble(ctx_world, polity, year: int):
+    """Самая тяжёлая свежая беда державы — или ничего."""
+    best, best_power = None, 0.25
+    for kind in TROUBLE_KINDS:
+        for fact in ctx_world.facts_of(polity.id, year, kind):
+            if year - fact.year > TROUBLE_AGE:
+                continue
+            value = fact.power(year)
+            if value > best_power:
+                best, best_power = fact, value
+    return best
+
+
 def _reform(ctx, polity, era_index: int, year: int, rng) -> None:
     world = ctx.world
     options = laws_mod.possible(polity, era_index, set(polity.known))
@@ -76,13 +96,20 @@ def _reform(ctx, polity, era_index: int, year: int, rng) -> None:
         record.copied_by.append(polity.id)
 
     title, text = texts.reform_made(rng, reform, polity, ruler)
+    # Порядок заводят не от хорошей жизни: если за державой числится
+    # свежая беда, летопись помнит, что реформа была ответом на неё.
+    trouble = _trouble(world, polity, year)
     event = world.add_event(
         date=date, era_index=era_index, kind="reform", title=title,
         text=text, importance=4 if first else 3,
         actors=[ruler.id] if ruler is not None else [],
         subjects=[record.id, polity.id],
         region_id=polity.region_ids[0] if polity.region_ids else "",
-        race_id=polity.race_id)
+        race_id=polity.race_id,
+        facts=[trouble.id] if trouble is not None else [],
+        causes=[trouble.event_id] if trouble is not None
+        and trouble.event_id else [],
+        trace=history.trace_of(4 if first else 3))
     if ruler is not None:
         ruler.deeds.append(event.id)
     _maybe_famous(ctx, record, year, date, rng)

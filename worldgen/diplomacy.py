@@ -24,6 +24,8 @@
 
 from __future__ import annotations
 
+from . import history
+from . import recall
 from . import races as races_mod
 from .models import ACTIVE
 
@@ -326,6 +328,15 @@ def reasons(world, first, second, year: int, index=None) -> list:
     if _neighbours(world, first, second):
         out.append(("общая межа", -0.10))
 
+    # Историческая инерция: подписанный мир не превращает вражду в
+    # дружбу. Следы прошлого — отнятые города, нарушенные клятвы,
+    # спасённые обозы — тянут отношения к себе, пока не выветрятся.
+    cold, warm = history.feelings(world, first.id, second.id, year)
+    if cold > 0.05:
+        out.append(("старые счёты", -min(0.50, 0.30 * cold)))
+    if warm > 0.05:
+        out.append(("старое добро", min(0.35, 0.26 * warm)))
+
     ruler_first = world.figures.get(first.ruler_id)
     ruler_second = world.figures.get(second.ruler_id)
     if ruler_first is not None and ruler_second is not None:
@@ -335,6 +346,15 @@ def reasons(world, first, second, year: int, index=None) -> list:
             out.append(("несхожий нрав государей", -0.18))
         elif gap <= 1:
             out.append(("схожий нрав государей", 0.10))
+        # Личное: что эти двое помнят друг о друге и о чужой державе.
+        personal = (recall.attitude(world, ruler_first, second.id, year)
+                    + recall.attitude(world, ruler_second, first.id, year)) / 2.0
+        personal += 0.5 * recall.bond_worth(
+            world.bond_between(ruler_first.id, ruler_second.id))
+        if personal <= -0.18:
+            out.append(("личные счёты государей", max(-0.45, personal * 0.6)))
+        elif personal >= 0.18:
+            out.append(("личная приязнь государей", min(0.35, personal * 0.5)))
 
     from . import nations as pol
     if pol.is_harsh(second.policy) and faith_first is not None \

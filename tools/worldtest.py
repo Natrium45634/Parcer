@@ -229,6 +229,25 @@ def faith_line(world, faith_id: str) -> str:
     return "; ".join(bits)
 
 
+def _side_name(world, entity_id: str) -> str:
+    """Имя того, о ком след или воспоминание."""
+    if not entity_id:
+        return ""
+    polity = world.polities.get(entity_id)
+    if polity is not None:
+        return polity.name
+    figure = world.figures.get(entity_id)
+    if figure is not None:
+        return figure.plain_name
+    region = world.regions.get(entity_id)
+    if region is not None:
+        return "земля по имени %s" % region.name
+    settlement = world.settlements.get(entity_id)
+    if settlement is not None:
+        return "город по имени %s" % settlement.name
+    return race_name(entity_id)
+
+
 def polity_block(world, polity, year: int, population: int, cities: int,
                  out, middle: float = 0.0) -> None:
     """Держава в подробностях: кто правит, чем правит и во что верит."""
@@ -278,6 +297,25 @@ def polity_block(world, polity, year: int, population: int, cities: int,
         other = world.polities.get(union.other(polity.id))
         out("   уния с державой: %s (с %d года)"
             % (other.full_name if other else "?", union.started.year))
+    # Что за державой числится: живые следы её прошлого — по ним видно,
+    # почему она такая и чего от неё ждать.
+    traces = world.facts_of(polity.id, year)[:3]
+    if traces:
+        out("   что за ней числится: %s" % "; ".join(
+            "%s%s (%d год)" % (fact.kind,
+                               (" на " + _side_name(world, fact.about_id))
+                               if fact.about_id else "",
+                               fact.year)
+            for fact in traces))
+    ruler = world.figures.get(polity.ruler_id)
+    if ruler is not None:
+        rows = world.memories_of(ruler.id)[:3]
+        if rows:
+            out("   что помнит государь: %s" % "; ".join(
+                "%s%s (%d)" % (item.kind,
+                               (" — " + _side_name(world, item.about_id))
+                               if item.about_id else "", item.year)
+                for item in rows))
 
 
 def snapshot(world, year: int, out) -> None:
@@ -1080,9 +1118,9 @@ def audit(world) -> list:
         from worldgen.systems.legacy import WAY_NOTES
         used = set()
         for calamity in world.calamities.values():
-            for note in calamity.notes:
+            for line in calamity.notes:
                 for key, pattern in WAY_NOTES.items():
-                    if note.startswith(pattern.split("%")[0].strip()):
+                    if line.startswith(pattern.split("%")[0].strip()):
                         used.add(key)
         if linked >= 6 and len(used) <= 2:
             note("зло возвращается в мир всего %d путями из %d — цепи "
@@ -1154,6 +1192,142 @@ def audit(world) -> list:
         if len(living) >= 6 and len(mainstays) < 3:
             note("опор у держав всего %d: хозяйство мира однообразно"
                  % len(mainstays))
+
+    # 27. Причинность: держится ли история на собственных нитях.
+    from worldgen import history
+    # Считаем по делам державы: город, основанный на пустом месте, и
+    # открытие ремесла причины иметь не обязаны, а война, мир, бунт,
+    # договор и реформа — обязаны.
+    POLITICAL = ("war_start", "war_end", "revolt", "betrayal",
+                 "titular_shift", "supply_break", "famine", "reform",
+                 "calamity_begins", "unfulfilled")
+    big = [event for event in world.events if event.kind in POLITICAL]
+    caused = [event for event in big if event.causes or event.facts]
+    share = 100.0 * len(caused) / max(1, len(big))
+    sprouted = [item for item in world.seeds.values() if item.state == "сбылось"]
+    faded = [item for item in world.seeds.values() if item.state == "угасло"]
+    deepest, longest = 0, 0
+    for event in world.events:
+        if not (event.causes or event.facts):
+            continue
+        depth = history.depth_of(world, event, 20)
+        if depth > deepest:
+            deepest = depth
+            chain = history.roots(world, event, 20)
+            longest = event.date.year - chain[-1].date.year if chain else 0
+    found.append(("=", "причинность: событий державных дел с причиной %d "
+                  "из %d "
+                  "(%.0f%%); следов %d, живых %d; зёрен %d — взошло %d, "
+                  "угасло %d; самая длинная нить %d звеньев на %d лет"
+                  % (len(caused), len(big), share, len(world.facts),
+                     len(world.open_facts), len(world.seeds), len(sprouted),
+                     len(faded), deepest + 1, longest)))
+    if world.total_years >= 2000:
+        if share < 5:
+            bad("история рассыпается: причина есть лишь у %.0f%% державных "
+                "дел" % share)
+        elif share < 25:
+            note("державных дел с причиной всего %.0f%%" % share)
+        if not sprouted:
+            note("ни одно отложенное последствие так и не взошло")
+        if deepest < 2:
+            note("длинных цепей причин в мире нет")
+        if sprouted and len(faded) < len(sprouted) * 0.3:
+            note("сбывается почти всё задуманное — несбывшегося слишком мало")
+    kinds = Counter(item.kind for item in sprouted)
+    if len(kinds) >= 2:
+        found.append(("=", "взошли: %s"
+                      % ", ".join("%s — %d" % (kind, count)
+                                  for kind, count in kinds.most_common(6))))
+    elif len(world.seeds) > 20 and len(kinds) == 1:
+        note("всходит только одно последствие из всех: %s"
+             % ", ".join(kinds))
+
+    # 28. Память людей: движет ли личный опыт политикой.
+    if world.memories:
+        by_kind = Counter(item.kind for item in world.memories.values())
+        twisted = sum(1 for item in world.memories.values() if item.twisted)
+        found.append(("=", "память: %d воспоминаний у %d человек, "
+                      "переиначенных %d; чаще всего помнят %s"
+                      % (len(world.memories), len(world._memory_of), twisted,
+                         ", ".join("%s (%d)" % pair
+                                   for pair in by_kind.most_common(3)))))
+        bonds = Counter(item.kind for item in world.bonds.values())
+        turned = sum(1 for item in world.bonds.values() if item.turns)
+        if bonds:
+            found.append(("=", "связи: %d, переменившихся %d; чаще всего %s"
+                          % (len(world.bonds), turned,
+                             ", ".join("%s (%d)" % pair
+                                       for pair in bonds.most_common(3)))))
+        personal = [event for event in world.events
+                    if event.kind == "war_start" and event.motives.get("лично")]
+        wars = [event for event in world.events if event.kind == "war_start"]
+        found.append(("=", "войн с личной причиной: %d из %d"
+                      % (len(personal), len(wars))))
+        for memory in world.memories.values():
+            figure = world.figures.get(memory.figure_id)
+            if figure is None:
+                bad("воспоминание принадлежит человеку, которого нет")
+                break
+            if figure.birth is not None and memory.year < figure.birth.year:
+                bad("%s помнит то, что было до его рождения"
+                    % figure.plain_name)
+                break
+        if world.total_years >= 3000 and len(by_kind) < 3:
+            note("люди этого мира помнят только одно: %s"
+                 % ", ".join(by_kind))
+    elif world.total_years >= 2000:
+        note("личной памяти в мире не осталось вовсе")
+
+    # 29. Переселения народов.
+    if world.migrations:
+        moves = list(world.migrations.values())
+        causes = Counter(item.cause for item in moves)
+        refused = sum(1 for item in moves if item.outcome != "приняли")
+        souls = sum(item.souls for item in moves)
+        found.append(("=", "переселений: %d, в дороге %s; отказали в приёме "
+                      "%d раз; гнало с места: %s"
+                      % (len(moves), _souls(souls), refused,
+                         ", ".join("%s — %d" % pair
+                                   for pair in causes.most_common(4)))))
+        top = causes.most_common(1)[0][1]
+        if len(moves) >= 10 and top * 10 > len(moves) * 9:
+            note("все переселения мира случились по одной причине: %s"
+                 % causes.most_common(1)[0][0])
+        for item in moves:
+            if item.souls <= 0:
+                bad("переселение без единой души")
+                break
+            target = world.regions.get(item.to_region)
+            if target is not None and target.drowned \
+                    and target.drowned_year and item.year > target.drowned_year:
+                bad("народ переселился в землю, ушедшую под воду")
+                break
+    elif world.total_years >= 3000:
+        note("за всю историю ни один народ не тронулся с места")
+
+    # 30. Растворение народов: смешиваются ли культуры.
+    culture = Counter(event.kind for event in world.events
+                      if event.kind in ("assimilation", "folk_blend",
+                                        "tongue_ban", "court_tongue"))
+    if culture:
+        found.append(("=", "растворение народов: растворилось %d, смешанных "
+                      "народов %d, дворов перешло на чужую речь %d, "
+                      "запретов речи %d"
+                      % (culture.get("assimilation", 0),
+                         culture.get("folk_blend", 0),
+                         culture.get("court_tongue", 0),
+                         culture.get("tongue_ban", 0))))
+        for folk in world.folks.values():
+            if folk.parent_id and folk.parent_id not in world.folks:
+                bad("народ «%s» вышел из народа, которого нет" % folk.name)
+                break
+    elif world.total_years >= 4000:
+        multi = sum(1 for pid in world.active_polities
+                    if world.polities[pid].multiethnic)
+        if multi >= 3:
+            note("в мире есть многонародные державы, но ни один народ ни в "
+                 "ком не растворился")
 
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:

@@ -63,6 +63,7 @@ def _drown(ctx, calamity, rng, year: int, date) -> None:
             continue
         already += 1
         region.drowned = True
+        region.drowned_year = year
         region.capacity = 0.0
         region.habitat = 0.0
         drowned.append(region)
