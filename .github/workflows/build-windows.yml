@@ -16,6 +16,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write        # чтобы готовый файл лёг в раздел Releases
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -50,6 +53,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
           Copy-Item dist/Chronist.exe "release/Хронист.exe"
+          Copy-Item dist/Chronist.exe "release/Chronist.exe"
           Copy-Item "ЧИТАТЬ ПЕРВЫМ.txt" release/ -ErrorAction SilentlyContinue
           Copy-Item "ВОЗМОЖНОСТИ.txt" release/ -ErrorAction SilentlyContinue
 
