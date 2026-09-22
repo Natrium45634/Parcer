@@ -682,7 +682,8 @@ class Wizard(ttk.Frame):
                 facts = self.map_preview.describe()
                 lines.append("  Карта ............... своя, %s, суша %s"
                              % (facts["Размер"], facts["Суша"]))
-            elif self.map_preview is not None:
+            elif (self.map_preview is not None and self._preview_key
+                  and self._preview_key[0] != "файл"):
                 lines.append("  Карта ............... своя, настройки "
                              "изменились — будет сделана заново")
             else:
