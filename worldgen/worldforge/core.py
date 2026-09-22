@@ -138,19 +138,30 @@ def make_namer(rng):
 class Config:
     """Настройки карты: сид, размер, замыкание по долготе и ползунки."""
 
+    # Пределы ползунков: как в окне исходного генератора. Числа за этими
+    # краями не делают карту интереснее, зато счёт может уйти в часы —
+    # тысяча материков или пять тысяч именных вершин никому не нужны.
+    LIMITS = {"temperature": (-60, 60), "peaks": (0, 60)}
+    LIMIT_DEFAULT = (0, 100)
+
     def __init__(self, seed="aurora-7", size="medium", wrap=True,
                  continents=4, min_alt=-11000.0, max_alt=8849.0, k=None):
         self.seed = str(seed)
         self.size = size if size in SIZES else "medium"
         self.wrap = bool(wrap)
-        self.continents = max(1, int(continents))
+        self.continents = max(1, min(12, int(continents)))
         self.min_alt = float(min_alt)
         self.max_alt = float(max_alt)
         self.k = dict(DEFAULT_K)
         if k:
             for key, value in k.items():
-                if key in self.k:
-                    self.k[key] = value
+                if key not in self.k:
+                    continue
+                low, high = self.LIMITS.get(key, self.LIMIT_DEFAULT)
+                try:
+                    self.k[key] = max(low, min(high, int(value)))
+                except (TypeError, ValueError):
+                    continue          # мусор в настройках — берём задуманное
 
     def to_dict(self) -> dict:
         return {"seed": self.seed, "size": self.size, "wrap": self.wrap,

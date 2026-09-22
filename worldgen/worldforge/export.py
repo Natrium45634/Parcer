@@ -30,9 +30,6 @@ DT_OF = {
     22: wm.DT_I32, 23: wm.DT_I32,
 }
 
-_PACK = {wm.DT_U8: "B", wm.DT_I16: "h", wm.DT_I32: "i", wm.DT_F32: "f"}
-
-
 def seed_to_u64(seed) -> int:
     """Числовой сид для движка — тем же хэшем, что и в исходнике."""
     step = xmur3(str(seed))
@@ -165,48 +162,12 @@ def worldmap_of(world, with_minerals: bool = False, progress=None):
 
 def dumps(world, with_minerals: bool = True, progress=None) -> bytes:
     """Карта в байтах формата .world версии 1."""
-    layers = build_layers(world, progress)
-    tail = build_tail(world, with_minerals, progress)
-    json_bytes = json.dumps(tail, ensure_ascii=False,
-                            separators=(",", ":")).encode("utf-8")
-
-    blocks = []
-    for layer_id in sorted(layers):
-        dtype = DT_OF[layer_id]
-        data = layers[layer_id]
-        code = _PACK[dtype]
-        if data.typecode == code:
-            raw = data.tobytes()
-        else:                     # на всякий случай: перекладываем по типу
-            raw = array(code, [int(v) for v in data]).tobytes()
-        blocks.append((layer_id, dtype, raw))
-
-    header = 64
-    body = sum(8 + len(raw) for _, _, raw in blocks)
-    json_offset = header + body
-    out = bytearray(json_offset + len(json_bytes))
-    struct.pack_into("<4sHHIIQIfffII", out, 0, b"WRLD", 1,
-                     1 if world.wrap else 0, world.W, world.H,
-                     seed_to_u64(world.cfg.seed), len(blocks), world.sea,
-                     world.cfg.min_alt, world.cfg.max_alt, json_offset,
-                     len(json_bytes))
-    offset = header
-    for layer_id, dtype, raw in blocks:
-        struct.pack_into("<BBBBI", out, offset, layer_id, dtype, 0, 0,
-                         len(raw))
-        offset += 8
-        out[offset:offset + len(raw)] = raw
-        offset += len(raw)
-    out[json_offset:json_offset + len(json_bytes)] = json_bytes
-    return bytes(out)
+    return dumps_map(worldmap_of(world, with_minerals, progress))
 
 
 def save(world, path, with_minerals: bool = True, progress=None) -> int:
     """Записывает карту файлом .world и возвращает его размер."""
-    blob = dumps(world, with_minerals, progress)
-    with open(path, "wb") as handle:
-        handle.write(blob)
-    return len(blob)
+    return save_map(worldmap_of(world, with_minerals, progress), path)
 
 
 def dumps_map(wmap) -> bytes:

@@ -97,8 +97,12 @@ def run_cli(argv) -> int:
             except ValueError:
                 print("Ползунок карты — число: %s" % pair)
                 return 2
-        make = {"size": size, "continents": int(float(options["--map-cont"])),
-                "k": knobs,
+        try:
+            continents = int(float(options["--map-cont"]))
+        except ValueError:
+            print("Материков — число от 1 до 8: %s" % options["--map-cont"])
+            return 2
+        make = {"size": size, "continents": continents, "k": knobs,
                 "seed": options["--map-seed"] or options["--seed"]}
 
     settings = Settings(seed=options["--seed"], years=int(float(options["--years"])),

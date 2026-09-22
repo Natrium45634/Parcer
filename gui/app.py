@@ -12,6 +12,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
 from gui.sidetabs import SideTabs
+from gui import wizard as wizard_mod
 from gui.wizard import Wizard
 from worldgen import chronicle, storage
 from worldgen.engine import GenerationCancelled, generate
@@ -466,8 +467,7 @@ class ChronicleApp(tk.Tk):
 
     def clear_map(self) -> None:
         self.show_wizard()
-        self.wizard.map_mode.set("без карты")
-        self.wizard._map_mode_changed()
+        self.wizard.set_map_mode(wizard_mod.MAP_NONE)
 
     def export_chronicle_map(self) -> None:
         """Пишет chronicle.json — политическую карту по годам."""

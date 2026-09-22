@@ -399,6 +399,11 @@ class Wizard(ttk.Frame):
             return 0, 40
         return 0, 100
 
+    def set_map_mode(self, mode: str) -> None:
+        """Переключить способ получения карты снаружи — из меню окна."""
+        self.map_mode.set(mode)
+        self._map_mode_changed()
+
     def _map_mode_changed(self) -> None:
         mode = self.map_mode.get()
         state = "normal" if mode == MAP_RANDOM else "disabled"
@@ -490,8 +495,8 @@ class Wizard(ttk.Frame):
     def _map_poll(self) -> None:
         """Пока карта считается, окно живёт и показывает, где счёт."""
         box = self._map_queue
-        if box is None:
-            return
+        if box is None or not self.winfo_exists():
+            return                 # окно закрыли — досматривать нечего
         done = False
         try:
             while True:
@@ -712,6 +717,11 @@ class Wizard(ttk.Frame):
                         tuning=self.knob_positions())
 
     def _start(self) -> None:
+        if self._map_busy:
+            messagebox.showinfo("Карта ещё делается",
+                                "Подождите, пока карта досчитается, — "
+                                "и нажмите снова.")
+            return
         if self.map_mode.get() == MAP_FILE and not self.map_path:
             messagebox.showinfo("Карта не выбрана",
                                 "Выберите файл .world или другой способ "

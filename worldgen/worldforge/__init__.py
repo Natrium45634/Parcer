@@ -44,7 +44,7 @@ def forge_world(seed, size=DEFAULT_SIZE, continents=4, wrap=True, k=None,
 # Последняя собранная карта держится в памяти байтами: мастер делает её
 # для предпросмотра, а движок просит ту же самую при создании мира —
 # считать её дважды незачем, а байты гарантируют чистую копию.
-_LAST = {"key": None, "blob": None}
+_LAST = {"entry": None}
 
 
 def _cache_key(seed, size, continents, wrap, k):
@@ -57,19 +57,26 @@ def forge(seed, size=DEFAULT_SIZE, continents=4, wrap=True, k=None,
     """Готовая гексовая карта: то же, что читается из файла .world."""
     size = size if size in SIZES else DEFAULT_SIZE
     key = _cache_key(seed, size, continents, wrap, k)
-    if _LAST["key"] == key and _LAST["blob"]:
+    entry = _LAST["entry"]
+    if entry is not None and entry[0] == key:
         from .. import worldmap as _wm
-        return _wm.loads(_LAST["blob"])
+        return _wm.loads(entry[1])
+    # Ход счёта идёт в одну сторону: сперва сам мир, потом слои и хвост.
+    def stage(low, high):
+        if progress is None:
+            return None
+        return lambda part, note: progress(low + (high - low) * part, note)
+
     world = forge_world(seed, size=size, continents=continents, wrap=wrap,
-                        k=k, progress=progress)
+                        k=k, progress=stage(0.0, 0.72))
     wmap = export.worldmap_of(world, with_minerals=with_minerals,
-                              progress=progress)
+                              progress=stage(0.72, 1.0))
     try:
-        _LAST["key"] = key
-        _LAST["blob"] = export.dumps_map(wmap)
+        # Ключ и байты кладём одной парой: иначе два потока успели бы
+        # смешать ключ одной карты с байтами другой.
+        _LAST["entry"] = (key, export.dumps_map(wmap))
     except Exception:            # не вышло сберечь — просто посчитаем снова
-        _LAST["key"] = None
-        _LAST["blob"] = None
+        _LAST["entry"] = None
     return wmap
 
 

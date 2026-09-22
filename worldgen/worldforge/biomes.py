@@ -56,12 +56,6 @@ NAMES = tuple(item[0] for item in BIOMES)
 COLORS = tuple(item[1] for item in BIOMES)
 GROUPS = tuple(item[2] for item in BIOMES)
 
-FEATURE_NAMES = {
-    "ocean": "океан", "sea": "море", "bay": "залив", "lake": "озеро",
-    "inlandsea": "внутреннее море", "continent": "континент",
-    "island": "остров", "bigisland": "большой остров",
-    "archipelago": "архипелаг", "range": "хребет", "river": "река",
-}
-
-COAST_NAMES = ("", "скалистый берег", "песчаный пляж", "речная дельта",
-               "фьорд")
+# Русские названия объектов карты (материк, залив, хребет) лежат не
+# здесь, а в mapregions.FEATURE_NOUNS: это дело движка истории, и держать
+# два списка одного и того же — верный способ их однажды разойтись.
