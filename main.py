@@ -82,8 +82,10 @@ def run_cli(argv) -> int:
                   % ", ".join(worldforge.SIZE_NAMES[key]
                               for key in ("small", "medium", "large")))
             return 2
-        knobs = {}
-        for pair in options["--map-knobs"].split(","):
+        # Ползунки карты — сами по себе: шкалы движка (--tune) живут в
+        # своём наборе, и мешать их нельзя.
+        map_knobs = {}
+        for pair in options["--map-knobs"].replace(";", ",").split(","):
             pair = pair.strip()
             if not pair:
                 continue
@@ -93,7 +95,7 @@ def run_cli(argv) -> int:
                 print("Нет такого ползунка карты: %s" % key)
                 return 2
             try:
-                knobs[key] = int(float(value))
+                map_knobs[key] = int(float(value))
             except ValueError:
                 print("Ползунок карты — число: %s" % pair)
                 return 2
@@ -102,7 +104,7 @@ def run_cli(argv) -> int:
         except ValueError:
             print("Материков — число от 1 до 8: %s" % options["--map-cont"])
             return 2
-        make = {"size": size, "continents": continents, "k": knobs,
+        make = {"size": size, "continents": continents, "k": map_knobs,
                 "seed": options["--map-seed"] or options["--seed"]}
 
     settings = Settings(seed=options["--seed"], years=int(float(options["--years"])),

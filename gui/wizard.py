@@ -79,6 +79,8 @@ class Wizard(ttk.Frame):
         self._photo = None
         self._map_busy = False
         self._map_queue = None
+        self._preview_key = None   # чем описана показанная сейчас карта
+        self._world_busy = False   # идёт ли прямо сейчас создание мира
 
         self.steps = ttk.Notebook(self)
         self.steps.pack(fill="both", expand=True, padx=6, pady=6)
@@ -203,9 +205,10 @@ class Wizard(ttk.Frame):
             return "как задумано"
         share = tuning.value_of(knob, position) / max(
             1e-9, tuning.base_value(knob.targets[0]))
+        # Слово берём по положению ползунка, а не по самому числу: у
+        # перевёрнутых шкал («Охота племён делиться» держится порогом,
+        # который надо опускать) вправо — это всё равно «чаще».
         word = "чаще" if position > tuning.MIDDLE else "реже"
-        if knob.invert:
-            word = "чаще" if position > tuning.MIDDLE else "реже"
         return "%d — в %.1f раза %s" % (position,
                                         share if share >= 1 else 1.0 / share,
                                         word)
@@ -282,6 +285,10 @@ class Wizard(ttk.Frame):
 
         self.map_box = ttk.Frame(page)
         self.map_box.pack(fill="x", pady=(10, 0))
+        # Виджеты, которые гаснут, когда карту берут файлом или не берут
+        # вовсе. Комбобоксу нужно «readonly», а не «normal», иначе в него
+        # можно вписать что угодно — и это молча пропадёт.
+        self._map_widgets = []
         ttk.Label(self.map_box, text="Сид карты:").grid(row=0, column=0,
                                                         sticky="e",
                                                         padx=(0, 6))
@@ -291,11 +298,12 @@ class Wizard(ttk.Frame):
                    command=self.roll_map_seed).grid(row=0, column=2, padx=6)
         ttk.Label(self.map_box, text="Размер:").grid(row=0, column=3,
                                                      sticky="e", padx=(14, 6))
-        ttk.Combobox(self.map_box, textvariable=self.map_size_var,
-                     state="readonly", width=10,
-                     values=[worldforge.SIZE_NAMES[key]
-                             for key in ("small", "medium", "large")]).grid(
-            row=0, column=4, sticky="w")
+        size_box = ttk.Combobox(self.map_box, textvariable=self.map_size_var,
+                                state="readonly", width=10,
+                                values=[worldforge.SIZE_NAMES[key]
+                                        for key in ("small", "medium",
+                                                    "large")])
+        size_box.grid(row=0, column=4, sticky="w")
         ttk.Label(self.map_box, text="Материков:").grid(row=0, column=5,
                                                         sticky="e",
                                                         padx=(14, 6))
@@ -305,6 +313,9 @@ class Wizard(ttk.Frame):
         ttk.Checkbutton(self.map_box, text="мир замкнут по долготе",
                         variable=self.map_wrap).grid(row=0, column=7,
                                                      sticky="w", padx=(14, 0))
+        for child in self.map_box.winfo_children():
+            self._map_widgets.append((child, "readonly"
+                                      if child is size_box else "normal"))
 
         bar = ttk.Frame(page)
         bar.pack(fill="x", pady=(10, 0))
@@ -388,6 +399,7 @@ class Wizard(ttk.Frame):
             scale.config(command=moved)
             position.trace_add("write", lambda *_, s=scale, v=position:
                                s.set(v.get()))
+            self._map_widgets.append((scale, "normal"))
             row += 1
 
     @staticmethod
@@ -406,10 +418,10 @@ class Wizard(ttk.Frame):
 
     def _map_mode_changed(self) -> None:
         mode = self.map_mode.get()
-        state = "normal" if mode == MAP_RANDOM else "disabled"
-        for child in self.map_box.winfo_children():
+        random_map = mode == MAP_RANDOM
+        for widget, live in self._map_widgets:
             try:
-                child.configure(state=state)
+                widget.configure(state=live if random_map else "disabled")
             except tk.TclError:
                 pass
         if mode == MAP_NONE:
@@ -425,8 +437,15 @@ class Wizard(ttk.Frame):
         self.map_seed_var.set(random_seed_text())
 
     def roll_map_knobs(self) -> None:
-        """Кости по сиду карты: тот же сид — та же раскрутка ползунков."""
-        seed = self.map_seed_var.get() or random_seed_text()
+        """Кости карты: новый сид и раскрутка ползунков этим же сидом.
+
+        Как в исходном картогенераторе: сперва берётся новый сид, потом
+        им засеваются ползунки. Значит, показанный сид полностью
+        описывает карту, а второе нажатие даёт другую раскладку, а не ту
+        же самую.
+        """
+        seed = random_seed_text()
+        self.map_seed_var.set(seed)
         locked = [key for key, var in self.map_knob_locks.items()
                   if var.get()]
         rolled = worldforge.random_knobs(seed, locked=locked)
@@ -448,6 +467,24 @@ class Wizard(ttk.Frame):
     def map_knobs(self) -> dict:
         return {key: int(var.get()) for key, var in self.map_knob_vars.items()}
 
+    def map_recipe(self) -> tuple:
+        """Чем сейчас описана карта: сид, размер, материки, замкнутость, шкалы.
+
+        По этому же набору видно, не устарел ли предпросмотр: стоит
+        тронуть хоть один ползунок — и показанная карта уже не та, что
+        получится при создании мира.
+        """
+        return (self.map_seed_var.get(), self.map_size_key(),
+                self.map_continents(), bool(self.map_wrap.get()),
+                tuple(sorted(self.map_knobs().items())))
+
+    def preview_is_fresh(self) -> bool:
+        if self.map_preview is None:
+            return False
+        if self.map_mode.get() == MAP_FILE:
+            return self._preview_key == ("файл", self.map_path)
+        return self._preview_key == self.map_recipe()
+
     def map_size_key(self) -> str:
         wanted = self.map_size_var.get()
         for key, name in worldforge.SIZE_NAMES.items():
@@ -466,6 +503,13 @@ class Wizard(ttk.Frame):
     def make_map(self) -> None:
         """Карта считается в стороне от окна: она идёт не одну секунду."""
         if self._map_busy:
+            return
+        if self._world_busy:
+            # Движок в это время сам строит карту в другом потоке; две
+            # стройки разом только мешают друг другу.
+            messagebox.showinfo("Мир создаётся",
+                                "Дождитесь конца создания мира — "
+                                "и делайте карту.")
             return
         self.map_mode.set(MAP_RANDOM)
         self._map_mode_changed()
@@ -520,6 +564,7 @@ class Wizard(ttk.Frame):
     def _map_ready(self, wmap) -> None:
         self._map_busy = False
         self.map_preview = wmap
+        self._preview_key = self.map_recipe()
         facts = wmap.describe()
         self.map_note.set(
             "%s, суша %s, земель %s, логов %s, племён %s"
@@ -586,7 +631,8 @@ class Wizard(ttk.Frame):
         except Exception as error:
             messagebox.showerror("Карта не читается", repr(error))
             return
-        self.map_preview = None
+        self.map_preview = wmap
+        self._preview_key = ("файл", path)
         facts = wmap.describe()
         self.map_note.set("%s — %s, суша %s"
                           % (os.path.basename(path), facts["Размер"],
@@ -632,10 +678,13 @@ class Wizard(ttk.Frame):
 
         mode = self.map_mode.get()
         if mode == MAP_RANDOM:
-            if self.map_preview is not None:
+            if self.preview_is_fresh():
                 facts = self.map_preview.describe()
                 lines.append("  Карта ............... своя, %s, суша %s"
                              % (facts["Размер"], facts["Суша"]))
+            elif self.map_preview is not None:
+                lines.append("  Карта ............... своя, настройки "
+                             "изменились — будет сделана заново")
             else:
                 lines.append("  Карта ............... своя, будет сделана "
                              "при создании мира")
@@ -733,6 +782,8 @@ class Wizard(ttk.Frame):
     # --- обратная связь от генерации ---
 
     def set_busy(self, busy: bool) -> None:
+        """Окно сообщает мастеру, что мир сейчас создаётся."""
+        self._world_busy = bool(busy)
         self.go_button.config(state="disabled" if busy else "normal")
 
     def set_progress(self, part: float) -> None:

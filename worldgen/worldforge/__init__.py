@@ -47,16 +47,17 @@ def forge_world(seed, size=DEFAULT_SIZE, continents=4, wrap=True, k=None,
 _LAST = {"entry": None}
 
 
-def _cache_key(seed, size, continents, wrap, k):
+def _cache_key(seed, size, continents, wrap, k, with_minerals):
     knobs = tuple(sorted((str(a), int(b)) for a, b in (k or {}).items()))
-    return (str(seed), str(size), int(continents), bool(wrap), knobs)
+    return (str(seed), str(size), int(continents), bool(wrap), knobs,
+            bool(with_minerals))
 
 
 def forge(seed, size=DEFAULT_SIZE, continents=4, wrap=True, k=None,
           progress=None, with_minerals=True, **older):
     """Готовая гексовая карта: то же, что читается из файла .world."""
     size = size if size in SIZES else DEFAULT_SIZE
-    key = _cache_key(seed, size, continents, wrap, k)
+    key = _cache_key(seed, size, continents, wrap, k, with_minerals)
     entry = _LAST["entry"]
     if entry is not None and entry[0] == key:
         from .. import worldmap as _wm
@@ -116,6 +117,9 @@ def random_knobs(seed, locked=None) -> dict:
             out[key] = _round((rng() - 0.5) * 60)
         else:
             out[key] = _round(rng() * 100)
+    # Вершины бросаются дважды: сперва в общем списке (0…100), потом
+    # своим броском (0…30). Так в исходном генераторе, и менять это
+    # нельзя — иначе с того же сида выпадет другая раскладка.
     if "peaks" not in locked:
         out["peaks"] = _round(rng() * 30)
     if "continents" not in locked:

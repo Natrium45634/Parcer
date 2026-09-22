@@ -1955,6 +1955,12 @@ class _Forge:
                      "coast_type", "magic", "settle", "land_reg", "water_reg",
                      "range_reg", "river_reg", "cont"):
             setattr(world, name, getattr(self, name))
+        # В карту .world уезжает не всё: формат держит два десятка слоёв,
+        # а мир знает больше. Пригодность под поселение (settle), тип
+        # берега (coast_type), порядок рек, течения и уровень залива
+        # (filled) остаются здесь — они посчитаны как в исходнике и ждут
+        # блоков, которым понадобятся. Считать их заново дороже, чем
+        # донести.
         world.peaks = self.peaks
         world.volcanoes = self.volcanoes
         world.features = self.features

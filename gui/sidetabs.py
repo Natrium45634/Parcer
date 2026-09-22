@@ -7,8 +7,10 @@ ttk сжимает подписи до «Ль» и «Пр», и найти ну�
 групп, внутри — полные названия, справа — сам раздел.
 
 Снаружи этот виджет ведёт себя как ttk.Notebook: те же add, select,
-tabs, tab и то же событие <<NotebookTabChanged>>, — чтобы окно летописи
-не знало, чем ему показывают разделы.
+tabs, tab, index и то же событие <<NotebookTabChanged>>, — чтобы окно
+летописи не знало, чем ему показывают разделы. Чего нет, того нет:
+разделы не прячутся и не удаляются (forget, hide, insert), потому что
+летопись этого никогда не просит.
 """
 
 from __future__ import annotations
@@ -104,7 +106,11 @@ class SideTabs(ttk.Frame):
         return [str(frame) for frame in self._frames]
 
     def tab(self, item, option=None, **kwargs):
+        """Прочитать или переименовать раздел — как у ttk.Notebook."""
         index = self._index_of(item)
+        if "text" in kwargs:
+            self._titles[index] = kwargs["text"]
+            self.tree.item(self._nodes[index], text="  " + kwargs["text"])
         if option in ("text", "-text"):
             return self._titles[index]
         return {"text": self._titles[index]}
@@ -112,6 +118,8 @@ class SideTabs(ttk.Frame):
     def index(self, item) -> int:
         if item == "current":
             return max(0, self._current)
+        if item == "end":
+            return len(self._frames)     # у Notebook «end» — это счёт разделов
         return self._index_of(item)
 
     def select(self, item=None):

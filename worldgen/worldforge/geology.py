@@ -23,22 +23,22 @@ SIZE_NAMES = ('ничтожные следы', 'следы', 'скудные з�
               'огромные запасы')
 GRADE_NAMES = ('бедная руда', 'рядовая руда', 'богатая руда')
 
-# Поля металлогенических поясов считаются по сиду мира, и хранить их
-# стоит только для того мира, который сейчас на руках: иначе за сеанс с
-# десятком карт в памяти копятся десятки полей шума.
-_PROV_CACHE = {"seed": None, "fields": {}}
-
-
 def ore_province(world, family: str, c: int, r: int) -> float:
-    """Насколько богат этим семейством руд здешний край."""
-    seed = world.cfg.seed
-    if _PROV_CACHE["seed"] != seed:
-        _PROV_CACHE["seed"] = seed
-        _PROV_CACHE["fields"] = {}
-    field = _PROV_CACHE["fields"].get(family)
+    """Насколько богат этим семейством руд здешний край.
+
+    Поля поясов живут на самом мире, а не в общем хранилище модуля:
+    две карты могут считаться разом (окно делает предпросмотр, пока
+    движок строит мир), и общий кэш подсунул бы одной из них чужие
+    недра — а значит, сид перестал бы определять мир.
+    """
+    fields = getattr(world, "_ore_fields", None)
+    if fields is None:
+        fields = {}
+        world._ore_fields = fields
+    field = fields.get(family)
     if field is None:
-        field = make_noise(rng_from("%s:prov:%s" % (seed, family)))
-        _PROV_CACHE["fields"][family] = field
+        field = make_noise(rng_from("%s:prov:%s" % (world.cfg.seed, family)))
+        fields[family] = field
     v = (field(c * 0.016, r * 0.016, 3.7) * 0.72
          + field(c * 0.055, r * 0.055, 8.1) * 0.28)
     return (max(0.0, v + 0.65) ** 3) * 1.4

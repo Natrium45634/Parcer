@@ -1245,7 +1245,7 @@ class ChronicleApp(tk.Tk):
         source = self.world.map_source or ""
         if source and os.path.exists(source):
             self.wizard.map_path = source
-            self.wizard.map_mode.set("файл")
+            self.wizard.set_map_mode(wizard_mod.MAP_FILE)
         self._fill_all()
         self.show_viewer()
 

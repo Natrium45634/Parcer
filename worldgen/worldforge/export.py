@@ -170,6 +170,20 @@ def save(world, path, with_minerals: bool = True, progress=None) -> int:
     return save_map(worldmap_of(world, with_minerals, progress), path)
 
 
+def _layer_bytes(data) -> bytes:
+    """Слой в байты. Формат .world — младшим байтом вперёд, всегда.
+
+    Читатель на машине с обратным порядком байт переворачивает числа при
+    чтении, значит и писать надо в том же порядке, иначе свой же файл
+    прочитается мусором.
+    """
+    if not wm._BIG_ENDIAN:
+        return data.tobytes()
+    flipped = array(data.typecode, data)
+    flipped.byteswap()
+    return flipped.tobytes()
+
+
 def dumps_map(wmap) -> bytes:
     """Готовая карта (та же, что читается из файла) — снова в байты."""
     json_bytes = json.dumps(wmap.tail, ensure_ascii=False,
@@ -179,7 +193,7 @@ def dumps_map(wmap) -> bytes:
         dtype = DT_OF.get(layer_id)
         if dtype is None:
             continue
-        blocks.append((layer_id, dtype, wmap.layers[layer_id].tobytes()))
+        blocks.append((layer_id, dtype, _layer_bytes(wmap.layers[layer_id])))
     header = 64
     body = sum(8 + len(raw) for _, _, raw in blocks)
     json_offset = header + body
