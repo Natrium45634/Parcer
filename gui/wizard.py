@@ -23,10 +23,13 @@
 from __future__ import annotations
 
 import os
+import queue
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from worldgen import mapforge, tuning
+from worldgen import tuning, worldforge
+from worldgen import worldmap
 from worldgen.engine import Settings
 from worldgen.rng import Rng, random_seed_text, seed_to_int
 
@@ -64,15 +67,18 @@ class Wizard(ttk.Frame):
 
         self.map_mode = tk.StringVar(value=MAP_RANDOM)
         self.map_seed_var = tk.StringVar(value=random_seed_text())
-        self.map_size_var = tk.StringVar(value=mapforge.DEFAULT_SIZE)
-        self.map_land = tk.IntVar(value=34)
-        self.map_rough = tk.IntVar(value=50)
-        self.map_warm = tk.IntVar(value=50)
-        self.map_wet = tk.IntVar(value=50)
-        self.map_magic = tk.IntVar(value=50)
+        self.map_size_var = tk.StringVar(
+            value=worldforge.SIZE_NAMES[worldforge.DEFAULT_SIZE])
+        self.map_cont_var = tk.StringVar(value="4")
+        self.map_wrap = tk.BooleanVar(value=True)
+        self.map_knob_vars = {}    # ключ -> IntVar 0…100
+        self.map_knob_locks = {}   # ключ -> BooleanVar
+        self.map_knob_labels = {}
         self.map_path = ""
         self.map_preview = None    # сделанная карта (WorldMap)
         self._photo = None
+        self._map_busy = False
+        self._map_queue = None
 
         self.steps = ttk.Notebook(self)
         self.steps.pack(fill="both", expand=True, padx=6, pady=6)
@@ -254,12 +260,13 @@ class Wizard(ttk.Frame):
     # ------------------------------------------------------------------
 
     def _build_map_step(self) -> None:
+        """Шаг «Карта»: настоящий картогенератор со своими ползунками."""
         page = ttk.Frame(self.steps, padding=12)
         self.steps.add(page, text="  2. Карта  ")
 
         picker = ttk.Frame(page)
         picker.pack(fill="x")
-        ttk.Radiobutton(picker, text="Случайная гексовая карта",
+        ttk.Radiobutton(picker, text="Гексовая карта Worldforge",
                         variable=self.map_mode, value=MAP_RANDOM,
                         command=self._map_mode_changed).grid(row=0, column=0,
                                                              sticky="w")
@@ -278,52 +285,119 @@ class Wizard(ttk.Frame):
         ttk.Label(self.map_box, text="Сид карты:").grid(row=0, column=0,
                                                         sticky="e",
                                                         padx=(0, 6))
-        ttk.Entry(self.map_box, textvariable=self.map_seed_var, width=20).grid(
+        ttk.Entry(self.map_box, textvariable=self.map_seed_var, width=18).grid(
             row=0, column=1, sticky="w")
         ttk.Button(self.map_box, text="Случайный",
-                   command=lambda: self.map_seed_var.set(
-                       random_seed_text())).grid(row=0, column=2, padx=6)
+                   command=self.roll_map_seed).grid(row=0, column=2, padx=6)
         ttk.Label(self.map_box, text="Размер:").grid(row=0, column=3,
-                                                     sticky="e", padx=(18, 6))
+                                                     sticky="e", padx=(14, 6))
         ttk.Combobox(self.map_box, textvariable=self.map_size_var,
-                     state="readonly", width=12,
-                     values=list(mapforge.SIZES)).grid(row=0, column=4,
-                                                       sticky="w")
+                     state="readonly", width=10,
+                     values=[worldforge.SIZE_NAMES[key]
+                             for key in ("small", "medium", "large")]).grid(
+            row=0, column=4, sticky="w")
+        ttk.Label(self.map_box, text="Материков:").grid(row=0, column=5,
+                                                        sticky="e",
+                                                        padx=(14, 6))
+        ttk.Spinbox(self.map_box, from_=1, to=8, increment=1, width=4,
+                    textvariable=self.map_cont_var).grid(row=0, column=6,
+                                                         sticky="w")
+        ttk.Checkbutton(self.map_box, text="мир замкнут по долготе",
+                        variable=self.map_wrap).grid(row=0, column=7,
+                                                     sticky="w", padx=(14, 0))
 
-        sliders = (("Сколько суши", self.map_land),
-                   ("Насколько изрезан рельеф", self.map_rough),
-                   ("Тепло", self.map_warm),
-                   ("Влага", self.map_wet),
-                   ("Магия", self.map_magic))
-        for number, (name, var) in enumerate(sliders, start=1):
-            ttk.Label(self.map_box, text=name, width=26, anchor="w").grid(
-                row=number, column=0, columnspan=2, sticky="w", pady=(6, 0))
-            scale = ttk.Scale(self.map_box, from_=0, to=100, length=240,
-                              orient="horizontal")
-            scale.set(var.get())
-            scale.grid(row=number, column=2, columnspan=3, sticky="w",
-                       pady=(6, 0))
-            scale.config(command=lambda value, holder=var:
-                         holder.set(int(float(value))))
-
-        buttons = ttk.Frame(page)
-        buttons.pack(fill="x", pady=(10, 0))
-        ttk.Button(buttons, text="Сделать карту",
+        bar = ttk.Frame(page)
+        bar.pack(fill="x", pady=(10, 0))
+        ttk.Button(bar, text="Сделать карту", style="Go.TButton",
                    command=self.make_map).pack(side="left")
-        ttk.Button(buttons, text="Ещё раз, по-другому",
+        ttk.Button(bar, text="Ещё раз, по-другому",
                    command=self.reroll_map).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Сохранить .world…",
+        ttk.Button(bar, text="Бросить кости",
+                   command=self.roll_map_knobs).pack(side="left")
+        ttk.Button(bar, text="Всё как задумано",
+                   command=self.reset_map_knobs).pack(side="left", padx=6)
+        ttk.Button(bar, text="Сохранить .world…",
                    command=self.save_map).pack(side="left")
-        ttk.Button(buttons, text="Выбрать файл .world…",
+        ttk.Button(bar, text="Выбрать файл .world…",
                    command=self.choose_map).pack(side="left", padx=6)
 
         self.map_note = tk.StringVar(
             value="Карта ещё не сделана. Нажмите «Сделать карту».")
         ttk.Label(page, textvariable=self.map_note, anchor="w").pack(
             fill="x", pady=(10, 4))
-        self.map_canvas = tk.Canvas(page, height=300, bg="#1b1826",
+
+        split = ttk.Frame(page)
+        split.pack(fill="both", expand=True)
+        self._build_map_knobs(split)
+        self.map_canvas = tk.Canvas(split, height=300, bg="#1b1826",
                                     highlightthickness=0)
-        self.map_canvas.pack(fill="both", expand=True)
+        self.map_canvas.pack(side="left", fill="both", expand=True,
+                             padx=(10, 0))
+
+    def _build_map_knobs(self, holder) -> None:
+        """Восемнадцать ползунков картогенератора — с замками, как в мире."""
+        frame = ttk.Frame(holder, width=500)
+        frame.pack(side="left", fill="y")
+        canvas = tk.Canvas(frame, highlightthickness=0, bg="#231f30",
+                           width=478)
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind("<Configure>",
+                   lambda event: canvas.configure(
+                       scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+
+        def wheel(event):
+            step = -1 if getattr(event, "delta", 0) > 0 or event.num == 4 else 1
+            canvas.yview_scroll(step, "units")
+
+        for widget in (canvas, inner):
+            widget.bind("<MouseWheel>", wheel)
+            widget.bind("<Button-4>", wheel)
+            widget.bind("<Button-5>", wheel)
+
+        ttk.Label(inner, text="ПОЛЗУНКИ КАРТЫ").grid(
+            row=0, column=0, columnspan=4, sticky="w", pady=(6, 4))
+        row = 1
+        for key, name in worldforge.K_NAMES:
+            low, high = self._map_knob_span(key)
+            lock = tk.BooleanVar(value=False)
+            position = tk.IntVar(value=worldforge.DEFAULT_K[key])
+            self.map_knob_locks[key] = lock
+            self.map_knob_vars[key] = position
+            ttk.Checkbutton(inner, variable=lock).grid(row=row, column=0,
+                                                       sticky="w")
+            ttk.Label(inner, text=name, width=24, anchor="w").grid(
+                row=row, column=1, sticky="w")
+            scale = ttk.Scale(inner, from_=low, to=high, length=140,
+                              orient="horizontal")
+            scale.set(position.get())
+            scale.grid(row=row, column=2, sticky="w", padx=6)
+            label = ttk.Label(inner, text=str(position.get()), width=5,
+                              anchor="e")
+            label.grid(row=row, column=3, sticky="w")
+            self.map_knob_labels[key] = label
+
+            def moved(value, holder=position, tag=key):
+                holder.set(int(float(value)))
+                self.map_knob_labels[tag].config(text=str(holder.get()))
+
+            scale.config(command=moved)
+            position.trace_add("write", lambda *_, s=scale, v=position:
+                               s.set(v.get()))
+            row += 1
+
+    @staticmethod
+    def _map_knob_span(key: str):
+        """У тепла шкала в обе стороны, у вершин — счётная."""
+        if key == "temperature":
+            return -30, 30
+        if key == "peaks":
+            return 0, 40
+        return 0, 100
 
     def _map_mode_changed(self) -> None:
         mode = self.map_mode.get()
@@ -340,27 +414,117 @@ class Wizard(ttk.Frame):
                               % (os.path.basename(self.map_path)
                                  or "пока никакой"))
 
+    # --- ползунки карты ---
+
+    def roll_map_seed(self) -> None:
+        self.map_seed_var.set(random_seed_text())
+
+    def roll_map_knobs(self) -> None:
+        """Кости по сиду карты: тот же сид — та же раскрутка ползунков."""
+        seed = self.map_seed_var.get() or random_seed_text()
+        locked = [key for key, var in self.map_knob_locks.items()
+                  if var.get()]
+        rolled = worldforge.random_knobs(seed, locked=locked)
+        for key, value in rolled.items():
+            if key == "continents":
+                self.map_cont_var.set(str(value))
+            elif key in self.map_knob_vars:
+                self.map_knob_vars[key].set(int(value))
+                self.map_knob_labels[key].config(text=str(int(value)))
+
+    def reset_map_knobs(self) -> None:
+        for key, var in self.map_knob_vars.items():
+            if self.map_knob_locks[key].get():
+                continue
+            var.set(worldforge.DEFAULT_K[key])
+            self.map_knob_labels[key].config(
+                text=str(worldforge.DEFAULT_K[key]))
+
+    def map_knobs(self) -> dict:
+        return {key: int(var.get()) for key, var in self.map_knob_vars.items()}
+
+    def map_size_key(self) -> str:
+        wanted = self.map_size_var.get()
+        for key, name in worldforge.SIZE_NAMES.items():
+            if name == wanted:
+                return key
+        return worldforge.DEFAULT_SIZE
+
+    def map_continents(self) -> int:
+        try:
+            return max(1, min(8, int(float(self.map_cont_var.get()))))
+        except ValueError:
+            return 4
+
+    # --- сама карта ---
+
     def make_map(self) -> None:
+        """Карта считается в стороне от окна: она идёт не одну секунду."""
+        if self._map_busy:
+            return
         self.map_mode.set(MAP_RANDOM)
         self._map_mode_changed()
-        try:
-            wmap = mapforge.forge(
-                self.map_seed_var.get() or random_seed_text(),
-                size=self.map_size_var.get(),
-                land_share=self.map_land.get() / 100.0,
-                roughness=self.map_rough.get() / 100.0,
-                warmth=self.map_warm.get() / 100.0,
-                wetness=self.map_wet.get() / 100.0,
-                magic=self.map_magic.get() / 100.0)
-        except Exception as error:               # показать, а не молчать
-            messagebox.showerror("Карта не вышла", repr(error))
+        seed = self.map_seed_var.get() or random_seed_text()
+        self.map_seed_var.set(seed)
+        size = self.map_size_key()
+        width, height = worldforge.SIZES[size]
+        self.map_note.set("Делаю карту %d×%d гексов…" % (width, height))
+        self._map_busy = True
+        self._map_queue = queue.Queue()
+        box = self._map_queue
+        options = {"size": size, "continents": self.map_continents(),
+                   "wrap": bool(self.map_wrap.get()), "k": self.map_knobs()}
+
+        def work():
+            try:
+                wmap = worldforge.forge(
+                    seed, progress=lambda part, note: box.put(
+                        ("шаг", part, note)), **options)
+                box.put(("готово", wmap))
+            except Exception as error:            # показать, а не молчать
+                box.put(("ошибка", error))
+
+        threading.Thread(target=work, daemon=True).start()
+        self.after(150, self._map_poll)
+
+    def _map_poll(self) -> None:
+        """Пока карта считается, окно живёт и показывает, где счёт."""
+        box = self._map_queue
+        if box is None:
             return
+        done = False
+        try:
+            while True:
+                item = box.get_nowait()
+                if item[0] == "шаг":
+                    self.map_note.set("Делаю карту: %s (%d%%)"
+                                      % (item[2], int(item[1] * 100)))
+                elif item[0] == "готово":
+                    self._map_ready(item[1])
+                    done = True
+                else:
+                    self._map_busy = False
+                    self.map_note.set("Карта не вышла: %r" % (item[1],))
+                    messagebox.showerror("Карта не вышла", repr(item[1]))
+                    done = True
+        except queue.Empty:
+            pass
+        if not done:
+            self.after(150, self._map_poll)
+
+    def _map_ready(self, wmap) -> None:
+        self._map_busy = False
         self.map_preview = wmap
         facts = wmap.describe()
-        self.map_note.set("%s, суша %s, логов %s, вершин %s, климат-событий %s"
-                          % (facts["Размер"], facts["Суша"], facts["Логовов"],
-                             facts["Вершин"], facts["Климат-событий"]))
+        self.map_note.set(
+            "%s, суша %s, земель %s, логов %s, племён %s"
+            % (facts["Размер"], facts["Суша"],
+               len([f for f in wmap.features
+                    if f.get("type") in ("continent", "bigisland", "island",
+                                         "archipelago")]),
+               len(wmap.lairs), len(wmap.map_tribes)))
         self._draw_map(wmap)
+        self.refresh_summary()
 
     def reroll_map(self) -> None:
         self.map_seed_var.set(random_seed_text())
@@ -368,11 +532,11 @@ class Wizard(ttk.Frame):
 
     def _draw_map(self, wmap) -> None:
         """Карта во всю ширину окна, гексовыми рядами вразбежку."""
-        grid = mapforge.color_grid(wmap)
+        grid = worldforge.color_grid(wmap)
         self.map_canvas.update_idletasks()
         room_w = max(PREVIEW_MIN, self.map_canvas.winfo_width() - 16)
         room_h = max(300, self.map_canvas.winfo_height() - 16)
-        cell = max(2, min(PREVIEW_CELL,
+        cell = max(1, min(PREVIEW_CELL,
                           room_w // max(1, wmap.width + 1),
                           room_h // max(1, wmap.height)))
         half = cell // 2
@@ -399,8 +563,9 @@ class Wizard(ttk.Frame):
             filetypes=[("Карта мира", "*.world"), ("Все файлы", "*.*")])
         if not path:
             return
-        mapforge.save(self.map_preview, path)
-        messagebox.showinfo("Готово", "Карта записана:\n%s" % path)
+        size = worldforge.save_map(self.map_preview, path)
+        messagebox.showinfo("Готово", "Карта записана (%.1f МБ):\n%s"
+                            % (size / 1048576.0, path))
 
     def choose_map(self) -> None:
         path = filedialog.askopenfilename(
@@ -412,21 +577,17 @@ class Wizard(ttk.Frame):
         self.map_mode.set(MAP_FILE)
         self._map_mode_changed()
         try:
-            from worldgen import worldmap as wmod
-            wmap = wmod.load(path)
+            wmap = worldmap.load(path)
         except Exception as error:
             messagebox.showerror("Карта не читается", repr(error))
             return
-        self.map_preview = wmap
+        self.map_preview = None
         facts = wmap.describe()
         self.map_note.set("%s — %s, суша %s"
                           % (os.path.basename(path), facts["Размер"],
                              facts["Суша"]))
         self._draw_map(wmap)
-
-    # ------------------------------------------------------------------
-    # Шаг 3: создание
-    # ------------------------------------------------------------------
+        self.refresh_summary()
 
     def _build_start_step(self) -> None:
         page = ttk.Frame(self.steps, padding=16)
@@ -474,6 +635,16 @@ class Wizard(ttk.Frame):
                 lines.append("  Карта ............... своя, будет сделана "
                              "при создании мира")
             lines.append("  Сид карты ........... %s" % self.map_seed_var.get())
+            lines.append("  Размер карты ........ %s, материков %d"
+                         % (self.map_size_var.get(), self.map_continents()))
+            shifted = [name for key, name in worldforge.K_NAMES
+                       if int(self.map_knob_vars[key].get())
+                       != worldforge.DEFAULT_K[key]]
+            if shifted:
+                lines.append("  Ползунки карты ...... сдвинуто %d: %s"
+                             % (len(shifted), ", ".join(shifted[:5])
+                                + (" и ещё %d" % (len(shifted) - 5)
+                                   if len(shifted) > 5 else "")))
         elif mode == MAP_FILE:
             lines.append("  Карта ............... файл %s"
                          % (os.path.basename(self.map_path) or "не выбран"))
@@ -528,12 +699,10 @@ class Wizard(ttk.Frame):
         if mode == MAP_RANDOM:
             make = {
                 "seed": self.map_seed_var.get() or self.seed_var.get(),
-                "size": self.map_size_var.get(),
-                "land_share": self.map_land.get() / 100.0,
-                "roughness": self.map_rough.get() / 100.0,
-                "warmth": self.map_warm.get() / 100.0,
-                "wetness": self.map_wet.get() / 100.0,
-                "magic": self.map_magic.get() / 100.0,
+                "size": self.map_size_key(),
+                "continents": self.map_continents(),
+                "wrap": bool(self.map_wrap.get()),
+                "k": self.map_knobs(),
             }
         elif mode == MAP_FILE:
             path = self.map_path

@@ -41,6 +41,7 @@ from worldgen.races import BEASTFOLK, EVIL, RACES, get_race   # noqa: E402
 RACE_IDS = {race.id for race in RACES}
 
 SEEDS = ("Ясень-7", "Первый мир", "проверка", "1234")
+FORGE_SEEDS = ("Своя земля",)
 MAP_SEEDS = ("карта-1", "карта-2")
 SAMPLE_MAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "maps", "aurora-7.world")
@@ -1410,6 +1411,43 @@ def main() -> int:
                      len(first.polities),
                      len(first.map_recorder.frames) if first.map_recorder else 0,
                      first.world_population(), spent))
+
+    # Мир на карте, которую программа делает сама: Worldforge должен
+    # держать те же проверки, что и карта из файла.
+    print()
+    for seed in FORGE_SEEDS:
+        started = time.time()
+        settings = Settings(seed=seed, years=4000,
+                            map_make={"seed": seed, "size": "small"})
+        first = generate(settings)
+        second = generate(settings)
+        spent = time.time() - started
+
+        if digest(first) != digest(second):
+            failures.append("своя карта, сид «%s»: две генерации разошлись"
+                            % seed)
+        handle, path = tempfile.mkstemp(suffix=".json")
+        os.close(handle)
+        try:
+            storage.save_world(first, path)
+            restored = storage.load_world(path)
+        finally:
+            os.remove(path)
+        if digest(restored) != digest(first):
+            failures.append("своя карта, сид «%s»: мир изменился после "
+                            "сохранения" % seed)
+        for check in (check_nobility, check_wars, check_politics,
+                      check_calamities, check_faiths, check_nations,
+                      check_tongues, check_embassies, check_things,
+                      check_causes, check_people_memory, check_migrations,
+                      check_strifes, check_lore, check_upheavals,
+                      check_capitals):
+            failures.extend(check(first, "своя/" + seed))
+        failures.extend(check_map_world(first, None, "своя/" + seed))
+        print("  своя карта, сид «%-8s» земель %3d | города %4d | страны %3d "
+              "| население %8d (%.1f c)"
+              % (seed, len(first.regions), len(first.settlements),
+                 len(first.polities), first.world_population(), spent))
 
     if failures:
         print("\nОШИБКИ:")

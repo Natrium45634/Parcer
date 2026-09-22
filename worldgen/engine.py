@@ -61,8 +61,8 @@ class Settings:
     # работает так, как задуман.
     tuning: dict = field(default_factory=dict)
     # Своя карта: если заполнено, гексовая карта делается на месте, а не
-    # берётся файлом. Ключи — как у mapforge.forge: seed, size, land_share,
-    # roughness, warmth, wetness, magic.
+    # берётся файлом. Ключи — как у worldforge.forge: seed, size,
+    # continents, wrap и k (восемнадцать ползунков картогенератора).
     map_make: dict = field(default_factory=dict)
 
     def normalized(self) -> "Settings":

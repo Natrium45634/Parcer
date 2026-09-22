@@ -63,10 +63,10 @@ def _build_from_map(ctx, path: str, make=None) -> None:
     world = ctx.world
     rng = ctx.rng("geography")
     if make:
-        from .. import mapforge
+        from .. import worldforge
         options = dict(make)
         seed = str(options.pop("seed", "") or ctx.world.seed_text)
-        wmap = mapforge.forge(seed, **options)
+        wmap = worldforge.forge(seed, **options)
         path = "карта «%s»" % seed
     else:
         wmap = wmod.load(path)
