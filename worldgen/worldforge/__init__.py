@@ -30,8 +30,13 @@ __all__ = ("forge", "forge_world", "save_map", "color_grid", "random_knobs",
 
 
 def forge_world(seed, size=DEFAULT_SIZE, continents=4, wrap=True, k=None,
-                progress=None) -> ForgedWorld:
-    """Собирает мир целиком — со всеми слоями, но без упаковки в карту."""
+                progress=None, **older) -> ForgedWorld:
+    """Собирает мир целиком — со всеми слоями, но без упаковки в карту.
+
+    Лишние ключи молча пропускаются: в старых сохранениях лежат настройки
+    прежнего генератора карт, и мир по ним всё равно должен собраться.
+    """
+    size = size if size in SIZES else DEFAULT_SIZE
     cfg = Config(seed=seed, size=size, continents=continents, wrap=wrap, k=k)
     return generate(cfg, progress)
 
@@ -48,8 +53,9 @@ def _cache_key(seed, size, continents, wrap, k):
 
 
 def forge(seed, size=DEFAULT_SIZE, continents=4, wrap=True, k=None,
-          progress=None, with_minerals=True):
+          progress=None, with_minerals=True, **older):
     """Готовая гексовая карта: то же, что читается из файла .world."""
+    size = size if size in SIZES else DEFAULT_SIZE
     key = _cache_key(seed, size, continents, wrap, k)
     if _LAST["key"] == key and _LAST["blob"]:
         from .. import worldmap as _wm

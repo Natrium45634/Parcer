@@ -173,12 +173,18 @@ def check_nations(world, seed: str) -> list:
     return problems
 
 
-def check_map_world(world, link_regions, seed: str) -> list:
-    """Проверяет мир, построенный по карте."""
+def check_map_world(world, wmap, seed: str) -> list:
+    """Проверяет мир, построенный по карте.
+
+    Карту надо передать ту самую, на которой мир и строился: своя карта
+    Worldforge и карта из файла — это разные земли, и сверять мир с
+    чужой картой значит искать города в чужом море.
+    """
     from worldgen import worldmap as wm
 
     problems = []
-    wmap = wm.load(SAMPLE_MAP)
+    if wmap is None:
+        wmap = wm.load(SAMPLE_MAP)
 
     seen = {}
     for region in world.regions.values():
@@ -1366,6 +1372,8 @@ def main() -> int:
     if not os.path.exists(SAMPLE_MAP):
         print("\n  карта для примера не найдена — проверка по карте пропущена")
     else:
+        from worldgen import worldmap as wm_mod
+        sample = wm_mod.load(SAMPLE_MAP)
         print()
         for seed in MAP_SEEDS:
             started = time.time()
@@ -1403,7 +1411,7 @@ def main() -> int:
             failures.extend(check_lore(first, "карта/" + seed))
             failures.extend(check_upheavals(first, "карта/" + seed))
             failures.extend(check_capitals(first, "карта/" + seed))
-            failures.extend(check_map_world(first, None, "карта/" + seed))
+            failures.extend(check_map_world(first, sample, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "
                   "кадров %3d | население %8d (%.1f c)"
@@ -1443,7 +1451,9 @@ def main() -> int:
                       check_strifes, check_lore, check_upheavals,
                       check_capitals):
             failures.extend(check(first, "своя/" + seed))
-        failures.extend(check_map_world(first, None, "своя/" + seed))
+        from worldgen import worldforge
+        failures.extend(check_map_world(
+            first, worldforge.forge(seed, size="small"), "своя/" + seed))
         print("  своя карта, сид «%-8s» земель %3d | города %4d | страны %3d "
               "| население %8d (%.1f c)"
               % (seed, len(first.regions), len(first.settlements),
