@@ -62,7 +62,9 @@
 | **Заговоры** (5 ступеней, предательства, разоблачения) | `systems/cabals.py` |
 | **68 шкал настроек движка** с замками | `tuning.py` |
 | Мастер создания мира из трёх шагов | `gui/wizard.py` |
-| Летопись на 38 разделов списком слева | `gui/app.py`, `gui/sidetabs.py`, `chronicle.py` |
+| Летопись на 39 разделов списком слева | `gui/app.py`, `gui/sidetabs.py`, `chronicle.py` |
+| **Живая карта мира**: 8 слоёв, ползунок года, карточка гекса | `gui/atlas.py` |
+| Масштаб окна (А−/А+, `Ctrl+=`, `Ctrl+-`, `Ctrl+0`) | `gui/app.py` |
 | Сборка .exe для Windows и выпуск в Releases | `.github/workflows/build-windows.yml` |
 
 **Чего ещё нет** (открытые блоки большого ТЗ):
@@ -81,6 +83,7 @@ main.py                 точка входа: окно (по умолчанию
 gui/app.py              окно летописи: 38 разделов, меню, генерация в потоке
 gui/wizard.py           мастер: шаг «Мир», шаг «Карта», шаг «Создание»
 gui/sidetabs.py         список разделов слева вместо ленты вкладок
+gui/atlas.py            живая карта: гексы картинкой, значки поверх неё
 worldgen/engine.py      Settings и главный цикл: год за годом
 worldgen/world.py       World — все реестры мира и операции над ними
 worldgen/models.py      56 моделей данных (Event, Polity, Figure, Fact, …)

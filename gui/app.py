@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import queue
@@ -11,6 +12,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
+from gui.atlas import Atlas
 from gui.sidetabs import SideTabs
 from gui import wizard as wizard_mod
 from gui.wizard import Wizard
@@ -68,6 +70,36 @@ def pick_font(candidates, size, weight="normal"):
     return tkfont.Font(size=size, weight=weight)
 
 
+# Настройки самой программы (не мира) живут в домашней папке человека:
+# рядом с .exe писать нельзя — он может лежать где угодно, хоть на
+# флешке, хоть в папке без прав на запись.
+SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".хронист.json")
+MIN_SCALE, MAX_SCALE = -2, 10
+
+
+def _read_scale() -> int:
+    """Во сколько ступеней крупнее обычного человек просил набирать текст."""
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as handle:
+            saved = json.load(handle)
+        return max(MIN_SCALE, min(MAX_SCALE, int(saved.get("scale", 0))))
+    except Exception:
+        return 0
+
+
+def _write_scale(step: int) -> None:
+    try:
+        saved = {}
+        if os.path.exists(SETTINGS_PATH):
+            with open(SETTINGS_PATH, encoding="utf-8") as handle:
+                saved = json.load(handle)
+        saved["scale"] = int(step)
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as handle:
+            json.dump(saved, handle, ensure_ascii=False)
+    except Exception:
+        pass          # не записалось — не беда, в этот раз обойдёмся
+
+
 def _fit(text: str, limit: int = 44) -> str:
     """Подрезает подпись, чтобы она не растягивала панель настроек."""
     text = str(text)
@@ -84,12 +116,19 @@ class ChronicleApp(tk.Tk):
 
         self.world = None
         self.worker = None
+        self.atlas = None              # живая карта: появляется вместе с миром
         self.progress_queue = queue.Queue()
         self.stop_flag = False
 
         self.mono = pick_font(("Consolas", "DejaVu Sans Mono", "Menlo",
                                "Courier New", "TkFixedFont"), 10)
         self.ui_font = pick_font(("Segoe UI", "DejaVu Sans", "Helvetica"), 10)
+        self.head_font = pick_font(("Segoe UI", "DejaVu Sans"), 11, "bold")
+        self.go_font = pick_font(("Segoe UI", "DejaVu Sans"), 10, "bold")
+        # Масштаб окна: насколько крупнее обычного набраны буквы. Выбор
+        # человека переживает закрытие программы — переставлять его при
+        # каждом запуске никто не станет.
+        self.scale_step = _read_scale()
 
         self._set_icon()
         self._setup_style()
@@ -102,6 +141,12 @@ class ChronicleApp(tk.Tk):
         self._build_status()
         self._show_welcome()
         self.show_wizard()
+        self.apply_scale()
+        for combo in ("<Control-plus>", "<Control-equal>", "<Control-KP_Add>"):
+            self.bind_all(combo, lambda _event: self.change_scale(1))
+        for combo in ("<Control-minus>", "<Control-KP_Subtract>"):
+            self.bind_all(combo, lambda _event: self.change_scale(-1))
+        self.bind_all("<Control-0>", lambda _event: self.reset_scale())
 
     # ------------------------------------------------------------------
     # Оформление
@@ -131,11 +176,11 @@ class ChronicleApp(tk.Tk):
         style.configure("TLabel", background=BG, foreground=INK)
         style.configure("Panel.TLabel", background=PANEL, foreground=INK)
         style.configure("Head.TLabel", background=PANEL, foreground=ACCENT,
-                        font=pick_font(("Segoe UI", "DejaVu Sans"), 11, "bold"))
+                        font=self.head_font)
         style.configure("TButton", background="#3a3550", foreground=INK, padding=5)
         style.map("TButton", background=[("active", "#4a4368")])
         style.configure("Go.TButton", background=ACCENT, foreground="#221d14",
-                        font=pick_font(("Segoe UI", "DejaVu Sans"), 10, "bold"))
+                        font=self.go_font)
         style.map("Go.TButton", background=[("active", "#e0bc63")])
         style.configure("TNotebook", background=BG, borderwidth=0)
         style.configure("TNotebook.Tab", background=PANEL, foreground=INK,
@@ -169,8 +214,10 @@ class ChronicleApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def _build_menu(self) -> None:
-        menu = tk.Menu(self)
-        file_menu = tk.Menu(menu, tearoff=0)
+        menu = tk.Menu(self, font=self.ui_font)
+        self._menus = [menu]
+        file_menu = tk.Menu(menu, tearoff=0, font=self.ui_font)
+        self._menus.append(file_menu)
         file_menu.add_command(label="Сохранить мир…", command=self.save_world)
         file_menu.add_command(label="Открыть мир…", command=self.open_world)
         file_menu.add_separator()
@@ -182,7 +229,9 @@ class ChronicleApp(tk.Tk):
         file_menu.add_command(label="Выход", command=self.destroy)
         menu.add_cascade(label="Файл", menu=file_menu)
 
-        help_menu = tk.Menu(menu, tearoff=0)
+        help_menu = tk.Menu(menu, tearoff=0, font=self.ui_font)
+
+        self._menus.append(help_menu)
         help_menu.add_command(label="О программе", command=self.show_about)
         menu.add_cascade(label="Справка", menu=help_menu)
         self.config(menu=menu)
@@ -201,10 +250,57 @@ class ChronicleApp(tk.Tk):
                   style="Panel.TLabel").pack(side="left", padx=12)
         ttk.Button(bar, text="Новый мир",
                    command=self.show_wizard).pack(side="right")
+        # Масштаб: крупнее или мельче весь текст окна разом.
+        zoom = ttk.Frame(bar, style="Panel.TFrame")
+        zoom.pack(side="right", padx=(0, 14))
+        ttk.Button(zoom, text="А−", width=3,
+                   command=lambda: self.change_scale(-1)).pack(side="left")
+        self.scale_var = tk.StringVar(value="100%")
+        ttk.Label(zoom, textvariable=self.scale_var, style="Panel.TLabel",
+                  width=5, anchor="center").pack(side="left", padx=2)
+        ttk.Button(zoom, text="А+", width=3,
+                   command=lambda: self.change_scale(1)).pack(side="left")
         self.to_chronicle = ttk.Button(bar, text="К летописи",
                                        command=self.show_viewer)
         self.to_chronicle.pack(side="right", padx=6)
         self.to_chronicle.config(state="disabled")
+
+    # ------------------------------------------------------------------
+    # Масштаб окна
+    # ------------------------------------------------------------------
+
+    def change_scale(self, delta: int) -> None:
+        step = max(MIN_SCALE, min(MAX_SCALE, self.scale_step + int(delta)))
+        if step == self.scale_step:
+            return
+        self.scale_step = step
+        self.apply_scale()
+        _write_scale(step)
+
+    def reset_scale(self) -> None:
+        self.scale_step = 0
+        self.apply_scale()
+        _write_scale(0)
+
+    def apply_scale(self) -> None:
+        """Крупнее весь текст разом: шрифты общие, потому хватает их одних."""
+        step = self.scale_step
+        self.ui_font.configure(size=max(7, 10 + step))
+        self.mono.configure(size=max(7, 10 + step))
+        self.head_font.configure(size=max(8, 11 + step))
+        self.go_font.configure(size=max(7, 10 + step))
+        # Строки таблиц не растут за шрифтом сами — им надо сказать.
+        ttk.Style(self).configure("Treeview",
+                                  rowheight=max(18, 22 + step * 2))
+        for item in getattr(self, "_menus", ()):
+            try:
+                item.configure(font=self.ui_font)
+            except tk.TclError:
+                pass
+        if hasattr(self, "scale_var"):
+            self.scale_var.set("%d%%" % round((10 + step) * 100.0 / 10))
+        if getattr(self, "atlas", None) is not None:
+            self.atlas.redraw()
 
     def _build_wizard(self) -> None:
         self.wizard = Wizard(self.body, on_start=self.start_generation,
@@ -240,6 +336,7 @@ class ChronicleApp(tk.Tk):
         self._filled = set()
 
         self._build_chronicle_tab()
+        self._build_map_tab()
         self.eras_text = self._add_text_tab("Эпохи")
         self.polity_tree = self._add_tree_tab(
             "Страны",
@@ -362,6 +459,21 @@ class ChronicleApp(tk.Tk):
         self.regions_text = self._add_text_tab("Земли")
         self.stats_text = self._add_text_tab("Итоги")
         self.tabs.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def _build_map_tab(self) -> None:
+        """Живая карта мира — тот же гексовый вид, что у картогенератора.
+
+        Раздел тяжёлый: карту надо нарисовать целиком. Поэтому он тоже
+        заполняется лениво — только когда его открыли.
+        """
+        self.atlas = Atlas(self.tabs, fonts={"ui": self.ui_font,
+                                             "mono": self.mono})
+        self.tabs.add(self.atlas, text="Карта мира")
+        self._fillers[str(self.atlas)] = self._fill_atlas
+
+    def _fill_atlas(self) -> None:
+        if self.world is not None:
+            self.atlas.show(self.world)
 
     def _build_chronicle_tab(self) -> None:
         frame = ttk.Frame(self.tabs)
@@ -593,6 +705,8 @@ class ChronicleApp(tk.Tk):
     def _fill_all(self) -> None:
         world = self.world
         self._filled = set()
+        if self.atlas is not None:
+            self.atlas.clear()     # чтобы не осталась карта прошлого мира
         self.refresh_chronicle()
         self._set_text(self.eras_text, chronicle.render_eras(world))
         self._set_text(self.folks_text, chronicle.render_folks(world))
