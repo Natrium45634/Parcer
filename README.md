@@ -16,7 +16,7 @@
 
 Ставить ничего не нужно — ни Python, ни библиотек.
 
-Скачать [`Chronist.exe`](https://github.com/Natrium45634/Parcer/releases/download/v1.0/Chronist.exe) — и запустить двойным щелчком.
+Скачать [`Chronist.exe`](https://github.com/Natrium45634/Parcer/releases/latest/download/Chronist.exe) — и запустить двойным щелчком.
 Все файлы выпуска: [страница релиза](https://github.com/Natrium45634/Parcer/releases/latest).
 Файл можно переименовать хоть в «Хронист.exe».
 
