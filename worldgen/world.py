@@ -1429,6 +1429,7 @@ class World:
             "Торговых путей": len(self.routes),
             "Путей действует": len(self.active_routes),
             "Походов в неизведанное": len(self.expeditions),
+            "Сказаний": len(self.tales),
             "Открытых земель": sum(1 for r in self.regions.values()
                                    if r.discovered_year),
             "Тёмных веков": len(self.dark_ages),

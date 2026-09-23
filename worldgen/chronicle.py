@@ -843,6 +843,94 @@ def render_laws(world) -> str:
     return "\n".join(rows)
 
 
+def render_tales(world) -> str:
+    """Сказания: местные героические истории целиком, одна за другой.
+
+    Летопись рассказывает, что случилось с миром; сказание — что
+    случилось с пятью людьми. Поэтому здесь не таблица, а текст: беда,
+    зов, дружина с именами и побуждениями, дорога с потерями, испытание,
+    исход и след.
+    """
+    from . import tales as cat
+
+    rows = ["СКАЗАНИЯ", ""]
+    if not world.tales:
+        rows.append("  В этом мире никто никуда не пошёл.")
+        return "\n".join(rows)
+
+    order = sorted(world.tales.values(), key=lambda item: item.began.ordinal)
+    counts = {}
+    for tale in order:
+        counts[tale.outcome] = counts.get(tale.outcome, 0) + 1
+    rows.append("  Сказаний сложено: %d." % len(order))
+    rows.append("  Чем кончались: %s."
+                % ", ".join("%s — %d" % (key, counts[key])
+                            for key in sorted(counts)))
+    rows.append("")
+
+    for tale in order:
+        era = world.era_at(tale.began.year)
+        rows.append("  %s" % tale.name)
+        rows.append("  " + "-" * (len(tale.name) + 2))
+        if tale.ended is not None and tale.ended.year != tale.began.year:
+            when = "%d—%d годы" % (tale.began.year, tale.ended.year)
+        else:
+            when = "%d год" % tale.began.year
+        rows.append("      %s, %s" % (when, era.name if era else "—"))
+        home = world.regions.get(tale.home_region_id)
+        goal = world.regions.get(tale.region_id)
+        if home is not None and goal is not None and home.id == goal.id:
+            rows.append("      беда стояла в их собственной земле по имени %s"
+                        % home.name)
+        elif home is not None or goal is not None:
+            rows.append("      вышли из земли по имени %s, шли в землю по "
+                        "имени %s"
+                        % (home.name if home is not None else "неведомой",
+                           goal.name if goal is not None else "неведомую"))
+        rows.append("")
+
+        rows.append("      ДРУЖИНА")
+        for item in tale.company:
+            rows.append("        %s — %s%s; %s; %s"
+                        % (item.get("имя", "?"), item.get("роль", ""),
+                           " (мир знал его и раньше)"
+                           if item.get("свой") and item.get("пол") != "f"
+                           else " (мир знал её и раньше)"
+                           if item.get("свой") else "",
+                           item.get("зачем", ""),
+                           cat.fate_text(item.get("судьба", ""),
+                                         item.get("пол", "m"))))
+        rows.append("")
+
+        for stage in tale.stages:
+            rows.append("      %s" % _wrap_tale(stage.get("строка", "")))
+        rows.append("")
+        rows.append("      Исход: %s. Не вернулось: %d из %d."
+                    % (tale.outcome, tale.dead, len(tale.company)))
+        for note in tale.notes:
+            rows.append("      %s" % note)
+        if tale.legend_id and tale.legend_id in world.legends:
+            rows.append("      Об этом поют: «%s»."
+                        % world.legends[tale.legend_id].name)
+        rows.append("")
+    return "\n".join(rows)
+
+
+def _wrap_tale(line: str, width: int = 74) -> str:
+    """Строка сказания в несколько строк — читать её будут глазами."""
+    words = (line or "").split()
+    out, current = [], ""
+    for word in words:
+        if current and len(current) + len(word) + 1 > width:
+            out.append(current)
+            current = word
+        else:
+            current = ("%s %s" % (current, word)).strip()
+    if current:
+        out.append(current)
+    return ("\n      ").join(out)
+
+
 def render_lore(world) -> str:
     """Своды и легенды: что мир записал о себе и что об этом поёт."""
     from . import lore as lore_mod
@@ -2449,6 +2537,7 @@ def full_text(world) -> str:
         render_crafts(world),
         render_laws(world),
         render_lore(world),
+        render_tales(world),
         render_guilds(world),
         render_expeditions(world),
         render_politics(world),

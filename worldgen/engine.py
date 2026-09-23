@@ -33,7 +33,8 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       notables,
                       peoples,
                       religion,
-                      sites, soldiery, spies, strife, succession, tongues,
+                      sites, soldiery, spies, strife, succession,
+                      tales, tongues,
                       trade,
                       unions, upheaval, war)
 from .timeline import Date
@@ -186,6 +187,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             citylife.upkeep(ctx, year, UPKEEP_PERIOD)
             monsters.upkeep(ctx, year, UPKEEP_PERIOD)
             sites.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Сказания идут следом за чудовищами, местами и вещами: к
+            # этому часу в мире уже есть и беда, и те, кто на неё пойдёт.
+            tales.upkeep(ctx, year, UPKEEP_PERIOD)
             lore.upkeep(ctx, year, UPKEEP_PERIOD)
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)
             causes.upkeep(ctx, year, UPKEEP_PERIOD)

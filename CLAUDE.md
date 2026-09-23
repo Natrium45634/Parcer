@@ -37,7 +37,7 @@
 ## Что уже сделано — не делать заново
 
 Полный человеческий перечень возможностей лежит в **`ВОЗМОЖНОСТИ.txt`**
-(1200 строк, 30 разделов). Здесь — короткий список того, за что нельзя
+(1340 строк, 34 раздела). Здесь — короткий список того, за что нельзя
 браться повторно.
 
 | Есть | Где живёт |
@@ -54,6 +54,7 @@
 | Бедствия, великие бедствия, цепи бедствий, Долгая Тьма | `catastrophe.py`, `systems/calamity.py`, `systems/upheaval.py` |
 | Хозяйство: ресурсы земель, торговые пути, гильдии, ремёсла | `goods.py`, `systems/trade.py`, `guilds.py`, `crafts.py` |
 | Артефакты, места истории, именные чудовища, легенды | `artifacts.py`, `sites.py`, `monsters.py`, `lore.py` |
+| **Сказания**: 7 бед, дружина, дорога, 7 исходов, след | `tales.py`, `systems/tales.py`, `narrative_tales.py` |
 | **Причинность**: факты, семена, отложенные последствия, три уровня причин | `history.py`, `systems/causes.py` |
 | **Память людей** и отношения человек↔человек | `recall.py`, `systems/memory.py` |
 | **Демография и переселения народов** | `demography.py`, `systems/migration.py` |
@@ -63,7 +64,7 @@
 | **Заговоры** (5 ступеней, предательства, разоблачения) | `systems/cabals.py` |
 | **69 шкал настроек движка** с замками | `tuning.py` |
 | Мастер создания мира из трёх шагов | `gui/wizard.py` |
-| Летопись на 39 разделов списком слева | `gui/app.py`, `gui/sidetabs.py`, `chronicle.py` |
+| Летопись на 40 разделов списком слева | `gui/app.py`, `gui/sidetabs.py`, `chronicle.py` |
 | **Живая карта мира**: 8 слоёв, ползунок года, карточка гекса | `gui/atlas.py` |
 | Масштаб окна (А−/А+, `Ctrl+=`, `Ctrl+-`, `Ctrl+0`) | `gui/app.py` |
 | Сборка .exe для Windows и выпуск в Releases | `.github/workflows/build-windows.yml` |
@@ -81,7 +82,7 @@
 
 ```
 main.py                 точка входа: окно (по умолчанию) и --cli
-gui/app.py              окно летописи: 38 разделов, меню, генерация в потоке
+gui/app.py              окно летописи: 40 разделов, меню, генерация в потоке
 gui/wizard.py           мастер: шаг «Мир», шаг «Карта», шаг «Создание»
 gui/sidetabs.py         список разделов слева вместо ленты вкладок
 gui/atlas.py            живая карта: гексы картинкой, значки поверх неё
@@ -92,9 +93,10 @@ worldgen/context.py     GenContext: ГСЧ по ключам, даты, карт
 worldgen/rng.py         свой SplitMix64: weighted, chance, bell, jitter, …
 worldgen/storage.py     сохранение мира в JSON и чтение обратно
 worldgen/fates.py       судьба мира: как идёт его населённость по годам
+worldgen/tales.py       перечень сказаний: беды, роли, побуждения, исходы
 worldgen/chronicle.py   текст летописи: 33 раздела full_text
-worldgen/narrative_*.py тексты событий по темам (24 файла)
-worldgen/systems/*.py   39 систем мира, каждая со своим tick/upkeep
+worldgen/narrative_*.py тексты событий по темам (25 файлов)
+worldgen/systems/*.py   40 систем мира, каждая со своим tick/upkeep
 worldgen/worldforge/    картогенератор (см. ниже)
 tools/selfcheck.py      самопроверка: 7 миров и ~30 проверок
 tools/mapcheck.py       сверка картогенератора с эталонной картой

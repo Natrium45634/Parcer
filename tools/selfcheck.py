@@ -47,6 +47,68 @@ SAMPLE_MAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
                           "maps", "aurora-7.world")
 
 
+def check_tales(world, seed: str) -> list:
+    """Сказания: дружина настоящая, дорога по своим землям, след честный."""
+    problems = []
+    for tale in world.tales.values():
+        if not tale.name:
+            problems.append("сид «%s»: у сказания %s нет имени"
+                            % (seed, tale.id))
+        if not tale.outcome:
+            problems.append("сид «%s»: сказание «%s» без исхода"
+                            % (seed, tale.name))
+        if tale.ended is not None and tale.ended.ordinal < tale.began.ordinal:
+            problems.append("сид «%s»: сказание «%s» кончилось раньше, чем "
+                            "началось" % (seed, tale.name))
+        if len(tale.company) < 2:
+            problems.append("сид «%s»: в сказании «%s» некому идти"
+                            % (seed, tale.name))
+        seen = set()
+        for item in tale.company:
+            figure = world.figures.get(item.get("кто", ""))
+            if figure is None:
+                problems.append("сид «%s»: в сказании «%s» идёт тот, кого "
+                                "нет" % (seed, tale.name))
+                continue
+            if figure.id in seen:
+                problems.append("сид «%s»: в сказании «%s» человек идёт "
+                                "дважды" % (seed, tale.name))
+            seen.add(figure.id)
+            if figure.birth is not None \
+                    and figure.birth.year > tale.began.year:
+                problems.append("сид «%s»: в сказании «%s» идёт тот, кто ещё "
+                                "не родился" % (seed, tale.name))
+            if item.get("судьба") in ("пал в пути", "пал у цели",
+                                      "пропал без вести"):
+                if figure.death is None:
+                    problems.append("сид «%s»: в сказании «%s» павший остался "
+                                    "жив" % (seed, tale.name))
+                elif figure.death.year < tale.began.year:
+                    problems.append("сид «%s»: в сказании «%s» павший умер "
+                                    "до похода" % (seed, tale.name))
+        if tale.region_id and tale.region_id not in world.regions:
+            problems.append("сид «%s»: сказание «%s» идёт в землю, которой "
+                            "нет" % (seed, tale.name))
+        for leg in tale.road:
+            if leg.get("земля") and leg["земля"] not in world.regions:
+                problems.append("сид «%s»: дорога сказания «%s» ведёт через "
+                                "землю, которой нет" % (seed, tale.name))
+                break
+        if tale.legend_id and tale.legend_id not in world.legends:
+            problems.append("сид «%s»: у сказания «%s» песня без записи"
+                            % (seed, tale.name))
+        if tale.site_id and tale.site_id not in world.sites:
+            problems.append("сид «%s»: сказание «%s» помнит место, которого "
+                            "нет" % (seed, tale.name))
+        if tale.prize_id and tale.prize_id not in world.artifacts:
+            problems.append("сид «%s»: сказание «%s» шло за вещью, которой "
+                            "нет" % (seed, tale.name))
+    names = [tale.name for tale in world.tales.values()]
+    if len(set(names)) != len(names):
+        problems.append("сид «%s»: имена сказаний повторяются" % seed)
+    return problems
+
+
 def check_souls(world, seed: str) -> list:
     """Людность мира: судьба записана, а числа не ушли в бессмыслицу."""
     problems = []
@@ -1390,6 +1452,7 @@ def main() -> int:
         failures.extend(check_upheavals(first, seed))
         failures.extend(check_capitals(first, seed))
         failures.extend(check_souls(first, seed))
+        failures.extend(check_tales(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -1440,6 +1503,7 @@ def main() -> int:
             failures.extend(check_upheavals(first, "карта/" + seed))
             failures.extend(check_capitals(first, "карта/" + seed))
             failures.extend(check_souls(first, "карта/" + seed))
+            failures.extend(check_tales(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "
@@ -1478,7 +1542,7 @@ def main() -> int:
                       check_tongues, check_embassies, check_things,
                       check_causes, check_people_memory, check_migrations,
                       check_strifes, check_lore, check_upheavals,
-                      check_capitals, check_souls):
+                      check_capitals, check_souls, check_tales):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
         failures.extend(check_map_world(
