@@ -47,6 +47,33 @@ SAMPLE_MAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
                           "maps", "aurora-7.world")
 
 
+def check_souls(world, seed: str) -> list:
+    """Людность мира: судьба записана, а числа не ушли в бессмыслицу."""
+    problems = []
+    fate = (world.notes or {}).get("судьба") or {}
+    if not fate.get("имя"):
+        problems.append("сид «%s»: у мира не записана судьба" % seed)
+    souls = world.world_population()
+    if souls <= 0:
+        problems.append("сид «%s»: в мире не осталось ни души" % seed)
+    if souls > 300000000:
+        problems.append("сид «%s»: население мира ушло за всякий предел: %d"
+                        % (seed, souls))
+    for settlement_id in world.active_settlements:
+        settlement = world.settlements[settlement_id]
+        if settlement.population > 4000000:
+            problems.append("сид «%s»: в городе %s %d жителей — это уже не "
+                            "город, а держава"
+                            % (seed, settlement.name, settlement.population))
+            break
+    for region in world.regions.values():
+        if region.capacity < 0:
+            problems.append("сид «%s»: у земли %s ёмкость ушла в минус"
+                            % (seed, region.name))
+            break
+    return problems
+
+
 def check_capitals(world, seed: str) -> list:
     """Престол державы: он должен быть живым городом этой самой державы."""
     problems = []
@@ -1362,6 +1389,7 @@ def main() -> int:
         failures.extend(check_lore(first, seed))
         failures.extend(check_upheavals(first, seed))
         failures.extend(check_capitals(first, seed))
+        failures.extend(check_souls(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -1411,6 +1439,7 @@ def main() -> int:
             failures.extend(check_lore(first, "карта/" + seed))
             failures.extend(check_upheavals(first, "карта/" + seed))
             failures.extend(check_capitals(first, "карта/" + seed))
+            failures.extend(check_souls(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "
@@ -1449,7 +1478,7 @@ def main() -> int:
                       check_tongues, check_embassies, check_things,
                       check_causes, check_people_memory, check_migrations,
                       check_strifes, check_lore, check_upheavals,
-                      check_capitals):
+                      check_capitals, check_souls):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
         failures.extend(check_map_world(

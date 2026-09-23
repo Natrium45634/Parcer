@@ -20,6 +20,7 @@ from dataclasses import dataclass, asdict, field
 from .chronicle_map import MapRecorder
 from .context import GenContext
 from .eras import build_eras
+from . import fates
 from .rng import normalize_seed, seed_to_int
 from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       citylife,
@@ -104,6 +105,11 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     ctx = GenContext(world, settings)
 
     world.eras = build_eras(ctx.rng("eras"), settings.years)
+    # Судьба мира выпадает до первого его года: по ней пойдёт вся
+    # населённость — ровно вверх, взлётом и долгим закатом или чередой
+    # падений. Дальше её знает только ёмкость земель.
+    ctx.fate = fates.choose(ctx.rng("fate"))
+    world.notes["судьба"] = ctx.fate.describe()
     geography.build(ctx)
 
     rng = ctx.rng("world_begin")

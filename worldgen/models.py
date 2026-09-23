@@ -1508,6 +1508,53 @@ class Cabal:
 
 
 @dataclass
+class Tale:
+    """Сказание: местная героическая история внутри большой летописи.
+
+    У сказания есть беда, зов, дружина с личными побуждениями, дорога по
+    настоящим землям с потерями, испытание у цели, исход и след. Всё это
+    берётся из того, что в мире уже есть: чудовище, спящий след бедствия,
+    запертое место, орда, пропавшая вещь, порченая земля или государь.
+    """
+
+    id: str
+    name: str                  # «Сказание о чудовище по имени Скарагорн»
+    kind: str                  # какая беда: чудовище / след / место / …
+    began: Date
+    home_region_id: str = ""   # откуда вышли
+    region_id: str = ""        # где беда
+    foe_id: str = ""           # id того, с кем сошлись, если он есть в мире
+    foe_name: str = ""
+    foe_word: str = ""         # «дракон», «логово», «орда» — родовое слово
+    call: str = ""             # зачем пошли именно теперь
+    prize_id: str = ""         # вещь, ради которой всё затевалось
+    site_id: str = ""          # место, где всё кончилось
+    polity_id: str = ""        # чья земля снарядила дружину
+    company: list = field(default_factory=list)   # [{кто, роль, зачем, судьба}]
+    road: list = field(default_factory=list)      # [{земля, что случилось}]
+    stages: list = field(default_factory=list)    # [{год, вид, строка}]
+    outcome: str = ""          # победа / дорогая победа / поражение / …
+    dead: int = 0              # сколько из дружины не вернулось
+    ended: Date = None
+    legend_id: str = ""
+    event_ids: list = field(default_factory=list)
+    fame: float = 1.0
+    notes: list = field(default_factory=list)
+
+    @property
+    def years(self) -> int:
+        if self.ended is None or self.began is None:
+            return 0
+        return max(0, self.ended.year - self.began.year)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["began"] = _date_out(self.began)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
 class Memory:
     """Что человек помнит о своей жизни.
 

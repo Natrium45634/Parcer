@@ -26,7 +26,8 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Polity,
                      Region,
                      Reign,
-                     Relic, Seed, Settlement, Site, Strife, Temple, Tongue,
+                     Relic, Seed, Settlement, Site, Strife, Tale, Temple,
+                     Tongue,
                      TradeRoute,
                      Tribe,
                      Union, War)
@@ -91,6 +92,7 @@ class World:
         self.race_awakening = {}       # race_id -> год пробуждения
         self.expeditions = {}
         self.active_expeditions = []
+        self.tales = {}                # сказания: местные героические истории
         self.folks = {}
         self.routes = {}
         self.active_routes = []
@@ -903,6 +905,11 @@ class World:
     # ------------------------------------------------------------------
     # Память людей и связи между ними (блок 16)
     # ------------------------------------------------------------------
+
+    def add_tale(self, **kwargs) -> Tale:
+        tale = Tale(id=self.next_id("SG"), **kwargs)
+        self.tales[tale.id] = tale
+        return tale
 
     def add_memory(self, figure_id: str, kind: str, year: int, **kwargs) -> Memory:
         item = Memory(id=self.next_id("ME"), figure_id=figure_id, kind=kind,

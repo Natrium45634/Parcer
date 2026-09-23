@@ -23,7 +23,16 @@ from ..timeline import Date
 # никогда, а мир за тысячу лет набирал едва десяток тысяч.
 SPLIT_SHARE_OF_LAND = 0.30     # доля прокорма, после которой откалываются
 MIN_SPLIT_POPULATION = 320     # и всё же меньше этого племя не делится
-TRIBE_CAPACITY = 1200.0
+# Сколько душ кормит земля под одним племенем. Тысяча двести — это
+# стойбище охотников, а не народ Первой эпохи: мир за первую тысячу лет
+# набирал полтора десятка тысяч душ и выглядел пустым. В фэнтези народы
+# не выводятся из зверей — их будят разом и целыми племенами, и земля
+# под ними держит куда больше.
+TRIBE_CAPACITY = 5200.0
+# Землю делят все, кто на ней живёт: десять племён в одной долине
+# прокормятся хуже, чем одно. Доля каждого падает как корень из их
+# числа — земля всё же кормит тем больше, чем больше на ней рук.
+CROWD_POWER = 0.55
 
 # Доли расколов по категориям рас. Без этого зверолюды и злые расы —
 # самые плодовитые — вытеснили бы из летописи все прочие народы.
@@ -32,8 +41,12 @@ CATEGORY_SPLIT_WEIGHT = {
     races_mod.BEASTFOLK: 0.3,
     races_mod.EVIL: 0.2,
 }
-FIRST_TRIBE_MIN = 40
-FIRST_TRIBE_MAX = 180
+# Народ просыпается народом, а не горсткой. Сорок душ — это семья,
+# и первые пятьсот лет мира уходили на то, чтобы эта семья доросла до
+# племени. В фэнтези народы не выводятся из зверей: их будят разом,
+# целыми родами, и с первого же дня их тысячи.
+FIRST_TRIBE_MIN = 520
+FIRST_TRIBE_MAX = 2400
 
 
 # ---------------------------------------------------------------------------
@@ -228,31 +241,66 @@ def found_tribe(ctx, race, region, year: int, rng, first: bool = False,
     return tribe
 
 
-def _split_at(world, tribe) -> int:
+def _crowding(world) -> dict:
+    """Сколько племён сидит на каждой земле — считается раз за такт."""
+    counts = {}
+    for tribe_id in world.active_tribes:
+        region_id = world.tribes[tribe_id].region_id
+        counts[region_id] = counts.get(region_id, 0) + 1
+    return counts
+
+
+def _tribe_capacity(ctx, tribe, crowd: int, year: int) -> float:
+    """Сколько душ кормит земля под этим племенем.
+
+    Ёмкость земли делится между всеми, кто на ней сидит, и на неё же
+    ложится судьба мира: в годы, когда мир кормит плохо, племена мельчают
+    сами собой, а не мрут по броску костей.
+    """
+    world = ctx.world
+    race = races_mod.get_race(tribe.race_id)
+    region = world.regions.get(tribe.region_id)
+    capacity = TRIBE_CAPACITY * (region.capacity if region else 1.0)
+    if race.category == races_mod.BEASTFOLK:
+        capacity *= 1.4          # зверолюдам города не нужны, племена крупнее
+    capacity *= ctx.fate_bounty(year)
+    return max(1.0, capacity / (max(1, crowd) ** CROWD_POWER))
+
+
+def _split_at(ctx, tribe, crowd: int, year: int) -> int:
     """Сколько душ должно набраться, чтобы племя раскололось.
 
     Считается от того, сколько народу кормит эта земля: на равнине
     расходятся поздно и большими родами, в тундре — рано и малыми.
     """
-    race = races_mod.get_race(tribe.race_id)
-    region = world.regions.get(tribe.region_id)
-    capacity = TRIBE_CAPACITY * (region.capacity if region else 1.0)
-    if race.category == races_mod.BEASTFOLK:
-        capacity *= 1.4
+    capacity = _tribe_capacity(ctx, tribe, crowd, year)
     return max(MIN_SPLIT_POPULATION, int(capacity * SPLIT_SHARE_OF_LAND))
 
 
 def tick_tribes(ctx, year: int) -> None:
-    """Раз в год — возможность появления нового племени (обычно откол)."""
+    """Раз в год — возможность появления новых племён (обычно отколов).
+
+    Раскол — дело каждого племени, а не мира: пока племя одно, новое
+    появляется редко, а когда их четыре десятка, за год расходится
+    несколько. Прежде бросок был один на весь мир, и племена прибывали
+    по одному в год, как бы ни был велик и пуст мир вокруг.
+    """
     world = ctx.world
     spec = ctx.era_spec(year)
     if not world.active_tribes:
         return
     rate = ctx.rate(spec.tribe_rate)
     rng = ctx.rng("tribes", year)
-    if not rng.chance(rate):
-        return
+    tries = 1 + len(world.active_tribes) // 10
+    for _ in range(min(6, tries)):
+        if not rng.chance(rate):
+            continue
+        _split_once(ctx, world, rng, year)
 
+
+def _split_once(ctx, world, rng, year: int) -> None:
+    """Одно племя отпускает часть своих в новую землю."""
+    crowding = _crowding(world)
     tribes_by_race = {}
     for tribe_id in world.active_tribes:
         race_id = world.tribes[tribe_id].race_id
@@ -261,7 +309,8 @@ def tick_tribes(ctx, year: int) -> None:
     by_category = {}
     for tribe_id in world.active_tribes:
         tribe = world.tribes[tribe_id]
-        if tribe.population < _split_at(world, tribe):
+        crowd = crowding.get(tribe.region_id, 1)
+        if tribe.population < _split_at(ctx, tribe, crowd, year):
             continue
         category = races_mod.get_race(tribe.race_id).category
         weight = float(tribe.population) / (
@@ -296,14 +345,12 @@ def upkeep(ctx, year: int, period: int) -> None:
     spec = ctx.era_spec(year)
     rng = ctx.rng("tribe_upkeep", year)
 
+    crowding = _crowding(world)
     for tribe_id in list(world.active_tribes):
         tribe = world.tribes[tribe_id]
         race = races_mod.get_race(tribe.race_id)
-        region = world.regions.get(tribe.region_id)
-        capacity = max(1.0, TRIBE_CAPACITY
-                       * (region.capacity if region else 1.0))
-        if race.category == races_mod.BEASTFOLK:
-            capacity *= 1.4          # зверолюдам города не нужны, племена крупнее
+        capacity = _tribe_capacity(ctx, tribe,
+                                   crowding.get(tribe.region_id, 1), year)
 
         growth = ctx.growth(race.growth, tribe.region_id) * period
         population = tribe.population

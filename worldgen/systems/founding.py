@@ -409,18 +409,37 @@ def _tributaries(world) -> dict:
             counts[lord] = counts.get(lord, 0) + 1
     return counts
 
+def _townfolk(world) -> dict:
+    """Сколько городов стоит на каждой земле — считается раз за такт."""
+    counts = {}
+    for settlement_id in world.active_settlements:
+        region_id = world.settlements[settlement_id].region_id
+        counts[region_id] = counts.get(region_id, 0) + 1
+    return counts
+
+
 def upkeep(ctx, year: int, period: int) -> None:
     world = ctx.world
     spec = ctx.era_spec(year)
     rng = ctx.rng("settlement_upkeep", year)
     era_index = world.era_index_at(year)
     tributaries = _tributaries(world)
+    townfolk = _townfolk(world)
+    # Судьба мира: во сколько раз земля кормит в этом году. У одного мира
+    # она идёт ровно вверх, у другого поднимает великую державу в первые
+    # века и потом тысячу лет опускает. Города сами мельчают и пустеют —
+    # подделывать упадок не нужно.
+    bounty = ctx.fate_bounty(year)
 
     for settlement_id in list(world.active_settlements):
         settlement = world.settlements[settlement_id]
         race = races_mod.get_race(settlement.race_id)
         region = world.regions.get(settlement.region_id)
         capacity = max(1.0, 7000.0 * (region.capacity if region else 1.0))
+        capacity *= bounty
+        # Землю город делит с соседями — но легко: ёмкость земли и так
+        # считается на один город, а не на всю округу сразу.
+        capacity /= max(1, townfolk.get(settlement.region_id, 1)) ** 0.12
         if ctx.map is not None and region is not None and region.from_map:
             # Урожайные годы и рыбный ход кормят больше ртов, чем голая земля.
             capacity *= 0.85 + 0.5 * ctx.map.bounty(region.id)

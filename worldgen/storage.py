@@ -21,6 +21,7 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Plot,
                      Polity,
                      Region, Reign, Relic, Seed, Settlement, Site, Strife,
+                     Tale,
                      Temple,
                      Tongue,
                      TradeRoute, Tribe, Union, War)
@@ -34,7 +35,7 @@ _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
                 "created", "awakened", "revealed", "born", "opened",
                 "sent", "returned", "started", "made", "lost", "opened",
                 "signed_at",
-                "closed", "married", "signed", "built"}
+                "closed", "married", "signed", "built", "began"}
 
 
 def _defaults(cls) -> dict:
@@ -160,6 +161,8 @@ def world_to_dict(world: World) -> dict:
                        for item in world.migrations.values()],
         "strifes": [_compact(Strife, item.to_dict())
                     for item in world.strifes.values()],
+        "tales": [_compact(Tale, item.to_dict())
+                  for item in world.tales.values()],
         "cabals": [_compact(Cabal, item.to_dict())
                    for item in world.cabals.values()],
         "seeds": [_compact(Seed, item.to_dict()) for item in world.seeds.values()],
@@ -348,6 +351,9 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("migrations", ()):
         moving = Migration(**_clean(Migration, item))
         world.migrations[moving.id] = moving
+    for item in data.get("tales", ()):
+        tale = Tale(**_clean(Tale, item))
+        world.tales[tale.id] = tale
     for item in data.get("strifes", ()):
         strife = Strife(**_clean(Strife, item))
         world.strifes[strife.id] = strife

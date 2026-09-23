@@ -42,6 +42,8 @@ class GenContext:
         self.schedule = {}           # год -> список race_id
         self.darkness = {}           # земля -> тяжесть тёмных веков (0…1)
         self.world_darkness = 0.0    # общемировая тяжесть
+        self.fate = None             # судьба мира: кривая его населённости
+        self._bounty = (-1, 1.0)     # последний посчитанный прокорм
         self.calamity_bias = {}      # нрав мира: к каким бедам он склонен
         self.calamity_last = {}
         self.calamity_plans = {}
@@ -95,6 +97,25 @@ class GenContext:
         gloom = self.gloom(region_id)
         return base * self.growth_scale * races_mod.GROWTH_SCALE \
             * max(-0.35, 1.0 - 1.15 * gloom)
+
+    def fate_bounty(self, year: int) -> float:
+        """Во сколько раз земля кормит в этом году.
+
+        Это судьба мира: у одного она идёт вверх почти без срывов, у
+        другого поднимает великую державу в первые века и потом тысячу
+        лет опускает. Через неё проходит ёмкость и племени, и города —
+        больше ничего подделывать не нужно, рост и так тянется к тому,
+        сколько земля кормит.
+        """
+        if self.fate is None:
+            return 1.0
+        year = int(year)
+        if self._bounty[0] == year:
+            return self._bounty[1]
+        total = max(1, int(self.world.total_years))
+        value = self.fate.bounty((year - 1) / float(total))
+        self._bounty = (year, value)
+        return value
 
     def gloom(self, region_id: str = "") -> float:
         """Насколько тяжело живётся в этой земле прямо сейчас."""

@@ -57,10 +57,11 @@
 | **Причинность**: факты, семена, отложенные последствия, три уровня причин | `history.py`, `systems/causes.py` |
 | **Память людей** и отношения человек↔человек | `recall.py`, `systems/memory.py` |
 | **Демография и переселения народов** | `demography.py`, `systems/migration.py` |
+| **Судьба мира**: 7 кривых населённости на всю историю | `fates.py` |
 | **Культурная и языковая ассимиляция** | `systems/culture.py` |
 | **Гражданские войны** (8 причин, 4 исхода) | `systems/strife.py` |
 | **Заговоры** (5 ступеней, предательства, разоблачения) | `systems/cabals.py` |
-| **68 шкал настроек движка** с замками | `tuning.py` |
+| **69 шкал настроек движка** с замками | `tuning.py` |
 | Мастер создания мира из трёх шагов | `gui/wizard.py` |
 | Летопись на 39 разделов списком слева | `gui/app.py`, `gui/sidetabs.py`, `chronicle.py` |
 | **Живая карта мира**: 8 слоёв, ползунок года, карточка гекса | `gui/atlas.py` |
@@ -90,6 +91,7 @@ worldgen/models.py      56 моделей данных (Event, Polity, Figure, F
 worldgen/context.py     GenContext: ГСЧ по ключам, даты, карта, кузница имён
 worldgen/rng.py         свой SplitMix64: weighted, chance, bell, jitter, …
 worldgen/storage.py     сохранение мира в JSON и чтение обратно
+worldgen/fates.py       судьба мира: как идёт его населённость по годам
 worldgen/chronicle.py   текст летописи: 33 раздела full_text
 worldgen/narrative_*.py тексты событий по темам (24 файла)
 worldgen/systems/*.py   39 систем мира, каждая со своим tick/upkeep
@@ -107,7 +109,12 @@ maps/aurora-7.world     эталонная карта 160×96 (ею же све�
 
 `engine.generate(settings)` строит мир и возвращает `World`.
 
-1. `tuning.apply(settings.tuning)` — 68 шкал расставляют числа движка.
+1. `tuning.apply(settings.tuning)` — 69 шкал расставляют числа движка.
+   Затем `fates.choose` бросает **судьбу мира** — кривую, по которой
+   пойдёт его населённость: ровно вверх, ранним расцветом с долгим
+   закатом, поздним взлётом или чередой падений. Через неё проходит
+   ёмкость и племени, и города, поэтому упадок не подделывается: города
+   мельчают сами, потому что земля стала кормить хуже.
 2. `geography.build(ctx)` — земли: **своя карта** (`settings.map_make`),
    **файл .world** (`settings.map_path`) или процедурная сетка.
 3. Год за годом, `for year in range(1, total + 1)`:

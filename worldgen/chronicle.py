@@ -188,8 +188,32 @@ def render_eras(world) -> str:
     return "\n".join(rows)
 
 
+def fate_lines(world) -> list:
+    """Судьба мира словами: какой кривой шла его населённость.
+
+    Мир не обязан расти ровно вверх. Один поднимает великую державу в
+    первые века и всю остальную историю её теряет, другой полжизни стоит
+    пустым и вспыхивает под конец. Эта кривая задана сидом, и назвать её
+    честнее, чем оставить человека гадать, отчего города вдруг измельчали.
+    """
+    fate = (world.notes or {}).get("судьба") or {}
+    name = fate.get("имя")
+    if not name:
+        return []
+    rows = ["  СУДЬБА МИРА", "", "    %s" % name.capitalize()]
+    note = fate.get("как было")
+    if note:
+        rows.append("    — %s." % note)
+    level = fate.get("людность")
+    if level:
+        rows.append("    Мир %s." % level)
+    rows.append("")
+    return rows
+
+
 def render_stats(world) -> str:
     rows = ["ИТОГИ", ""]
+    rows.extend(fate_lines(world))
     for key, value in world.stats().items():
         rows.append("  %-26s %s" % (key + ":", value))
     rows.append("")
@@ -1704,6 +1728,7 @@ def render_upheavals(world) -> str:
     from .systems import upheaval as upheaval_mod
 
     rows = ["КАК МЕНЯЛСЯ МИР", ""]
+    rows.extend(fate_lines(world))
 
     great = [calamity for calamity in world.calamities.values()
              if calamity.key in upheaval_mod.GREAT]
