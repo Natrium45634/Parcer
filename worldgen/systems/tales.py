@@ -212,6 +212,14 @@ def _seat_region(world, polity) -> str:
 # ---------------------------------------------------------------------------
 
 def _tell(ctx, rng, year: int, threat: Threat) -> None:
+    """Складывает сказание целиком — и кончает его этим самым годом.
+
+    Дорога занимает годы, и раньше эти годы прибавлялись к нынешнему:
+    сказание кончалось на четыре года позже, чем мир до них дожил. От
+    этого и песня рождалась в будущем, и след в ткани причин закрывался
+    раньше, чем появлялся. Поэтому дорога отсчитывается назад: вышли
+    тогда-то, дошли и кончили — теперь.
+    """
     world = ctx.world
     home = _home_city(ctx, rng, threat)
     if home is None:
@@ -220,9 +228,11 @@ def _tell(ctx, rng, year: int, threat: Threat) -> None:
     if race is None:
         return
 
-    began = ctx.date_in(rng, year)
+    legs, spent = _plan_road(ctx, rng, home.region_id, threat.region_id)
+    began_year = max(1, year - spent)
+    began = ctx.date_in(rng, began_year)
     _call_key, call_note = rng.choice(cat.CALLS)
-    company = _company(ctx, rng, race, home, year)
+    company = _company(ctx, rng, race, home, began_year, year)
     if len(company) < COMPANY_MIN:
         return
 
@@ -234,16 +244,17 @@ def _tell(ctx, rng, year: int, threat: Threat) -> None:
         polity_id=home.polity_id, company=company)
 
     where = _region_name(world, threat.region_id)
-    tale.stages.append({"вид": "беда", "год": year, "строка": texts.threat(
-        rng, threat.kind, where, _foe_phrase(threat), _foe_nom(threat),
-        name=threat.name)})
-    tale.stages.append({"вид": "зов", "год": year,
+    tale.stages.append({"вид": "беда", "год": began_year,
+                        "строка": texts.threat(
+                            rng, threat.kind, where, _foe_phrase(threat),
+                            _foe_nom(threat), name=threat.name)})
+    tale.stages.append({"вид": "зов", "год": began_year,
                         "строка": texts.call(rng, call_note)})
-    tale.stages.append({"вид": "сбор", "год": year,
+    tale.stages.append({"вид": "сбор", "год": began_year,
                         "строка": texts.gathering(rng, len(company))})
 
-    walked = _walk(ctx, rng, tale, home, threat, year)
-    outcome = _resolve(ctx, rng, tale, threat, walked)
+    _walk(ctx, rng, tale, legs, began_year)
+    outcome = _resolve(ctx, rng, tale, threat, year)
     _finish(ctx, rng, tale, threat, home, outcome, year)
 
 
@@ -272,12 +283,13 @@ def _home_city(ctx, rng, threat):
     return rng.weighted([(item, float(item.population)) for item in pool])
 
 
-def _company(ctx, rng, race, home, year: int) -> list:
+def _company(ctx, rng, race, home, began_year: int, end_year: int) -> list:
     """Кто идёт и зачем. Своих берут первыми, недостающих зовут со стороны."""
     world = ctx.world
+    year = began_year
     size = rng.randint(COMPANY_MIN, COMPANY_MAX)
     roles = _roles(rng, size)
-    taken = _known_hands(world, home, year)
+    taken = _known_hands(world, home, began_year, end_year)
     motives = list(cat.MOTIVES)
     company = []
     for index, (role, note) in enumerate(roles):
@@ -326,20 +338,21 @@ def _roles(rng, size: int) -> list:
     return chosen
 
 
-def _known_hands(world, home, year: int) -> list:
+def _known_hands(world, home, began_year: int, end_year: int) -> list:
     """Живые люди этой земли, которых не жалко отправить в поход.
 
-    Государей и наследников не берём: сказание о короле, сгинувшем в
-    болоте, ломает половину престолонаследия.
+    Государей не берём: сказание о короле, сгинувшем в болоте, ломает
+    половину престолонаследия. И брать можно только того, кто прожил всю
+    дорогу: и в год выхода был взрослым, и к возвращению ещё жив.
     """
     crowns = {world.polities[pid].ruler_id for pid in world.active_polities}
     out = []
     for figure in world.figures.values():
-        if figure.id in crowns or not figure.alive_at(year):
+        if figure.id in crowns or not figure.alive_at(end_year):
             continue
         if figure.origin_region != home.region_id:
             continue
-        age = figure.age_at(year)
+        age = figure.age_at(began_year)
         if age < 16:
             continue
         if not any(word in role for role in figure.roles
@@ -355,27 +368,42 @@ def _known_hands(world, home, year: int) -> list:
 # Дорога
 # ---------------------------------------------------------------------------
 
-def _walk(ctx, rng, tale, home, threat, year: int) -> int:
-    """Проводит дружину по землям. Возвращает год, когда дошли."""
+def _plan_road(ctx, rng, start: str, goal: str):
+    """Раскладывает дорогу заранее: земли, беды и сколько лет на это ушло.
+
+    Считается до того, как сказание записано, — иначе не узнать, каким
+    годом оно началось.
+    """
     world = ctx.world
-    path = _road(world, home.region_id, threat.region_id, rng)
-    walked = year
+    path = _road(world, start, goal, rng)
+    legs, spent = [], 0
     for region_id in path:
         trial, cost = rng.choice(cat.TRIALS)
-        line = texts.road_leg(rng, _region_name(world, region_id), trial)
+        legs.append({"земля": region_id, "что случилось": trial,
+                     "цена": cost, "через сколько": spent})
+        if rng.chance(0.3):
+            spent += 1          # иной переход занимает больше года
+    return legs, spent
+
+
+def _walk(ctx, rng, tale, legs, began_year: int) -> None:
+    """Проводит дружину по заранее расписанной дороге."""
+    world = ctx.world
+    for leg in legs:
+        when = began_year + leg["через сколько"]
+        line = texts.road_leg(rng, _region_name(world, leg["земля"]),
+                              leg["что случилось"])
         lost = ""
-        if cost and rng.chance(LOSS_ON_ROAD):
-            fallen = _lose_one(ctx, rng, tale, walked, cat.FELL_ROAD)
+        if leg["цена"] and rng.chance(LOSS_ON_ROAD):
+            fallen = _lose_one(ctx, rng, tale, when, cat.FELL_ROAD)
             if fallen is not None:
                 line = "%s %s" % (line, texts.road_loss(
                     rng, fallen["имя"], fallen["пол"]))
                 lost = fallen["кто"]
-        tale.road.append({"земля": region_id, "что случилось": trial,
+        tale.road.append({"земля": leg["земля"],
+                          "что случилось": leg["что случилось"],
                           "потеря": lost})
-        tale.stages.append({"вид": "дорога", "год": walked, "строка": line})
-        if rng.chance(0.3):
-            walked += 1          # иной переход занимает больше года
-    return walked
+        tale.stages.append({"вид": "дорога", "год": when, "строка": line})
 
 
 def _road(world, start: str, goal: str, rng) -> list:
@@ -501,7 +529,7 @@ def _stay_behind(ctx, rng, tale, year: int) -> None:
 
 def _finish(ctx, rng, tale, threat, home, outcome: str, year: int) -> None:
     world = ctx.world
-    ended_year = max(year, tale.stages[-1]["год"] if tale.stages else year)
+    ended_year = year      # сказание кончается тем годом, в котором мир
     # Число внутри года берётся случайно, и в год начала оно запросто
     # выпадало раньше самого начала: сказание кончалось до того, как
     # началось. Потому конец всегда отсчитывается от начала.
@@ -512,7 +540,9 @@ def _finish(ctx, rng, tale, threat, home, outcome: str, year: int) -> None:
     tale.fame = round(cat.OUTCOME_FAME.get(outcome, 1.0)
                       * (1.0 + 0.12 * tale.dead)
                       * (0.8 + threat.power * 0.12), 2)
-    mournful = outcome in (cat.FAILED, cat.HOLLOW) or tale.dead >= 3
+    # Плачем зовут то, где кого-то хоронили. Напрасный путь без потерь —
+    # не плач, а досада.
+    mournful = outcome == cat.FAILED or tale.dead >= 3
     # На одну и ту же беду ходят и второй раз, и третий. Первое сказание
     # зовут по беде, следующие — по тому, кто вёл дружину: иначе к имени
     # прирастает «Новый», и получается «Новый Плач о чудовище».
