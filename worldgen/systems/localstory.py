@@ -332,11 +332,32 @@ def _tell(ctx, rng, year: int, node: Node) -> bool:
     if home is None:
         return False
 
-    cast = _cast(ctx, rng, shape, home, year)
+    # Сколько лет займёт дело, считается до первого акта, и быль
+    # отсчитывается назад от нынешнего года. Кончиться она обязана
+    # сегодня: иначе след, который она оставляет в ткани причин,
+    # оказывается датирован вперёд, и мир закрывает его раньше, чем он
+    # появился.
+    gaps = _plan_gaps(rng, shape)
+    floor = max(1, node.year + 1)
+    if home.founded is not None:
+        floor = max(floor, home.founded.year)
+    room = max(0, year - floor)
+    while sum(gaps) > room:
+        # Укорачиваем разрывы, а не двигаем начало: корень обязан лежать
+        # раньше были, а место — стоять до её начала.
+        for index in range(len(gaps) - 1, -1, -1):
+            if gaps[index]:
+                gaps[index] -= 1
+                break
+        else:
+            break
+    start = max(1, year - sum(gaps))
+
+    cast = _cast(ctx, rng, shape, home, start)
     if len(cast) < 2:
         return False
 
-    began = ctx.date_in(rng, year)
+    began = ctx.date_in(rng, start)
     story = world.add_story(
         title="", shape=shape.key, node=node.kind, began=began,
         region_id=home.region_id, settlement_id=home.id,
@@ -354,11 +375,11 @@ def _tell(ctx, rng, year: int, node: Node) -> bool:
                           # уходит с него дальше в глубь веков.
                           "событие": world.event_about(node.ref)})
 
-    _open(ctx, rng, story, shape, node, home, year)
-    _middle(ctx, rng, story, shape, year)
-    _turn(ctx, rng, story, shape, year)
-    _close(ctx, rng, story, shape, home, year)
-    _after(ctx, rng, story, shape, node, home, year)
+    _open(ctx, rng, story, shape, node, home, start)
+    _middle(ctx, rng, story, shape, start, gaps)
+    _turn(ctx, rng, story, shape, start)
+    _close(ctx, rng, story, shape, home, start)
+    _after(ctx, rng, story, shape, node, home, start)
     _name_it(ctx, rng, story, shape, home)
     _record(ctx, story, shape, home, year)
 
@@ -522,21 +543,34 @@ def _open(ctx, rng, story, shape, node, home, year: int) -> None:
             break
 
 
-def _middle(ctx, rng, story, shape, year: int) -> None:
-    """Развитие: столько шагов, сколько просит размах истории."""
+def _plan_gaps(rng, shape) -> list:
+    """Сколько шагов у дела и сколько лет между ними.
+
+    Разрывы считаются заранее, до первого акта: только зная их сумму,
+    можно поставить начало были так, чтобы конец её пришёлся на нынешний
+    год, а не на будущее.
+    """
     low, high = shape.acts
     steps = rng.randint(low, high)
+    # Перед первым шагом разрыва нет, дальше — через раз-другой. Сумма
+    # разрывов и есть длина дела: последний шаг приходится ровно на
+    # нынешний год.
+    return [0] + [rng.randint(1, 3) if rng.chance(0.35) else 0
+                  for _ in range(max(0, steps - 1))]
+
+
+def _middle(ctx, rng, story, shape, year: int, gaps: list) -> None:
+    """Развитие: столько шагов, сколько просит размах истории."""
     when = year
     used = set()
-    for number in range(steps):
+    for gap in gaps:
+        when += gap
         for _ in range(5):
             line = texts.step(rng)
             if line not in used:
                 used.add(line)
                 break
         _act(story, when, "ход", line)
-        if rng.chance(0.35):
-            when += rng.randint(1, 3)
 
 
 def _turn(ctx, rng, story, shape, year: int) -> None:
