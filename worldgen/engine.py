@@ -36,7 +36,7 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       peoples,
                       religion,
                       sites, soldiery, spies, strife, succession,
-                      tales, tongues,
+                      tales, tongues, township,
                       trade,
                       unions, upheaval, war)
 from .timeline import Date
@@ -192,6 +192,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             # Сказания идут следом за чудовищами, местами и вещами: к
             # этому часу в мире уже есть и беда, и те, кто на неё пойдёт.
             tales.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Жизнь городов идёт до былей: быль может вырасти из тяготы
+            # или тайны города, и к этому часу они уже должны быть.
+            township.upkeep(ctx, year, UPKEEP_PERIOD)
             # Были идут последними из историй: им нужен готовый мир со
             # всеми его руинами, вдовами, тяжбами и закрывшимися трактами.
             localstory.upkeep(ctx, year, UPKEEP_PERIOD)

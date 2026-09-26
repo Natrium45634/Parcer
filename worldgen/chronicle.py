@@ -6,6 +6,7 @@ from __future__ import annotations
 import textwrap
 
 from . import races as races_mod
+from .models import ACTIVE
 from .timeline import years_text
 
 IMPORTANCE_MARKS = {5: "***", 4: " **", 3: "  *", 2: "   ", 1: "   "}
@@ -36,6 +37,7 @@ KIND_LABELS = {
     "settlement_found": "Основание поселения",
     "colony_found": "Новое поселение",
     "settlement_ruined": "Запустение",
+    "town_turn": "Перелом в жизни города",
     "polity_found": "Рождение страны",
     "polity_fall": "Падение страны",
     "camp_found": "Лагерь",
@@ -1042,6 +1044,225 @@ def _wrap_tale(line: str, width: int = 74) -> str:
     if current:
         out.append(current)
     return ("\n      ").join(out)
+
+
+def render_towns(world) -> str:
+    """Жизнь городов: почему город есть и чем он стал.
+
+    Город тут — не строка с числом жителей, а историческая личность. У
+    него есть причина существовать, и она тянется через всю его жизнь:
+    город у переправы и город у рудной жилы проживут разные тысячу лет.
+    Поэтому сперва идёт визитная карточка — то, чем этот город не похож
+    на соседний, — а за ней его биография по годам.
+    """
+    from . import township as cat
+    from . import narrative_town as texts
+
+    rows = ["ЖИЗНЬ ГОРОДОВ", ""]
+    if not world.townships:
+        rows.append("  Ни один город не прожил столько, чтобы о нём было "
+                    "что рассказать.")
+        return "\n".join(rows)
+
+    towns = []
+    for town in world.townships.values():
+        settlement = world.settlements.get(town.settlement_id)
+        if settlement is not None:
+            towns.append((town, settlement))
+    towns.sort(key=lambda pair: (-pair[0].peak, pair[0].id))
+
+    origins, trades, lives = {}, {}, {}
+    changed = reborn = secrets = opened = 0
+    for town, _ in towns:
+        origins[town.origin] = origins.get(town.origin, 0) + 1
+        for key in {item["чем"] for item in town.trades if not item.get("по")}:
+            trades[key] = trades.get(key, 0) + 1
+        lives[town.life] = lives.get(town.life, 0) + 1
+        if len(town.trades) > 1:
+            changed += 1
+        if any(item.get("вид") == cat.RESETTLED for item in town.marks):
+            reborn += 1
+        secrets += len(town.secrets)
+        opened += sum(1 for item in town.secrets if item.get("раскрыта"))
+
+    alive = sum(1 for _, place in towns if place.status == ACTIVE)
+    rows.append("  Городов со своей биографией: %d, из них живых: %d."
+                % (len(towns), alive))
+    rows.append("  Отчего вставали: %s."
+                % ", ".join("%s — %d" % (cat.ORIGINS_BY_KEY[key].name, count)
+                            for key, count in sorted(
+                                origins.items(), key=lambda p: (-p[1], p[0]))
+                            [:6] if key in cat.ORIGINS_BY_KEY))
+    rows.append("  Чем кормятся сейчас: %s."
+                % ", ".join("%s — %d" % (key, count)
+                            for key, count in sorted(
+                                trades.items(), key=lambda p: (-p[1], p[0]))
+                            [:8]))
+    rows.append("  Как идут дела: %s."
+                % ", ".join("%s — %d" % (key, lives[key])
+                            for key in cat.LIVES if key in lives))
+    rows.append("  Меняли занятие: %d. Встали на месте прежнего города: %d."
+                % (changed, reborn))
+    if secrets:
+        rows.append("  Городских тайн: %d, из них вывели наружу были: %d."
+                    % (secrets, opened))
+    rows.append("")
+
+    # Подробно — о тех, кого мир заметил; об остальных строкой.
+    big = [pair for pair in towns if pair[0].peak >= 2500][:30]
+    shown = {town.id for town, _ in big}
+    for town, settlement in big:
+        rows.extend(_town_block(world, town, settlement, cat, texts))
+
+    rest = [pair for pair in towns if pair[0].id not in shown]
+    if rest:
+        rows.append("  ОСТАЛЬНЫЕ")
+        rows.append("")
+        for town, settlement in rest[:120]:
+            origin = cat.ORIGINS_BY_KEY.get(town.origin)
+            rows.append("    %-30s %-22s %-16s %s"
+                        % (settlement.full_name[:30],
+                           origin.name if origin else "—",
+                           town.trade or "—", town.life))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def _town_block(world, town, settlement, cat, texts) -> list:
+    """Визитная карточка города и его биография."""
+    origin = cat.ORIGINS_BY_KEY.get(town.origin)
+    head = settlement.full_name
+    rows = ["  %s" % head, "  " + "-" * (len(head) + 2), ""]
+
+    # --- визитная карточка: чем этот город не похож на соседний -------
+    rows.append("      ВИЗИТНАЯ КАРТОЧКА")
+    if origin is not None:
+        rows.append("        Встал тут потому, что %s." % origin.about)
+    if town.trade:
+        trade = cat.TRADES_BY_KEY.get(town.trade)
+        rows.append("        Нынешнее занятие — %s: %s."
+                    % (town.trade, trade.about if trade else "чем придётся"))
+    others = [item["чем"] for item in town.trades
+              if not item.get("по") and item["чем"] != town.trade]
+    if others:
+        rows.append("        А ещё кормится: %s." % ", ".join(others))
+    for line in texts.temper_lines(town.temper):
+        rows.append("        %s." % texts.cap(line))
+    if town.districts:
+        rows.append("        Концы города: %s."
+                    % ", ".join("%s (%d)" % (item["конец"], item["год"])
+                                for item in town.districts))
+    if town.layers:
+        rows.append("        Под ногами: %s."
+                    % "; ".join(item["слой"] for item in town.layers[:4]))
+    if settlement.landmarks:
+        rows.append("        Приметы: %s." % ", ".join(settlement.landmarks))
+    rows.append("        Людей: %d сейчас, %d в лучшую пору (%d год); %s."
+                % (settlement.population if settlement.status == ACTIVE else 0,
+                   town.peak, town.peak_year, town.life))
+    rows.append("")
+
+    # --- хозяйство ------------------------------------------------------
+    if town.incomes or town.takes or town.weak:
+        rows.append("      ЧЕМ ЖИВЁТ")
+        if town.incomes:
+            rows.append("        даёт ....... %s" % ", ".join(town.incomes))
+        if town.takes:
+            rows.append("        берёт ...... %s" % ", ".join(town.takes))
+        if town.weak:
+            rows.append("        держится на том, что не вечно: %s"
+                        % town.weak)
+        rows.append("")
+
+    # --- уклад ----------------------------------------------------------
+    mix = town.mix or {}
+    lines = []
+    races = mix.get("расы") or {}
+    if len(races) > 1:
+        lines.append("        расы ....... %s" % _shares(
+            world, races, lambda key: _race_name(key)))
+    faiths = mix.get("веры") or {}
+    if faiths:
+        lines.append("        веры ....... %s" % _shares(
+            world, faiths, lambda key: _faith_name(world, key)))
+    if lines:
+        rows.append("      КТО ТУТ ЖИВЁТ")
+        rows.extend(lines)
+        rows.append("")
+
+    # --- кто чего хочет --------------------------------------------------
+    if town.estates or town.forces:
+        rows.append("      КТО ЧЕГО ХОЧЕТ")
+        for item in town.estates[:6]:
+            rows.append("        %-16s %s" % (item["сословие"], item["хочет"]))
+        for item in town.forces[:5]:
+            # «хочет держать город» — без запятой, «хочет, чтобы…» — с ней.
+            wants = item["хочет"]
+            rows.append("        %-16s %s"
+                        % (item["сила"],
+                           ("хочет, %s" if wants.startswith("чтобы")
+                            else "хочет %s") % wants))
+        rows.append("")
+
+    # --- тяготы ---------------------------------------------------------
+    live = [item for item in town.troubles if not item.get("по")]
+    past = [item for item in town.troubles if item.get("по")]
+    if live or past:
+        rows.append("      ЧТО БОЛИТ И ЧТО БОЛЕЛО")
+        for item in live:
+            trouble = cat.TROUBLES_BY_KEY.get(item["тягота"])
+            rows.append("        с %-5d %-28s %s"
+                        % (item["с"], item["тягота"],
+                           trouble.about if trouble else ""))
+        for item in past[-4:]:
+            rows.append("        %d—%-5d %-28s %s"
+                        % (item["с"], item["по"], item["тягота"],
+                           item.get("чем", "")))
+        rows.append("")
+
+    # --- тайны -----------------------------------------------------------
+    if town.secrets:
+        rows.append("      О ЧЁМ ГОРОД МОЛЧИТ")
+        for item in town.secrets:
+            rows.append("        все знают: %s" % item.get(cat.PUBLIC, ""))
+            rows.append("        говорят:   %s" % item.get(cat.RUMOUR, ""))
+            if item.get("раскрыта"):
+                rows.append("        а было:    %s (вышло наружу в %d году)"
+                            % (item.get(cat.TRUTH, ""), item["раскрыта"]))
+            else:
+                rows.append("        а было:    %s — и этого в городе не "
+                            "знают" % item.get(cat.TRUTH, ""))
+            rows.append("")
+
+    # --- биография --------------------------------------------------------
+    if town.marks:
+        rows.append("      КАК ЭТО ШЛО")
+        for mark in town.marks:
+            rows.append("        %5d  %-18s %s"
+                        % (mark.get("год", 0), mark.get("вид", ""),
+                           mark.get("строка", "")))
+        rows.append("")
+    for note in town.notes[:6]:
+        rows.append("      %s" % texts.cap(note))
+    rows.append("")
+    return rows
+
+
+def _shares(world, rows: dict, namer) -> str:
+    """Доли уклада одной строкой: «люди — 62%, эльфы — 27%»."""
+    pairs = sorted(rows.items(), key=lambda pair: (-pair[1], pair[0]))[:4]
+    return ", ".join("%s — %d%%" % (namer(key), round(value * 100))
+                     for key, value in pairs)
+
+
+def _race_name(race_id: str) -> str:
+    race = races_mod.RACES_BY_ID.get(race_id)
+    return race.name if race is not None else race_id
+
+
+def _faith_name(world, faith_id: str) -> str:
+    faith = world.faiths.get(faith_id)
+    return faith.name if faith is not None else faith_id
 
 
 def render_stories(world) -> str:
@@ -2873,6 +3094,7 @@ def full_text(world) -> str:
         render_tales(world),
         render_lifepaths(world),
         render_stories(world),
+        render_towns(world),
         render_guilds(world),
         render_expeditions(world),
         render_politics(world),

@@ -22,7 +22,7 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Polity,
                      LifePath,
                      Region, Reign, Relic, Seed, Settlement, Site, Story,
-                     Strife,
+                     Strife, Township,
                      Tale,
                      Temple,
                      Tongue,
@@ -169,6 +169,8 @@ def world_to_dict(world: World) -> dict:
                       for item in world.lifepaths.values()],
         "stories": [_compact(Story, item.to_dict())
                     for item in world.stories.values()],
+        "townships": [_compact(Township, item.to_dict())
+                      for item in world.townships.values()],
         "story_marks": world.story_marks,
         "cabals": [_compact(Cabal, item.to_dict())
                    for item in world.cabals.values()],
@@ -365,6 +367,10 @@ def dict_to_world(data: dict) -> World:
         story = Story(**_clean(Story, item))
         world.stories[story.id] = story
     world.story_marks = dict(data.get("story_marks") or {})
+    for item in data.get("townships", ()):
+        town = Township(**_clean(Township, item))
+        world.townships[town.id] = town
+        world._town_of[town.settlement_id] = town.id
     for item in data.get("lifepaths", ()):
         path = LifePath(**_clean(LifePath, item))
         world.lifepaths[path.id] = path

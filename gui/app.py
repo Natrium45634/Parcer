@@ -428,6 +428,9 @@ class ChronicleApp(tk.Tk):
         self.stories_text = self._add_text_tab(
             "Были", lambda: self._set_text(
                 self.stories_text, chronicle.render_stories(self.world)))
+        self.towns_text = self._add_text_tab(
+            "Жизнь городов", lambda: self._set_text(
+                self.towns_text, chronicle.render_towns(self.world)))
         self.crafts_text = self._add_text_tab(
             "Ремёсла", lambda: self._set_text(
                 self.crafts_text, chronicle.render_crafts(self.world)))
@@ -1309,6 +1312,47 @@ class ChronicleApp(tk.Tk):
                 lines.extend(reign_rows(reigns))
 
         elif kind in ("Settlement", "Site", "Region"):
+            # У города своя биография: отчего он встал тут, чем кормится,
+            # что у него болит и что лежит под ногами.
+            town = world.town_of(entity.id) if kind == "Settlement" else None
+            if town is not None:
+                from worldgen import township as town_cat
+                from worldgen import narrative_town as town_texts
+                origin = town_cat.ORIGINS_BY_KEY.get(town.origin)
+                lines.extend(["", "ОТЧЕГО ЭТОТ ГОРОД ЗДЕСЬ", "-" * 60])
+                if origin is not None:
+                    lines.append("  %s" % town_texts.cap(origin.about))
+                if town.trade:
+                    trade = town_cat.TRADES_BY_KEY.get(town.trade)
+                    lines.append("  нынешнее занятие: %s — %s"
+                                 % (town.trade,
+                                    trade.about if trade else ""))
+                if town.weak:
+                    lines.append("  держится на том, что не вечно: %s"
+                                 % town.weak)
+                for line in town_texts.temper_lines(town.temper):
+                    lines.append("  %s" % line)
+                if town.districts:
+                    lines.append("  концы города: %s"
+                                 % ", ".join("%s (%d)" % (item["конец"],
+                                                          item["год"])
+                                             for item in town.districts))
+                if town.layers:
+                    lines.append("  под ногами: %s"
+                                 % "; ".join(item["слой"]
+                                             for item in town.layers[:4]))
+                live = [item for item in town.troubles if not item.get("по")]
+                if live:
+                    lines.append("  болит сейчас: %s"
+                                 % ", ".join(item["тягота"] for item in live))
+                if town.marks:
+                    lines.extend(["", "КАК ЭТО ШЛО", "-" * 60])
+                    for mark in town.marks[-24:]:
+                        lines.append("  %5d  %-18s %s"
+                                     % (mark.get("год", 0),
+                                        mark.get("вид", ""),
+                                        mark.get("строка", "")))
+
             # У места своя память: что тут рассказывают. Летопись помнит
             # основание и разорение, а быль — то, из-за чего это место
             # обходят стороной или ходят к нему за советом.

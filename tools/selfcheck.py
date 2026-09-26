@@ -320,6 +320,124 @@ def check_stories(world, seed: str) -> list:
     return problems
 
 
+def check_towns(world, seed: str) -> list:
+    """Города: биография не спорит сама с собой и с миром.
+
+    Проверяется то, на чём она держится: город не заводит концов раньше
+    себя, слои не ложатся из будущего, доли уклада сходятся, занятие
+    возможно в этой земле, а оставленный город не продолжает жить.
+    """
+    from worldgen import township as cat
+    from worldgen.models import ACTIVE
+
+    problems = []
+    for town in world.townships.values():
+        settlement = world.settlements.get(town.settlement_id)
+        where = "город по имени %s" % (settlement.name if settlement
+                                       else town.settlement_id)
+        if settlement is None:
+            problems.append("сид «%s»: биография без города (%s)"
+                            % (seed, town.id))
+            continue
+        if town.origin not in cat.ORIGINS_BY_KEY:
+            problems.append("сид «%s»: у %s причина, которой нет в списке"
+                            % (seed, where))
+        born = town.born.year if town.born else settlement.founded.year
+
+        for item in town.districts:
+            if int(item.get("год", 0)) < born:
+                problems.append("сид «%s»: у %s конец города старше самого "
+                                "города" % (seed, where))
+                break
+            if item.get("конец") not in cat.DISTRICTS_BY_KEY:
+                problems.append("сид «%s»: у %s конец города, которого нет "
+                                "в списке" % (seed, where))
+                break
+        for item in town.layers:
+            if int(item.get("год", 0)) > world.total_years:
+                problems.append("сид «%s»: под %s лежит слой из будущего"
+                                % (seed, where))
+                break
+        for item in town.marks:
+            if int(item.get("год", 0)) > world.total_years:
+                problems.append("сид «%s»: у %s веха позже конца мира"
+                                % (seed, where))
+                break
+        for item in town.trades:
+            if item.get("чем") not in cat.TRADES_BY_KEY:
+                problems.append("сид «%s»: у %s занятие, которого нет в "
+                                "списке" % (seed, where))
+                break
+            if item.get("по") and int(item["по"]) < int(item.get("с", 0)):
+                problems.append("сид «%s»: у %s занятие кончилось раньше, "
+                                "чем началось" % (seed, where))
+                break
+        for item in town.troubles:
+            if item.get("тягота") not in cat.TROUBLES_BY_KEY:
+                problems.append("сид «%s»: у %s тягота, которой нет в списке"
+                                % (seed, where))
+                break
+            if item.get("по") and int(item["по"]) < int(item.get("с", 0)):
+                problems.append("сид «%s»: у %s тягота кончилась раньше, "
+                                "чем началась" % (seed, where))
+                break
+        for item in town.secrets:
+            if item.get("уровень") not in cat.SECRET_LEVELS:
+                problems.append("сид «%s»: у %s тайна без уровня"
+                                % (seed, where))
+                break
+            if not item.get(cat.TRUTH):
+                problems.append("сид «%s»: у %s тайна без правды"
+                                % (seed, where))
+                break
+
+        # Доли уклада — это доли: они обязаны сходиться к единице.
+        for name, rows in (town.mix or {}).items():
+            if not rows:
+                continue
+            total = sum(rows.values())
+            if abs(total - 1.0) > 0.03:
+                problems.append("сид «%s»: у %s доли «%s» не сходятся (%.2f)"
+                                % (seed, where, name, total))
+                break
+
+        for name, value in (town.temper or {}).items():
+            if name not in cat.TEMPERS:
+                problems.append("сид «%s»: у %s шкала нрава, которой нет"
+                                % (seed, where))
+                break
+            if not 0.0 <= float(value) <= 1.0:
+                problems.append("сид «%s»: у %s нрав вышел за меру"
+                                % (seed, where))
+                break
+
+        # Оставленный город не растёт и не заводит новых дел.
+        if settlement.status != ACTIVE and town.life != cat.EMPTY:
+            problems.append("сид «%s»: %s оставлен, а биография его "
+                            "продолжается" % (seed, where))
+        if settlement.status != ACTIVE and settlement.ended is not None:
+            late = [item for item in town.marks
+                    if int(item.get("год", 0)) > settlement.ended.year]
+            if late:
+                problems.append("сид «%s»: у %s веха позже его конца"
+                                % (seed, where))
+
+    live = [town for town in world.townships.values()
+            if world.settlements.get(town.settlement_id) is not None
+            and world.settlements[town.settlement_id].status == ACTIVE]
+    if len(live) >= 12:
+        # Мир, где все города одинаковы, — это не мир, а список.
+        trades = {town.trade for town in live}
+        if len(trades) < 4:
+            problems.append("сид «%s»: живые города кормятся одним и тем же "
+                            "(%d занятия)" % (seed, len(trades)))
+        origins = {town.origin for town in live}
+        if len(origins) < 4:
+            problems.append("сид «%s»: все города возникли по одной причине"
+                            % seed)
+    return problems
+
+
 def check_souls(world, seed: str) -> list:
     """Людность мира: судьба записана, а числа не ушли в бессмыслицу."""
     problems = []
@@ -1666,6 +1784,7 @@ def main() -> int:
         failures.extend(check_tales(first, seed))
         failures.extend(check_lives(first, seed))
         failures.extend(check_stories(first, seed))
+        failures.extend(check_towns(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -1719,6 +1838,7 @@ def main() -> int:
             failures.extend(check_tales(first, "карта/" + seed))
             failures.extend(check_lives(first, "карта/" + seed))
             failures.extend(check_stories(first, "карта/" + seed))
+            failures.extend(check_towns(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "
@@ -1758,7 +1878,7 @@ def main() -> int:
                       check_causes, check_people_memory, check_migrations,
                       check_strifes, check_lore, check_upheavals,
                       check_capitals, check_souls, check_tales,
-                      check_lives, check_stories):
+                      check_lives, check_stories, check_towns):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
         failures.extend(check_map_world(

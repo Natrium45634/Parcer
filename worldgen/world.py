@@ -28,6 +28,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Region,
                      Reign,
                      Relic, Seed, Settlement, Site, Story, Strife, Tale,
+                     Township,
                      Temple,
                      Tongue,
                      TradeRoute,
@@ -97,6 +98,9 @@ class World:
         self.tales = {}                # сказания: местные героические истории
         self.lifepaths = {}            # жизненные пути значимых людей
         self.stories = {}              # были: малые истории мест и людей
+        self.townships = {}            # биографии городов
+        self._town_of = {}             # поселение -> id биографии
+        self._town_watch = {}          # рабочие указатели биографий
         self.story_marks = {}          # чего и сколько уже рассказано
         self._path_of = {}             # figure_id -> id пути
         self.folks = {}
@@ -944,6 +948,22 @@ class World:
     # Память людей и связи между ними (блок 16)
     # ------------------------------------------------------------------
 
+    def add_township(self, **kwargs) -> Township:
+        town = Township(id=self.next_id("TW"), **kwargs)
+        self.townships[town.id] = town
+        self._town_of[town.settlement_id] = town.id
+        return town
+
+    def town_of(self, settlement_id: str):
+        """Биография этого города, если она у него есть."""
+        town_id = self._town_of.get(settlement_id)
+        if town_id is None:
+            # Мир, поднятый из файла: указатель строится по первому спросу.
+            self._town_of = {item.settlement_id: item.id
+                             for item in self.townships.values()}
+            town_id = self._town_of.get(settlement_id)
+        return self.townships.get(town_id) if town_id else None
+
     def add_story(self, **kwargs) -> Story:
         story = Story(id=self.next_id("BY"), **kwargs)
         self.stories[story.id] = story
@@ -1497,6 +1517,7 @@ class World:
             "Походов в неизведанное": len(self.expeditions),
             "Сказаний": len(self.tales),
             "Былей": len(self.stories),
+            "Городских биографий": len(self.townships),
             "Открытых земель": sum(1 for r in self.regions.values()
                                    if r.discovered_year),
             "Тёмных веков": len(self.dark_ages),

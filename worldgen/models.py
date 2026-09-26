@@ -1508,6 +1508,64 @@ class Cabal:
 
 
 @dataclass
+class Township:
+    """Биография города: почему он есть и чем он стал.
+
+    Поселение само по себе — строка с числом жителей. Биография делает
+    из него историческую личность: у города есть причина существовать
+    (`origin`), занятия, которыми он кормится и которые меняются
+    (`trades`), концы, наросшие по ходу жизни (`districts`), слои под
+    ногами от прежних городов на этом месте (`layers`), тяготы, тайны и
+    нрав, сложившийся из прожитого, а не брошенный костью.
+
+    Главное правило: причина основания тянется через всю жизнь. Город у
+    переправы и город у рудной жилы проживут разные тысячу лет, и когда
+    причина исчезает — брод занесло, жила иссякла, — город или находит
+    новую, или начинает умирать.
+    """
+
+    id: str
+    settlement_id: str
+    origin: str                # ключ причины основания
+    born: Date
+    trades: list = field(default_factory=list)      # [{чем, с, по}]
+    districts: list = field(default_factory=list)   # [{конец, год, чем живёт}]
+    layers: list = field(default_factory=list)      # [{слой, год, от чего}]
+    marks: list = field(default_factory=list)       # вехи: [{год, вид, строка}]
+    estates: list = field(default_factory=list)     # [{сословие, доля}]
+    forces: list = field(default_factory=list)      # [{сила, чего хочет}]
+    troubles: list = field(default_factory=list)    # [{тягота, с, по, чем}]
+    secrets: list = field(default_factory=list)     # [{ключ, уровень, …}]
+    temper: dict = field(default_factory=dict)      # десять шкал нрава
+    mix: dict = field(default_factory=dict)         # уклад: расы, наречия, веры
+    incomes: list = field(default_factory=list)     # чем кормится
+    takes: list = field(default_factory=list)       # что приходится ввозить
+    weak: str = ""             # из-за чего нынешнее занятие однажды кончится
+    life: str = ""             # растёт, стоит, мельчает, пуст, заселён заново
+    peak: int = 0              # самая людная пора
+    peak_year: int = 0
+    low_year: int = 0          # когда было хуже всего
+    seen: int = 0              # сколько душ было при прошлом счёте
+    held_by: str = ""          # чья держава держала город тогда же
+    last_woe: str = ""         # какую беду город уже отметил у себя
+    notes: list = field(default_factory=list)
+    event_ids: list = field(default_factory=list)
+
+    @property
+    def trade(self) -> str:
+        """Чем город кормится сейчас: последнее незакрытое занятие."""
+        for item in reversed(self.trades):
+            if not item.get("по"):
+                return item.get("чем", "")
+        return self.trades[-1].get("чем", "") if self.trades else ""
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["born"] = _date_out(self.born)
+        return data
+
+
+@dataclass
 class Story:
     """Быль: маленькая история, выросшая из большой.
 

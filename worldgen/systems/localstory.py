@@ -39,7 +39,8 @@ from .. import narrative_local as texts
 from .. import narrative_lore as lore_texts
 from .. import races as races_mod
 from .. import sites as sites_mod
-from ..models import RUINED
+from .. import township as town_cat
+from ..models import ACTIVE, RUINED
 
 STORY_RATE = 0.55          # шанс, что за десятилетний такт найдётся быль
 MAX_PER_UPKEEP = 2         # больше двух за раз мир не рассказывает
@@ -230,6 +231,46 @@ def _nodes(ctx, year: int) -> list:
             cat.MIGRATION, "народ снялся с места и пришёл сюда", when,
             ref=migration.id,
             region_id=getattr(migration, "to_region", ""), weight=1.0))
+
+    # --- то, что даёт сам город ----------------------------------------
+    # Город — самый щедрый источник малых историй: у него болит своё, он
+    # о чём-то молчит, и под ним лежит чужой город. Всё это уже сосчитано
+    # в его биографии, остаётся взять.
+    for town in world.townships.values():
+        settlement = world.settlements.get(town.settlement_id)
+        if settlement is None or settlement.status != ACTIVE:
+            continue
+        if settlement.population < 200:
+            continue
+        for item in town.troubles:
+            if item.get("по"):
+                continue
+            began = int(item.get("с", 0))
+            if year - began < ECHO_MIN_AGE:
+                continue
+            trouble = town_cat.TROUBLES_BY_KEY.get(item["тягота"])
+            if trouble is None:
+                continue
+            out.append(Node(
+                cat.TOWN_ACHE, trouble.about, began, ref=settlement.id,
+                region_id=settlement.region_id, settlement_id=settlement.id,
+                weight=1.2))
+        for item in town.secrets:
+            if item.get("раскрыта"):
+                continue
+            out.append(Node(
+                cat.TOWN_SECRET, item.get(town_cat.RUMOUR, ""),
+                int(item.get("год", 0)), ref=settlement.id,
+                region_id=settlement.region_id, settlement_id=settlement.id,
+                weight=1.0))
+        for item in town.layers:
+            when = int(item.get("год", 0))
+            if year - when < 80:
+                continue        # то, что легло вчера, ещё не тайна
+            out.append(Node(
+                cat.UNDERCITY, item.get("слой", ""), when, ref=settlement.id,
+                region_id=settlement.region_id, settlement_id=settlement.id,
+                weight=0.9))
 
     # --- живые обиды и новые порядки -----------------------------------
     for fact in list(world.open_facts)[:400]:
@@ -425,6 +466,13 @@ def _pick_shape(ctx, rng, node: Node):
 def _home(ctx, rng, node: Node):
     """Где это случилось: живое поселение рядом с узлом."""
     world = ctx.world
+    # У городского узла место известно точно: это тот самый город, у
+    # которого болит, молчится или лежит что-то под ногами.
+    if node.settlement_id:
+        home = world.settlements.get(node.settlement_id)
+        if home is not None and home.status == ACTIVE \
+                and home.population >= 80:
+            return home
     near, far = [], []
     region = world.regions.get(node.region_id)
     close = {node.region_id} | set(region.neighbors or ()) if region else set()
@@ -663,6 +711,10 @@ def _write_back(ctx, rng, story, shape, node, home, year: int) -> None:
                             else "замешана в деле: %s"
                             % (story.title or "быль"))
 
+    # Город узнаёт о себе то, чего не знал: дошедшая до конца быль
+    # поднимает тайну с уровня слуха до того, как было на самом деле.
+    _town_back(ctx, story, node, year)
+
     # След в ткани причин: обида, слава или долг остаётся у державы.
     polity_id = home.polity_id
     if polity_id and polity_id in world.polities and shape.epicity >= 2:
@@ -671,6 +723,47 @@ def _write_back(ctx, rng, story, shape, node, home, year: int) -> None:
             "другая сторона взяла") else history.FAVOUR
         history.leave(world, kind, year, polity_id, weight=0.35,
                       note="быль по имени «%s»" % (story.title or "быль"))
+
+
+def _town_back(ctx, story, node, year: int) -> None:
+    """Что быль меняет в самом городе.
+
+    Тайна, до которой докопались, перестаёт быть тайной; тягота, с
+    которой сладили, кончается; вскрытый ярус остаётся вскрытым. Без
+    этого город рассказывал бы одно и то же без конца.
+    """
+    world = ctx.world
+    town = world.town_of(node.settlement_id) if node.settlement_id else None
+    if town is None:
+        return
+    good = story.outcome in ("сладилось", "сладилось наполовину",
+                             "правда не нужна")
+    if node.kind == cat.TOWN_SECRET and good:
+        for item in town.secrets:
+            if item.get(town_cat.RUMOUR) != node.what or item.get("раскрыта"):
+                continue
+            item["уровень"] = town_cat.TRUTH
+            item["раскрыта"] = int(year)
+            town.marks.append({
+                "год": int(year), "вид": town_cat.TROUBLE_MARK,
+                "строка": "Город узнал о себе то, чего не знал: %s."
+                          % item.get(town_cat.TRUTH, ""),
+                "души": 0})
+            town.notes.append("быль по имени «%s» вывела старое наружу"
+                              % (story.title or "быль"))
+            break
+    elif node.kind == cat.TOWN_ACHE and story.outcome == "сладилось":
+        for item in town.troubles:
+            trouble = town_cat.TROUBLES_BY_KEY.get(item["тягота"])
+            if item.get("по") or trouble is None or trouble.about != node.what:
+                continue
+            item["по"] = int(year)
+            item["чем"] = "уладилось, и об этом рассказывают"
+            break
+    elif node.kind == cat.UNDERCITY and good:
+        note = "под городом побывали: %s" % node.what
+        if note not in town.notes:
+            town.notes.append(note)
 
 
 def _name_it(ctx, rng, story, shape, home) -> None:
