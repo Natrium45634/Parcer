@@ -422,6 +422,9 @@ class ChronicleApp(tk.Tk):
         self.tales_text = self._add_text_tab(
             "Сказания", lambda: self._set_text(
                 self.tales_text, chronicle.render_tales(self.world)))
+        self.lives_text = self._add_text_tab(
+            "Судьбы людей", lambda: self._set_text(
+                self.lives_text, chronicle.render_lifepaths(self.world)))
         self.crafts_text = self._add_text_tab(
             "Ремёсла", lambda: self._set_text(
                 self.crafts_text, chronicle.render_crafts(self.world)))
@@ -1229,6 +1232,37 @@ class ChronicleApp(tk.Tk):
                         ", ".join(member.roles[:2]) or "—", mark))
 
         elif kind == "Figure":
+            # Чего человек хотел и что из этого вышло. Это первое, что
+            # стоит знать о нём: послужной список — уже следствие.
+            path = world.path_of(entity.id)
+            if path is not None:
+                lines.extend(["", "ЧЕГО ХОТЕЛ" if entity.sex == "m"
+                              else "ЧЕГО ХОТЕЛА", "-" * 60])
+                lines.append("  %s%s" % (path.wish,
+                                         " — %s" % path.about
+                                         if path.about else ""))
+                if path.hidden:
+                    lines.append("  а на деле: %s" % path.hidden)
+                if path.limits:
+                    lines.append("  мешало: %s" % ", ".join(path.limits))
+                lines.append("  чем кончилось: %s" % path.state)
+                if path.steps:
+                    lines.extend(["", "КАК ЭТО ШЛО", "-" * 60])
+                    for item in path.steps:
+                        lines.append("  %5d  %s" % (item["год"],
+                                                    item["строка"]))
+                lines.extend(["", "ЧТО ИЗ ЭТОГО ВЫШЛО", "-" * 60])
+                lines.append("  на деле ...... %s" % (path.did or "—"))
+                lines.append("  сам считал ... %s" % (path.thought or "—"))
+                lines.append("  в летописи ... %s" % (path.written or "—"))
+                if path.sung:
+                    lines.append("  поют ......... %s" % path.sung)
+                if path.irony:
+                    lines.append("  и вот что вышло: %s" % path.irony)
+                for item in path.legacy:
+                    lines.append("  после (%d): %s" % (item["год"],
+                                                       item["что"]))
+
             # Что человек помнит и с кем связан: по этому видно, почему
             # он поступал так, а не иначе.
             memories = world.memories_of(entity.id)

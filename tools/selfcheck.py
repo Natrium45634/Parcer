@@ -47,6 +47,85 @@ SAMPLE_MAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
                           "maps", "aurora-7.world")
 
 
+def check_lives(world, seed: str) -> list:
+    """Жизненные пути: цель имеет причину, а человек не действует мёртвым.
+
+    Проверяется то, что перечислено в задании: цели могут кончаться и
+    проваливаться, никто не добивается всего, события не случаются до
+    рождения и после смерти, великих не слишком много и биографии не
+    повторяются слово в слово.
+    """
+    from worldgen import lifepaths as cat
+
+    problems = []
+    seen_ids = set()
+    for path in world.lifepaths.values():
+        figure = world.figures.get(path.figure_id)
+        if figure is None:
+            problems.append("сид «%s»: путь %s ведёт человека, которого нет"
+                            % (seed, path.id))
+            continue
+        if path.figure_id in seen_ids:
+            problems.append("сид «%s»: у %s два жизненных пути"
+                            % (seed, figure.plain_name))
+        seen_ids.add(path.figure_id)
+        if not path.wish:
+            problems.append("сид «%s»: у %s путь без цели"
+                            % (seed, figure.plain_name))
+        if path.state not in cat.STATES:
+            problems.append("сид «%s»: у %s неведомое состояние цели «%s»"
+                            % (seed, figure.plain_name, path.state))
+        if path.fame not in cat.FAME_LADDER:
+            problems.append("сид «%s»: у %s неведомая ступень известности"
+                            % (seed, figure.plain_name))
+        birth = figure.birth.year if figure.birth else 0
+        death = figure.death.year if figure.death else 10 ** 9
+        for item in path.steps:
+            year = int(item.get("год", 0))
+            if year < birth:
+                problems.append("сид «%s»: в жизни %s есть год до рождения"
+                                % (seed, figure.plain_name))
+                break
+            if year > death:
+                problems.append("сид «%s»: %s действует после смерти"
+                                % (seed, figure.plain_name))
+                break
+        for item in path.legacy:
+            if int(item.get("год", 0)) < death:
+                problems.append("сид «%s»: наследие %s началось раньше его "
+                                "смерти" % (seed, figure.plain_name))
+                break
+        if path.ended_year and path.ended_year < birth:
+            problems.append("сид «%s»: путь %s кончился до рождения"
+                            % (seed, figure.plain_name))
+
+    total = len(world.lifepaths)
+    if total:
+        done = sum(1 for path in world.lifepaths.values()
+                   if path.state in cat.GOOD_ENDS)
+        if done == total:
+            problems.append("сид «%s»: все до единого добились своего — "
+                            "так не бывает" % seed)
+        great = sum(1 for path in world.lifepaths.values()
+                    if path.fame == cat.GREAT)
+        if great > total * 0.35:
+            problems.append("сид «%s»: великих людей %d из %d — слишком "
+                            "много" % (seed, great, total))
+        wishes = [path.wish for path in world.lifepaths.values()]
+        if total >= 12 and len(set(wishes)) < 3:
+            problems.append("сид «%s»: все жизни об одном и том же" % seed)
+        # Биографии не должны совпадать слово в слово.
+        prints = set()
+        for path in world.lifepaths.values():
+            mark = tuple(item["строка"] for item in path.steps)
+            if len(mark) >= 6 and mark in prints:
+                problems.append("сид «%s»: две жизни написаны одинаково"
+                                % seed)
+                break
+            prints.add(mark)
+    return problems
+
+
 def check_tales(world, seed: str) -> list:
     """Сказания: дружина настоящая, дорога по своим землям, след честный."""
     problems = []
@@ -1453,6 +1532,7 @@ def main() -> int:
         failures.extend(check_capitals(first, seed))
         failures.extend(check_souls(first, seed))
         failures.extend(check_tales(first, seed))
+        failures.extend(check_lives(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -1504,6 +1584,7 @@ def main() -> int:
             failures.extend(check_capitals(first, "карта/" + seed))
             failures.extend(check_souls(first, "карта/" + seed))
             failures.extend(check_tales(first, "карта/" + seed))
+            failures.extend(check_lives(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "
@@ -1542,7 +1623,8 @@ def main() -> int:
                       check_tongues, check_embassies, check_things,
                       check_causes, check_people_memory, check_migrations,
                       check_strifes, check_lore, check_upheavals,
-                      check_capitals, check_souls, check_tales):
+                      check_capitals, check_souls, check_tales,
+                      check_lives):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
         failures.extend(check_map_world(

@@ -20,7 +20,8 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Discovery, Embassy, Event, Expedition, Fact, Faith, Feud,
                      Figure,
                      Folk, Fortress,
-                     Guild, House, Law, League, Legend, Memory, Migration,
+                     Guild, House, Law, League, Legend, LifePath, Memory,
+                     Migration,
                      Monster, Pact,
                      Plot,
                      Polity,
@@ -93,6 +94,8 @@ class World:
         self.expeditions = {}
         self.active_expeditions = []
         self.tales = {}                # сказания: местные героические истории
+        self.lifepaths = {}            # жизненные пути значимых людей
+        self._path_of = {}             # figure_id -> id пути
         self.folks = {}
         self.routes = {}
         self.active_routes = []
@@ -905,6 +908,17 @@ class World:
     # ------------------------------------------------------------------
     # Память людей и связи между ними (блок 16)
     # ------------------------------------------------------------------
+
+    def add_lifepath(self, **kwargs) -> LifePath:
+        path = LifePath(id=self.next_id("LF"), **kwargs)
+        self.lifepaths[path.id] = path
+        self._path_of[path.figure_id] = path.id
+        return path
+
+    def path_of(self, figure_id: str):
+        """Жизненный путь этого человека, если он у него есть."""
+        path_id = self._path_of.get(figure_id)
+        return self.lifepaths.get(path_id) if path_id else None
 
     def add_tale(self, **kwargs) -> Tale:
         tale = Tale(id=self.next_id("SG"), **kwargs)

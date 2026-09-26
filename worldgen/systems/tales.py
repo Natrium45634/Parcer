@@ -232,7 +232,9 @@ def _tell(ctx, rng, year: int, threat: Threat) -> None:
     began_year = max(1, year - spent)
     began = ctx.date_in(rng, began_year)
     _call_key, call_note = rng.choice(cat.CALLS)
-    company = _company(ctx, rng, race, home, began_year, year)
+    seeking = _seekers_first(ctx, home, threat, began_year, year)
+    company = _company(ctx, rng, race, home, began_year, year,
+                       seeking=seeking)
     if len(company) < COMPANY_MIN:
         return
 
@@ -283,18 +285,26 @@ def _home_city(ctx, rng, threat):
     return rng.weighted([(item, float(item.population)) for item in pool])
 
 
-def _company(ctx, rng, race, home, began_year: int, end_year: int) -> list:
-    """Кто идёт и зачем. Своих берут первыми, недостающих зовут со стороны."""
+def _company(ctx, rng, race, home, began_year: int, end_year: int,
+             seeking=()) -> list:
+    """Кто идёт и зачем. Своих берут первыми, недостающих зовут со стороны.
+
+    Первым в дружину входит тот, кто искал этой беды всю жизнь: он же её
+    и ведёт. Остальных добирают из людей этой земли и с улицы.
+    """
     world = ctx.world
     year = began_year
     size = rng.randint(COMPANY_MIN, COMPANY_MAX)
     roles = _roles(rng, size)
     taken = _known_hands(world, home, began_year, end_year)
+    # Искавшие идут первыми — и вождём становится тот, кто этого хотел.
+    taken = [item for item in taken if item not in seeking]
+    taken.extend(reversed(list(seeking)))
     motives = list(cat.MOTIVES)
     company = []
     for index, (role, note) in enumerate(roles):
         figure = None
-        if taken and rng.chance(0.45):
+        if taken and (index == 0 or rng.chance(0.45)):
             figure = taken.pop()
         if figure is None:
             sex = "f" if rng.chance(0.34) else "m"
@@ -336,6 +346,25 @@ def _roles(rng, size: int) -> list:
         rest.remove(pick)
         chosen.append((pick[0], pick[1]))
     return chosen
+
+
+def _seekers_first(ctx, home, threat, began_year: int, end_year: int) -> list:
+    """Те, кто искал именно этой беды всю жизнь.
+
+    Человек, который годами хочет убить чудовище, должен оказаться в той
+    дружине, которая за чудовищем идёт, — иначе цели людей и местные
+    истории остаются двумя разными генераторами.
+    """
+    from . import lifepath as lifepath_mod
+
+    world = ctx.world
+    out = []
+    for figure in lifepath_mod.seekers(world, threat.kind, home.region_id,
+                                       end_year):
+        if not figure.alive_at(end_year) or figure.age_at(began_year) < 16:
+            continue
+        out.append(figure)
+    return out[:2]
 
 
 def _known_hands(world, home, began_year: int, end_year: int) -> list:
@@ -593,10 +622,14 @@ def _finish(ctx, rng, tale, threat, home, outcome: str, year: int) -> None:
         race_id=world.figures[heroes[0]].race_id if heroes else "",
         causes=causes[-2:])
     tale.event_ids.append(event.id)
+    from . import lifepath as lifepath_mod
     for figure_id in heroes:
         figure = world.figures.get(figure_id)
         if figure is not None:
             figure.deeds.append(event.id)
+            # Для того, кто этого искал, сказание — шаг к своей цели; для
+            # прочих — та попытка, на которой всё и кончилось.
+            lifepath_mod.after_tale(ctx, tale, figure, outcome, ended_year)
     # Награда раздаётся последней: и след в ткани причин, и песня
     # ссылаются на запись летописи, а её до этой минуты не было.
     _reward(ctx, rng, tale, threat, home, outcome, ended_year)

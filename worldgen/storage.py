@@ -20,6 +20,7 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Migration, Monster, Pact,
                      Plot,
                      Polity,
+                     LifePath,
                      Region, Reign, Relic, Seed, Settlement, Site, Strife,
                      Tale,
                      Temple,
@@ -163,6 +164,8 @@ def world_to_dict(world: World) -> dict:
                     for item in world.strifes.values()],
         "tales": [_compact(Tale, item.to_dict())
                   for item in world.tales.values()],
+        "lifepaths": [_compact(LifePath, item.to_dict())
+                      for item in world.lifepaths.values()],
         "cabals": [_compact(Cabal, item.to_dict())
                    for item in world.cabals.values()],
         "seeds": [_compact(Seed, item.to_dict()) for item in world.seeds.values()],
@@ -354,6 +357,10 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("tales", ()):
         tale = Tale(**_clean(Tale, item))
         world.tales[tale.id] = tale
+    for item in data.get("lifepaths", ()):
+        path = LifePath(**_clean(LifePath, item))
+        world.lifepaths[path.id] = path
+        world._path_of[path.figure_id] = path.id
     for item in data.get("strifes", ()):
         strife = Strife(**_clean(Strife, item))
         world.strifes[strife.id] = strife

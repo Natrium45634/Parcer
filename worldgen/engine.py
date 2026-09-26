@@ -28,7 +28,8 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       diplomacy, embassy,
                       era_events,
                       exploration, founding, geography, guilds, houses,
-                      laws, legacy, lives, lore, memory, migration, monsters,
+                      laws, legacy, lifepath, lives, lore, memory, migration,
+                      monsters,
                       nations,
                       notables,
                       peoples,
@@ -194,6 +195,10 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)
             causes.upkeep(ctx, year, UPKEEP_PERIOD)
             memory.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Жизненные пути идут после памяти: перелом в судьбе человека
+            # растёт из того, что он и правда пережил, а память к этому
+            # часу уже сложена.
+            lifepath.upkeep(ctx, year, UPKEEP_PERIOD)
             migration.upkeep(ctx, year, UPKEEP_PERIOD)
             culture.upkeep(ctx, year, UPKEEP_PERIOD)
             upheaval.upkeep(ctx, year, UPKEEP_PERIOD)

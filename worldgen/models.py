@@ -1508,6 +1508,61 @@ class Cabal:
 
 
 @dataclass
+class LifePath:
+    """Жизненный путь человека: чего хотел, что делал, что получилось.
+
+    Главное здесь — не достижения, а разница между тремя вещами: чего
+    человек хотел, что он пытался сделать и что в итоге вышло. Летопись
+    до сих пор помнила только третье, и оттого люди в ней читались
+    послужными списками.
+
+    Путь ведётся не у всех: большинство живёт обычно и в истории не
+    остаётся. Из заметных единицы становятся великими — и становятся
+    сами, по ходу жизни, а не назначаются заранее.
+    """
+
+    id: str
+    figure_id: str
+    goal_key: str              # ключ жизненной цели
+    wish: str                  # «стать величайшим охотником на чудовищ»
+    about: str = ""            # ради кого или чего именно: имя, земля, род
+    hidden: str = ""           # чего он хотел на самом деле
+    state: str = "не начата"   # состояние главной цели
+    steps_done: int = 0        # сколько подцелей пройдено
+    subgoals: list = field(default_factory=list)   # [{что, состояние, год}]
+    limits: list = field(default_factory=list)     # что мешает
+    luck: str = "ровный"       # нрав случая
+    luck_note: str = ""
+    signature: str = ""        # то, что повторяется всю дорогу
+    habits: list = field(default_factory=list)
+    fear: str = ""
+    secret: str = ""
+    secret_fate: str = ""
+    contradiction: str = ""
+    tries: int = 0             # сколько раз брался
+    wins: int = 0
+    losses: int = 0
+    # Сам жизненный путь: узлы с годом, видом и тем, из-за чего это вышло.
+    steps: list = field(default_factory=list)
+    fame: str = "обычный человек"
+    fame_trail: list = field(default_factory=list)  # [{год, ступень}]
+    # Четыре правды об одном человеке.
+    did: str = ""              # что он сделал на самом деле
+    thought: str = ""          # чем считал это сам
+    written: str = ""          # что записала летопись
+    sung: str = ""             # что поют через сто лет
+    irony: str = ""            # ирония судьбы, если она случилась
+    death_note: str = ""       # как и отчего он умер
+    legacy: list = field(default_factory=list)      # что было после
+    born_year: int = 0
+    ended_year: int = 0
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class Tale:
     """Сказание: местная героическая история внутри большой летописи.
 

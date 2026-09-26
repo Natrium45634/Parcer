@@ -843,6 +843,119 @@ def render_laws(world) -> str:
     return "\n".join(rows)
 
 
+def render_lifepaths(world) -> str:
+    """Судьбы людей: чего хотели, что делали и что из этого вышло.
+
+    Летопись до сих пор записывала за человеком только удавшееся, и люди
+    в ней читались послужными списками. Здесь записано другое — разница
+    между желанием, попытками и итогом. Она и есть судьба.
+    """
+    from . import lifepaths as cat
+
+    rows = ["СУДЬБЫ ЛЮДЕЙ", ""]
+    if not world.lifepaths:
+        rows.append("  Ни за кем в этом мире не следили так близко.")
+        return "\n".join(rows)
+
+    paths = sorted(world.lifepaths.values(),
+                   key=lambda item: (item.born_year, item.id))
+    ends, ladder = {}, {}
+    for path in paths:
+        ends[path.state] = ends.get(path.state, 0) + 1
+        ladder[path.fame] = ladder.get(path.fame, 0) + 1
+    good = sum(count for state, count in ends.items()
+               if state in cat.GOOD_ENDS)
+    rows.append("  Жизней прослежено: %d." % len(paths))
+    rows.append("  Добились своего: %d; остальные — нет." % good)
+    rows.append("  Чем кончались цели: %s."
+                % ", ".join("%s — %d" % (key, ends[key])
+                            for key in sorted(ends)))
+    rows.append("  Известность к концу жизни: %s."
+                % ", ".join("%s — %d" % (key, ladder[key])
+                            for key in cat.FAME_LADDER if key in ladder))
+    rows.append("")
+
+    # Подробно — о тех, кого мир запомнил; об остальных строкой.
+    big = [path for path in paths
+           if path.fame in (cat.GREAT, cat.HISTORIC, cat.REGION)][:40]
+    shown = {path.id for path in big}
+    for path in big:
+        rows.extend(_life_block(world, path, cat))
+
+    rest = [path for path in paths if path.id not in shown]
+    if rest:
+        rows.append("  ОСТАЛЬНЫЕ")
+        rows.append("")
+        for path in rest:
+            figure = world.figures.get(path.figure_id)
+            if figure is None:
+                continue
+            rows.append("    %-28s %-11s хотел: %s — %s"
+                        % (figure.plain_name[:28], figure.lifespan_text(),
+                           path.wish, path.state))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def _life_block(world, path, cat) -> list:
+    """Одна жизнь целиком: желание, дорога, итог и четыре правды о нём."""
+    figure = world.figures.get(path.figure_id)
+    if figure is None:
+        return []
+    rows = ["  %s" % figure.name]
+    rows.append("  " + "-" * (len(figure.name) + 2))
+    race = races_mod.RACES_BY_ID.get(figure.race_id)
+    rows.append("      %s, %s, %s"
+                % (figure.lifespan_text(), race.name if race else "—",
+                   cat.fame_word(path.fame, figure.sex)))
+    if figure.roles:
+        rows.append("      чем был занят: %s" % ", ".join(figure.roles[:6]))
+    rows.append("")
+    rows.append("      ЧЕГО ХОТЕЛ" if figure.sex == "m"
+                else "      ЧЕГО ХОТЕЛА")
+    rows.append("        %s" % path.wish
+                + (" — %s" % path.about if path.about else ""))
+    if path.hidden:
+        rows.append("        а на деле: %s" % path.hidden)
+    if path.limits:
+        rows.append("        мешало: %s" % ", ".join(path.limits))
+    if path.luck_note:
+        rows.append("        удача: %s" % path.luck_note)
+    if path.signature:
+        rows.append("        за ним водилось: %s" % path.signature
+                    if figure.sex == "m"
+                    else "        за ней водилось: %s" % path.signature)
+    if path.contradiction:
+        rows.append("        в нём не сходилось: %s" % path.contradiction
+                    if figure.sex == "m"
+                    else "        в ней не сходилось: %s" % path.contradiction)
+    if path.secret:
+        rows.append("        скрывал: %s (%s)"
+                    % (path.secret, path.secret_fate or "так и не раскрылся")
+                    if figure.sex == "m"
+                    else "        скрывала: %s (%s)"
+                    % (path.secret, path.secret_fate or "так и не раскрылся"))
+    rows.append("")
+    rows.append("      КАК ЭТО ШЛО")
+    for item in path.steps:
+        rows.append("        %5d  %s" % (item["год"], item["строка"]))
+    rows.append("")
+    rows.append("      ЧТО ИЗ ЭТОГО ВЫШЛО")
+    rows.append("        на деле ...... %s" % (path.did or "—"))
+    rows.append("        сам считал ... %s" % (path.thought or "—")
+                if figure.sex == "m"
+                else "        сама считала  %s" % (path.thought or "—"))
+    rows.append("        в летописи ... %s" % (path.written or "—"))
+    if path.sung:
+        rows.append("        поют ......... %s" % path.sung)
+    if path.irony:
+        rows.append("        и вот что вышло: %s" % path.irony)
+    for item in path.legacy:
+        rows.append("        после (%d): %s" % (item["год"], item["что"]))
+    rows.append("")
+    return rows
+
+
 def render_tales(world) -> str:
     """Сказания: местные героические истории целиком, одна за другой.
 
@@ -2538,6 +2651,7 @@ def full_text(world) -> str:
         render_laws(world),
         render_lore(world),
         render_tales(world),
+        render_lifepaths(world),
         render_guilds(world),
         render_expeditions(world),
         render_politics(world),
