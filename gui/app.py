@@ -425,6 +425,9 @@ class ChronicleApp(tk.Tk):
         self.lives_text = self._add_text_tab(
             "Судьбы людей", lambda: self._set_text(
                 self.lives_text, chronicle.render_lifepaths(self.world)))
+        self.stories_text = self._add_text_tab(
+            "Были", lambda: self._set_text(
+                self.stories_text, chronicle.render_stories(self.world)))
         self.crafts_text = self._add_text_tab(
             "Ремёсла", lambda: self._set_text(
                 self.crafts_text, chronicle.render_crafts(self.world)))
@@ -1286,11 +1289,36 @@ class ChronicleApp(tk.Tk):
                         (other.plain_name if other else "?")[:32], path,
                         bond.since,
                         ", оборвалась в %d" % bond.ended if bond.ended else ""))
+            stories = [story for story in world.stories.values()
+                       if any(item.get("кто") == entity.id
+                              for item in story.cast)]
+            if stories:
+                stories.sort(key=lambda item: item.began.ordinal)
+                lines.extend(["", "В КАКИХ ДЕЛАХ ЗАМЕШАН" if entity.sex == "m"
+                              else "В КАКИХ ДЕЛАХ ЗАМЕШАНА", "-" * 60])
+                for story in stories[:12]:
+                    role = next((item.get("роль", "") for item in story.cast
+                                 if item.get("кто") == entity.id), "")
+                    lines.append("  %-5d %-38s %-22s %s"
+                                 % (story.began.year, story.title[:38],
+                                    role[:22], story.outcome))
             reigns = [r for r in world.reigns.values() if r.ruler_id == entity.id]
             reigns.sort(key=lambda r: r.start.ordinal)
             if reigns:
                 lines.extend(["", "ПРАВЛЕНИЯ", "-" * 60])
                 lines.extend(reign_rows(reigns))
+
+        elif kind in ("Settlement", "Site", "Region"):
+            # У места своя память: что тут рассказывают. Летопись помнит
+            # основание и разорение, а быль — то, из-за чего это место
+            # обходят стороной или ходят к нему за советом.
+            told = world.stories_at(entity.id)
+            if told:
+                lines.extend(["", "ЧТО ТУТ РАССКАЗЫВАЮТ", "-" * 60])
+                for story in told[:15]:
+                    lines.append("  %-5d %-40s %-16s %s"
+                                 % (story.began.year, story.title[:40],
+                                    story.tone, story.outcome))
 
         elif kind == "Calamity":
             if entity.battle_ids:

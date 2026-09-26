@@ -27,7 +27,8 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Polity,
                      Region,
                      Reign,
-                     Relic, Seed, Settlement, Site, Strife, Tale, Temple,
+                     Relic, Seed, Settlement, Site, Story, Strife, Tale,
+                     Temple,
                      Tongue,
                      TradeRoute,
                      Tribe,
@@ -95,6 +96,8 @@ class World:
         self.active_expeditions = []
         self.tales = {}                # сказания: местные героические истории
         self.lifepaths = {}            # жизненные пути значимых людей
+        self.stories = {}              # были: малые истории мест и людей
+        self.story_marks = {}          # чего и сколько уже рассказано
         self._path_of = {}             # figure_id -> id пути
         self.folks = {}
         self.routes = {}
@@ -147,6 +150,12 @@ class World:
         self.cabals = {}               # id -> Cabal
         self.live_cabals = []          # заговоры, ещё не кончившиеся
         self._events_by_id = {}        # id -> Event (для дерева причин)
+        # Указатель «о ком последнее событие»: нужен цепочке причин у
+        # былей. У узла были есть город, человек или война, а причины
+        # ведутся по событиям, и связать одно с другим иначе можно
+        # только перебором всей летописи.
+        self._subject_index = {}       # id существа -> id события
+        self._subject_cursor = 0       # сколько событий уже разобрано
         self.notes = {}                # свободные заметки для будущих блоков
         # Перепись мира раз в несколько лет: по ней видно, как мир рос,
         # когда он проваливался и какой век стоил ему дороже всего.
@@ -837,6 +846,32 @@ class World:
             self._events_by_id[item.id] = item
         return self._events_by_id.get(event_id)
 
+    def event_about(self, entity_id: str) -> str:
+        """Первое событие, где это существо названо предметом.
+
+        Именно первое, а не последнее: цепочку причин интересует, откуда
+        это взялось, а не что о нём говорили после. У руин первое
+        событие — как они появились, у войны — как она началась, и от
+        них причины уходят дальше в глубь веков.
+
+        Указатель дополняется по мере того, как летопись растёт, и потому
+        стоит один проход по событиям на весь мир, а не проход на каждый
+        вопрос.
+        """
+        if not entity_id:
+            return ""
+        if self._subject_cursor < len(self.events):
+            for event in self.events[self._subject_cursor:]:
+                # Сперва предметы, потом действующие: у человека своего
+                # события обычно нет, зато есть то, в котором он впервые
+                # что-то сделал, и оно годится корнем не хуже.
+                for subject_id in event.subjects:
+                    self._subject_index.setdefault(subject_id, event.id)
+                for actor_id in event.actors:
+                    self._subject_index.setdefault(actor_id, event.id)
+            self._subject_cursor = len(self.events)
+        return self._subject_index.get(entity_id, "")
+
     # ------------------------------------------------------------------
     # Следы событий и отложенные последствия (блок 15)
     # ------------------------------------------------------------------
@@ -908,6 +943,23 @@ class World:
     # ------------------------------------------------------------------
     # Память людей и связи между ними (блок 16)
     # ------------------------------------------------------------------
+
+    def add_story(self, **kwargs) -> Story:
+        story = Story(id=self.next_id("BY"), **kwargs)
+        self.stories[story.id] = story
+        return story
+
+    def stories_at(self, place_id: str) -> list:
+        """Были, случившиеся в этом месте, по годам.
+
+        Одно место живёт долго: пожар, заговор, мор, запустение, приход
+        исследователя — это всё может случиться с ним по очереди.
+        """
+        rows = [story for story in self.stories.values()
+                if place_id in (story.settlement_id, story.site_id,
+                                story.region_id)]
+        rows.sort(key=lambda item: item.began.ordinal)
+        return rows
 
     def add_lifepath(self, **kwargs) -> LifePath:
         path = LifePath(id=self.next_id("LF"), **kwargs)
@@ -1444,6 +1496,7 @@ class World:
             "Путей действует": len(self.active_routes),
             "Походов в неизведанное": len(self.expeditions),
             "Сказаний": len(self.tales),
+            "Былей": len(self.stories),
             "Открытых земель": sum(1 for r in self.regions.values()
                                    if r.discovered_year),
             "Тёмных веков": len(self.dark_ages),

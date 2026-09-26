@@ -188,6 +188,138 @@ def check_tales(world, seed: str) -> list:
     return problems
 
 
+def check_stories(world, seed: str) -> list:
+    """Были: история найдена, а не выдумана.
+
+    Проверяется то, на чём держится весь раздел: участники живы и
+    настоящие, место существует, корень лежит раньше самой были, поворот
+    подготовлен подсказкой, последствия не больше размаха истории — и
+    девять из десяти былей не спасают мир. Последнее — не вкусовщина: без
+    этого правила мир превращается в череду древних зол.
+    """
+    from worldgen import localstory as cat
+
+    problems = []
+    sizes, shapes = {}, {}
+    for story in world.stories.values():
+        where = "быль «%s»" % (story.title or story.id)
+        if not story.title:
+            problems.append("сид «%s»: у были %s нет имени" % (seed, story.id))
+        if not story.outcome:
+            problems.append("сид «%s»: %s без исхода" % (seed, where))
+        if story.ended is not None and story.ended.ordinal < story.began.ordinal:
+            problems.append("сид «%s»: %s кончилась раньше, чем началась"
+                            % (seed, where))
+        sizes[story.epicity] = sizes.get(story.epicity, 0) + 1
+        shapes[story.shape] = shapes.get(story.shape, 0) + 1
+        if story.shape not in cat.SHAPES_BY_KEY:
+            problems.append("сид «%s»: у %s костяк, которого нет в каталоге"
+                            % (seed, where))
+        if story.node not in cat.NODES:
+            problems.append("сид «%s»: %s выросла из узла, которого нет"
+                            % (seed, where))
+
+        # Люди: настоящие, живые и по одному разу.
+        if len(story.cast) < 2:
+            problems.append("сид «%s»: в %s некому участвовать" % (seed, where))
+        seen = set()
+        for item in story.cast:
+            figure = world.figures.get(item.get("кто", ""))
+            if figure is None:
+                problems.append("сид «%s»: в %s замешан тот, кого нет"
+                                % (seed, where))
+                continue
+            if figure.id in seen:
+                problems.append("сид «%s»: в %s человек участвует дважды"
+                                % (seed, where))
+            seen.add(figure.id)
+            if figure.birth is not None \
+                    and figure.birth.year > story.began.year:
+                problems.append("сид «%s»: в %s участвует тот, кто ещё не "
+                                "родился" % (seed, where))
+            if figure.death is not None \
+                    and figure.death.year < story.began.year:
+                problems.append("сид «%s»: в %s участвует тот, кто уже умер"
+                                % (seed, where))
+
+        # Место: оно должно быть в мире.
+        if story.region_id and story.region_id not in world.regions:
+            problems.append("сид «%s»: %s случилась в земле, которой нет"
+                            % (seed, where))
+        if story.settlement_id and story.settlement_id not in world.settlements:
+            problems.append("сид «%s»: %s случилась в городе, которого нет"
+                            % (seed, where))
+        if story.site_id and story.site_id not in world.sites:
+            problems.append("сид «%s»: %s помнит место, которого нет"
+                            % (seed, where))
+        if story.legend_id and story.legend_id not in world.legends:
+            problems.append("сид «%s»: у %s предание без записи"
+                            % (seed, where))
+
+        # Корень: он лежит в прошлом, иначе быль выросла из будущего.
+        for anchor in story.anchors:
+            if int(anchor.get("год", 0)) > story.began.year:
+                problems.append("сид «%s»: корень %s лежит позже самой были"
+                                % (seed, where))
+                break
+
+        # Поворот: только подготовленный.
+        if story.twist and not story.twist_seeded:
+            problems.append("сид «%s»: в %s поворот не подготовлен подсказкой"
+                            % (seed, where))
+
+        # Акты: после корня время идёт только вперёд.
+        last = None
+        for act in story.acts:
+            if act.get("вид") == "якорь":
+                continue
+            year = int(act.get("год", 0))
+            if year < story.began.year:
+                problems.append("сид «%s»: в %s действие идёт раньше начала"
+                                % (seed, where))
+                break
+            if story.ended is not None and year > story.ended.year:
+                problems.append("сид «%s»: в %s действие идёт после конца"
+                                % (seed, where))
+                break
+            if last is not None and year < last:
+                problems.append("сид «%s»: в %s годы идут вспять"
+                                % (seed, where))
+                break
+            last = year
+
+        # Последствия не больше размаха: бытовое дело не переворачивает
+        # державу.
+        if story.epicity <= 1:
+            wide = [item.get("уровень") for item in story.consequences
+                    if item.get("уровень") in (cat.POLITY, cat.HISTORIC)]
+            if wide:
+                problems.append("сид «%s»: у %s последствия больше её размаха"
+                                % (seed, where))
+
+        # Громкая быль обязана попасть в летопись, тихая — не обязана.
+        if story.epicity >= 1 and not story.event_ids:
+            problems.append("сид «%s»: %s не попала в летопись, хотя вышла за "
+                            "пределы двора" % (seed, where))
+
+    names = [story.title for story in world.stories.values()]
+    if len(set(names)) != len(names):
+        problems.append("сид «%s»: имена былей повторяются" % seed)
+
+    total = len(world.stories)
+    if total >= 30:
+        small = sum(count for size, count in sizes.items() if size <= 2)
+        if small < 0.7 * total:
+            problems.append("сид «%s»: слишком много былей о судьбе мира: "
+                            "%d из %d не про неё" % (seed, small, total))
+        worst = max(shapes.values())
+        if worst > 0.3 * total:
+            key = [k for k, v in shapes.items() if v == worst][0]
+            problems.append("сид «%s»: костяк «%s» занял %d былей из %d"
+                            % (seed, key, worst, total))
+    return problems
+
+
 def check_souls(world, seed: str) -> list:
     """Людность мира: судьба записана, а числа не ушли в бессмыслицу."""
     problems = []
@@ -1533,6 +1665,7 @@ def main() -> int:
         failures.extend(check_souls(first, seed))
         failures.extend(check_tales(first, seed))
         failures.extend(check_lives(first, seed))
+        failures.extend(check_stories(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -1585,6 +1718,7 @@ def main() -> int:
             failures.extend(check_souls(first, "карта/" + seed))
             failures.extend(check_tales(first, "карта/" + seed))
             failures.extend(check_lives(first, "карта/" + seed))
+            failures.extend(check_stories(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "
@@ -1624,7 +1758,7 @@ def main() -> int:
                       check_causes, check_people_memory, check_migrations,
                       check_strifes, check_lore, check_upheavals,
                       check_capitals, check_souls, check_tales,
-                      check_lives):
+                      check_lives, check_stories):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
         failures.extend(check_map_world(

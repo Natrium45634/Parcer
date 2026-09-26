@@ -981,6 +981,28 @@ class Atlas(ttk.Frame):
             for row_text in here:
                 lines.append("    %s" % row_text)
 
+        # Быль привязана к месту, а не к гексу: собираем места этого гекса
+        # и спрашиваем у мира, что тут рассказывают. Показываем только
+        # то, что к выбранному году уже случилось, — ползунок года
+        # управляет и этим.
+        places = [item.id for item in world.settlements.values()
+                  if item.hex_index == index]
+        places += [item.id for item in world.sites.values()
+                   if item.hex_index == index]
+        told = []
+        for place_id in places:
+            for story in world.stories_at(place_id):
+                if story.began.year <= year and story.id not in \
+                        [item[0] for item in told]:
+                    told.append((story.id, story))
+        if told:
+            told.sort(key=lambda item: item[1].began.ordinal)
+            lines.append("")
+            lines.append("  ЧТО ТУТ РАССКАЗЫВАЮТ")
+            for _, story in told[:8]:
+                # Карточка узкая: год и имя, а подробности — в разделе.
+                lines.append("    %5d  %s" % (story.began.year, story.title))
+
         slots = self._frame_for_year()
         if slots is not None and index < len(slots):
             slot = slots[index]

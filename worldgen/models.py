@@ -1508,6 +1508,65 @@ class Cabal:
 
 
 @dataclass
+class Story:
+    """Быль: маленькая история, выросшая из большой.
+
+    Не придумана, а найдена: у каждой были есть якорь — настоящее
+    событие мировой истории, от которого она пошла. Война кончилась
+    двадцать лет назад — в деревню возвращается тот, кого считали
+    погибшим. Город сгинул пятьсот лет назад — в его руинах находят
+    монету, которой не должно быть.
+
+    Видимое и скрытое хранятся врозь: `belief` — то, что считают люди,
+    `truth` — то, что было на самом деле. Подсказки ведут к правде,
+    ложные следы — мимо, а поворот обязан быть подготовлен тем, что уже
+    лежит в подсказках.
+    """
+
+    id: str
+    title: str
+    shape: str                 # ключ архетипа
+    node: str                  # какой исторический узел её породил
+    began: Date
+    ended: Date = None
+    region_id: str = ""
+    settlement_id: str = ""
+    site_id: str = ""
+    epicity: int = 0           # 0 бытовая … 5 событие эпохи
+    tone: str = ""
+    genres: list = field(default_factory=list)
+    driver: str = ""           # из-за чего завертелось
+    anchors: list = field(default_factory=list)  # [{вид, что, год, id}]
+    cast: list = field(default_factory=list)     # [{кто, роль, ремесло, …}]
+    belief: str = ""           # что считают люди
+    truth: str = ""            # что было на самом деле
+    clues: list = field(default_factory=list)    # [{вид, строка, верна}]
+    acts: list = field(default_factory=list)     # [{год, вид, строка, из-за}]
+    twist: str = ""
+    twist_seeded: bool = False  # был ли поворот подготовлен подсказкой
+    climax: str = ""
+    outcome: str = ""
+    consequences: list = field(default_factory=list)  # [{уровень, что}]
+    voices: list = field(default_factory=list)   # [{кто, версия}]
+    legend_id: str = ""
+    event_ids: list = field(default_factory=list)
+    related: list = field(default_factory=list)  # id соседних былей
+    notes: list = field(default_factory=list)
+
+    @property
+    def years(self) -> int:
+        if self.ended is None or self.began is None:
+            return 0
+        return max(0, self.ended.year - self.began.year)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["began"] = _date_out(self.began)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
 class LifePath:
     """Жизненный путь человека: чего хотел, что делал, что получилось.
 

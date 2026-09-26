@@ -21,7 +21,8 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Plot,
                      Polity,
                      LifePath,
-                     Region, Reign, Relic, Seed, Settlement, Site, Strife,
+                     Region, Reign, Relic, Seed, Settlement, Site, Story,
+                     Strife,
                      Tale,
                      Temple,
                      Tongue,
@@ -166,6 +167,9 @@ def world_to_dict(world: World) -> dict:
                   for item in world.tales.values()],
         "lifepaths": [_compact(LifePath, item.to_dict())
                       for item in world.lifepaths.values()],
+        "stories": [_compact(Story, item.to_dict())
+                    for item in world.stories.values()],
+        "story_marks": world.story_marks,
         "cabals": [_compact(Cabal, item.to_dict())
                    for item in world.cabals.values()],
         "seeds": [_compact(Seed, item.to_dict()) for item in world.seeds.values()],
@@ -357,6 +361,10 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("tales", ()):
         tale = Tale(**_clean(Tale, item))
         world.tales[tale.id] = tale
+    for item in data.get("stories", ()):
+        story = Story(**_clean(Story, item))
+        world.stories[story.id] = story
+    world.story_marks = dict(data.get("story_marks") or {})
     for item in data.get("lifepaths", ()):
         path = LifePath(**_clean(LifePath, item))
         world.lifepaths[path.id] = path

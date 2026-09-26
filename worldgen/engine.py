@@ -28,7 +28,8 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       diplomacy, embassy,
                       era_events,
                       exploration, founding, geography, guilds, houses,
-                      laws, legacy, lifepath, lives, lore, memory, migration,
+                      laws, legacy, lifepath, lives, localstory, lore,
+                      memory, migration,
                       monsters,
                       nations,
                       notables,
@@ -191,6 +192,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             # Сказания идут следом за чудовищами, местами и вещами: к
             # этому часу в мире уже есть и беда, и те, кто на неё пойдёт.
             tales.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Были идут последними из историй: им нужен готовый мир со
+            # всеми его руинами, вдовами, тяжбами и закрывшимися трактами.
+            localstory.upkeep(ctx, year, UPKEEP_PERIOD)
             lore.upkeep(ctx, year, UPKEEP_PERIOD)
             calamity.upkeep(ctx, year, UPKEEP_PERIOD)
             causes.upkeep(ctx, year, UPKEEP_PERIOD)

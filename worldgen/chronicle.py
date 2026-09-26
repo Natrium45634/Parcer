@@ -1044,6 +1044,226 @@ def _wrap_tale(line: str, width: int = 74) -> str:
     return ("\n      ").join(out)
 
 
+def render_stories(world) -> str:
+    """Были: маленькие истории, выросшие из большой.
+
+    У каждой были здесь два представления — того же требует её
+    устройство. Разбор показывает, из чего она собрана: якорь в мировой
+    истории, что считали люди, что было на самом деле, подсказки,
+    подготовленный ими поворот и последствия ровно того размаха, какого
+    сама история. Пересказ показывает, как всё это читается подряд.
+    Первое нужно, чтобы видеть: быль не выдумана, а найдена. Второе — чтобы
+    её было интересно читать.
+
+    Девять из десяти былей не спасают мир, и сводка вверху это
+    показывает числами: если бы каждая вторая история была про древнее
+    зло, живого мира не получилось бы.
+    """
+    from . import history
+    from . import localstory as cat
+    from . import narrative_local as texts
+
+    rows = ["БЫЛИ", ""]
+    if not world.stories:
+        rows.append("  Мир не рассказал о себе ни одной малой истории.")
+        return "\n".join(rows)
+
+    order = sorted(world.stories.values(),
+                   key=lambda item: (item.began.ordinal, item.id))
+    sizes, nodes, shapes, outcomes = {}, {}, {}, {}
+    seeded = turns = songs = 0
+    for story in order:
+        sizes[story.epicity] = sizes.get(story.epicity, 0) + 1
+        nodes[story.node] = nodes.get(story.node, 0) + 1
+        shapes[story.shape] = shapes.get(story.shape, 0) + 1
+        outcomes[story.outcome] = outcomes.get(story.outcome, 0) + 1
+        if story.twist:
+            turns += 1
+            if story.twist_seeded:
+                seeded += 1
+        if story.legend_id:
+            songs += 1
+    total = len(order)
+    small = sum(count for size, count in sizes.items() if size <= 2)
+
+    rows.append("  Былей найдено: %d." % total)
+    rows.append("  Из них никак не касаются судьбы мира: %d (%d из ста)."
+                % (small, round(100.0 * small / total)))
+    rows.append("  Насколько велики: %s."
+                % ", ".join("%s — %d (%d%%)"
+                            % (cat.EPICITY_NAMES.get(size, "?"), sizes[size],
+                               round(100.0 * sizes[size] / total))
+                            for size in sorted(sizes)))
+    top = sorted(nodes.items(), key=lambda item: (-item[1], item[0]))[:8]
+    rows.append("  Из чего выросли: %s."
+                % ", ".join("%s — %d" % (key, count) for key, count in top))
+    rows.append("  Костяков в ходу: %d из %d." % (len(shapes), len(cat.SHAPES)))
+    if turns:
+        rows.append("  Поворотов: %d, и каждый подготовлен подсказкой: %d."
+                    % (turns, seeded))
+    rows.append("  Чем кончались: %s."
+                % ", ".join("%s — %d" % (key, outcomes[key])
+                            for key in sorted(outcomes)))
+    if songs:
+        rows.append("  Через поколение выросло в предание: %d." % songs)
+    rows.append("")
+
+    for story in order:
+        rows.extend(_story_block(world, story, cat, texts, history))
+    return "\n".join(rows)
+
+
+def _story_block(world, story, cat, texts, history) -> list:
+    """Одна быль: сперва разбор, потом пересказ, потом «почему»."""
+    era = world.era_at(story.began.year)
+    if story.ended is not None and story.ended.year != story.began.year:
+        when = "%d—%d годы" % (story.began.year, story.ended.year)
+    else:
+        when = "%d год" % story.began.year
+    shape = cat.SHAPES_BY_KEY.get(story.shape)
+    rows = ["  %s" % story.title]
+    rows.append("  " + "-" * (len(story.title) + 2))
+    rows.append("      %s, %s" % (when, era.name if era else "—"))
+    rows.append("      размах: %s; костяк: %s; тон: %s"
+                % (cat.EPICITY_NAMES.get(story.epicity, "?"),
+                   shape.name if shape is not None else story.shape,
+                   story.tone))
+
+    place = world.settlements.get(story.settlement_id)
+    region = world.regions.get(story.region_id)
+    where = []
+    if place is not None:
+        where.append("%s по имени %s" % (place.kind, place.name))
+    if region is not None:
+        where.append("земля по имени %s" % region.name)
+    site = world.sites.get(story.site_id) if story.site_id else None
+    if site is not None:
+        where.append("место по имени %s" % site.name)
+    if where:
+        rows.append("      где: %s" % ", ".join(where))
+
+    for anchor in story.anchors:
+        rows.append("      корень: %s — %s (%d год)"
+                    % (anchor.get("вид", ""), anchor.get("что", ""),
+                       anchor.get("год", 0)))
+    if story.driver:
+        rows.append("      завертелось из-за: %s" % story.driver)
+    rows.append("")
+
+    rows.append("      КТО В ЭТОМ БЫЛ")
+    for item in story.cast:
+        line = "        %s — %s, %s; %s" % (
+            item.get("имя", "?"), item.get("роль", ""),
+            item.get("ремесло", ""), item.get("зачем", ""))
+        if item.get("а на деле"):
+            line += "; а на деле %s" % item["а на деле"]
+        rows.append(line)
+    rows.append("")
+
+    rows.append("      Считали: %s." % story.belief)
+    rows.append("      Было: %s." % story.truth)
+    if story.clues:
+        rows.append("      Подсказки:")
+        for clue in story.clues:
+            rows.append("        %s %s" % ("+" if clue.get("верна") else "−",
+                                           clue.get("строка", "")))
+    rows.append("")
+
+    rows.append("      КАК ШЛО")
+    for act in story.acts:
+        rows.append("        %5d  %-12s %s"
+                    % (act.get("год", 0), act.get("вид", ""),
+                       _wrap_act(act.get("строка", ""))))
+        if act.get("из-за"):
+            rows.append("                            (к этому вела подсказка: "
+                        "%s)" % act["из-за"])
+    rows.append("")
+
+    rows.append("      Исход: %s." % story.outcome)
+    if story.consequences:
+        rows.append("      После:")
+        for item in story.consequences:
+            rows.append("        %s — %s" % (item.get("уровень", ""),
+                                             item.get("что", "")))
+    if story.voices:
+        rows.append("      Рассказывают по-разному:")
+        for item in story.voices:
+            rows.append("        %s — %s" % (item.get("кто", ""),
+                                             item.get("версия", "")))
+    if story.legend_id and story.legend_id in world.legends:
+        rows.append("      Об этом поют: «%s»."
+                    % world.legends[story.legend_id].name)
+    for note in story.notes:
+        rows.append("      %s" % note)
+    rows.append("")
+
+    rows.append("      ПОЧЕМУ ЭТО ВООБЩЕ СЛУЧИЛОСЬ")
+    for line in _story_why(world, story, history):
+        rows.append("        %s" % line)
+    rows.append("")
+
+    rows.append("      КАК ЭТО РАССКАЗЫВАЮТ")
+    for part in texts.prose(story):
+        rows.append("        %s" % _wrap_tale(part, width=68)
+                    .replace("\n      ", "\n        "))
+        rows.append("")
+    return rows
+
+
+def _story_why(world, story, history) -> list:
+    """Цепочка причин вверх: от были к тому, с чего всё началось.
+
+    Тот самый режим «почему»: у были есть якорь, у якоря — событие, у
+    события — свои причины, и так на сотни лет назад. Цепочка не
+    сочиняется здесь, а берётся из ткани причин (`history.roots`):
+    если её нет, значит, быль и правда выросла из пустяка, и это тоже
+    ответ.
+    """
+    out = []
+    for anchor in story.anchors:
+        out.append("← %d год: %s" % (anchor.get("год", 0),
+                                     anchor.get("что", "")))
+    event = None
+    for event_id in story.event_ids:
+        event = world.event(event_id)
+        if event is not None:
+            break
+    if event is None:
+        for anchor in story.anchors:
+            event = world.event(anchor.get("событие", ""))
+            if event is not None:
+                break
+    if event is not None:
+        # Вопрос «почему» ведёт только назад. Причина, оказавшаяся позже
+        # уже названного звена, в цепочку не идёт: это не корень, а
+        # пересказ, случившийся после.
+        edge = story.anchors[0].get("год", story.began.year) \
+            if story.anchors else story.began.year
+        for parent in history.roots(world, event, depth=6):
+            if parent.date.year > edge:
+                continue
+            out.append("← %d год: %s" % (parent.date.year, parent.title))
+            edge = parent.date.year
+    if len(out) < 2:
+        out.append("← дальше причин не тянется: дело началось само собой.")
+    return out
+
+
+def _wrap_act(line: str, width: int = 56) -> str:
+    """Строка акта: перенос с отбивкой под столбец «как шло»."""
+    words = (line or "").split()
+    out, current = [], ""
+    for word in words:
+        if current and len(current) + len(word) + 1 > width:
+            out.append(current)
+            current = word
+        else:
+            current = ("%s %s" % (current, word)).strip()
+    if current:
+        out.append(current)
+    return ("\n" + " " * 28).join(out)
+
+
 def render_lore(world) -> str:
     """Своды и легенды: что мир записал о себе и что об этом поёт."""
     from . import lore as lore_mod
@@ -2652,6 +2872,7 @@ def full_text(world) -> str:
         render_lore(world),
         render_tales(world),
         render_lifepaths(world),
+        render_stories(world),
         render_guilds(world),
         render_expeditions(world),
         render_politics(world),
