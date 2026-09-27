@@ -21,7 +21,8 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Plot,
                      Polity,
                      LifePath,
-                     Region, Reign, Relic, Seed, Settlement, Site, Story,
+                     Region, Reign, Relic, Scar, LostLore, CrisisEra,
+                     Seed, Settlement, Site, Story,
                      Strife, Township, Godhead, Renown,
                      Tale,
                      Temple,
@@ -37,7 +38,8 @@ _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
                 "created", "awakened", "revealed", "born", "opened",
                 "sent", "returned", "started", "made", "lost", "opened",
                 "signed_at",
-                "closed", "married", "signed", "built", "began"}
+                "closed", "married", "signed", "built", "began",
+                "found"}
 
 
 def _defaults(cls) -> dict:
@@ -109,6 +111,11 @@ def world_to_dict(world: World) -> dict:
         "calamities": [_compact(Calamity, item.to_dict())
                        for item in world.calamities.values()],
         "relics": [_compact(Relic, item.to_dict()) for item in world.relics.values()],
+        "scars": [_compact(Scar, item.to_dict()) for item in world.scars.values()],
+        "lost_lore": [_compact(LostLore, item.to_dict())
+                      for item in world.lost_lore.values()],
+        "crisis_eras": [_compact(CrisisEra, item.to_dict())
+                        for item in world.crisis_eras.values()],
         "expeditions": [_compact(Expedition, item.to_dict())
                         for item in world.expeditions.values()],
         "folks": [_compact(Folk, item.to_dict()) for item in world.folks.values()],
@@ -243,6 +250,15 @@ def dict_to_world(data: dict) -> World:
         world.relics[relic.id] = relic
         if relic.status == "спит":
             world.sleeping_relics.append(relic.id)
+    for item in data.get("scars", ()):
+        scar = Scar(**_clean(Scar, item))
+        world.scars[scar.id] = scar
+    for item in data.get("lost_lore", ()):
+        lore = LostLore(**_clean(LostLore, item))
+        world.lost_lore[lore.id] = lore
+    for item in data.get("crisis_eras", ()):
+        era = CrisisEra(**_clean(CrisisEra, item))
+        world.crisis_eras[era.id] = era
     for item in data.get("battles", ()):
         battle = Battle(**_clean(Battle, item))
         world.battles[battle.id] = battle

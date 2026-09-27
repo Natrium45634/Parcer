@@ -21,6 +21,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Figure,
                      Folk, Fortress,
                      Guild, House, Law, League, Legend, LifePath, Memory,
+                     Scar, LostLore, CrisisEra,
                      Migration,
                      Monster, Pact,
                      Plot,
@@ -72,6 +73,10 @@ class World:
         self.reigns = {}               # id -> Reign  (правления)
         self.calamities = {}           # id -> Calamity (бедствия)
         self.relics = {}               # id -> Relic (следы бедствий)
+        self.scars = {}                # id -> Scar (шрамы мира)
+        self.lost_lore = {}            # id -> LostLore (что забылось)
+        self.crisis_eras = {}          # id -> CrisisEra (эпохи кризиса)
+        self.era_open = ""             # какая эпоха кризиса идёт сейчас
         self.battles = {}              # id -> Battle (сражения)
         self.dark_ages = []            # тёмные века: последствия бедствий
         self.deities = {}              # id -> Deity (боги)
@@ -371,6 +376,29 @@ class World:
         if relic.status == "спит":
             self.sleeping_relics.append(relic.id)
         return relic
+
+    def add_scar(self, **kwargs) -> Scar:
+        """Шрам мира: то, что беда оставила на земле навсегда."""
+        scar = Scar(id=self.next_id("SC"), **kwargs)
+        self.scars[scar.id] = scar
+        return scar
+
+    def add_lost_lore(self, **kwargs) -> LostLore:
+        """Знание, погибшее вместе с людьми."""
+        lore = LostLore(id=self.next_id("LK"), **kwargs)
+        self.lost_lore[lore.id] = lore
+        return lore
+
+    def add_crisis_era(self, **kwargs) -> CrisisEra:
+        """Катастрофическая эпоха: цепь бед под одним именем."""
+        era = CrisisEra(id=self.next_id("KE"), **kwargs)
+        self.crisis_eras[era.id] = era
+        return era
+
+    def scars_in(self, region_id: str) -> list:
+        """Чем эта земля помечена: шрамы, которые на ней остались."""
+        return [item for item in self.scars.values()
+                if item.region_id == region_id]
 
     def add_battle(self, **kwargs) -> Battle:
         battle = Battle(id=self.next_id("B"), **kwargs)

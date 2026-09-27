@@ -159,6 +159,12 @@ class Region:
     drowned: bool = False       # земля ушла под воду и больше не земля
     drowned_year: int = 0       # в каком году её не стало
     sundered: bool = False      # по ней прошёл разлом, и связи порваны
+    # Насколько земля не готова к беде каждого рода (0 — готова, 1 — совсем
+    # нет). Растёт от самих бед и от забвения, падает от дел людей: дамбы,
+    # амбары, стены, карантинный двор. Отсюда берётся то, что одна и та же
+    # беда в двух землях идёт по-разному.
+    vulnerability: dict = field(default_factory=dict)
+    works: list = field(default_factory=list)   # [{что, год, беда}]
     elev_m: int = 0
     temp: float = 0.0
     moist: float = 0.0
@@ -604,6 +610,39 @@ class Calamity:
     battle_ids: list = field(default_factory=list)
     strength: float = 1.0      # запас сил захватчика, 1.0 — полон
     host_size: int = 0         # сколько их было
+
+    # --- живая катастрофа (disaster.py) ---
+    # Беда не объект с числами, а история: у неё есть причина и то, что
+    # её спустило, предвестники, которые прочли верно или нет, фазы,
+    # живая сила, решения власти, ошибки, четыре исхода и шесть версий
+    # того, как это запомнили.
+    cause: str = ""            # причина: «чрезмерная добыча», «недра», …
+    cause_hidden: str = ""     # настоящая причина, если известная — не та
+    cause_known: bool = True   # узнал ли мир правду
+    cause_year: int = 0        # с какого года тянется причина
+    trigger: str = ""          # что спустило беду именно в этот год
+    omens: list = field(default_factory=list)      # [{знак, год, прочтение}]
+    phase: str = ""            # какая фаза идёт сейчас
+    phase_log: list = field(default_factory=list)  # [{фаза, с, по, сила}]
+    force: float = 1.0         # живая сила беды: растёт и падает по ходу
+    force_peak: float = 1.0
+    turns: list = field(default_factory=list)      # переломы [{год, что, сдвиг}]
+    responses: list = field(default_factory=list)  # решения власти
+    mistakes: list = field(default_factory=list)   # ошибки управления
+    prevented: str = ""        # предотвращена / ослаблена заранее
+    would_take: int = 0        # сколько взяла бы, если бы не мешали
+    gains: list = field(default_factory=list)      # кто на ней поднялся
+    actors: list = field(default_factory=list)     # [{роль, кто, что}]
+    scar_ids: list = field(default_factory=list)   # шрамы на земле
+    lore_ids: list = field(default_factory=list)   # что забылось
+    damage: dict = field(default_factory=dict)     # ущерб по видам, 0…1
+    scale: str = ""            # местная … цивилизационная
+    depth: int = 0             # глубина перемены, 1…5
+    outcome: dict = field(default_factory=dict)    # четыре исхода
+    versions: dict = field(default_factory=dict)   # шесть историй
+    era_id: str = ""           # катастрофическая эпоха, если вошла в неё
+    front: list = field(default_factory=list)      # ход по землям
+    chain_factor: str = ""     # через что выросла из родителя
     notes: list = field(default_factory=list)
 
     @property
@@ -611,6 +650,91 @@ class Calamity:
         if self.end is None:
             return 0
         return max(0, self.end.year - self.start.year)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["start"] = _date_out(self.start)
+        data["end"] = _date_out(self.end)
+        return data
+
+
+@dataclass
+class Scar:
+    """Шрам мира: география, которая помнит беду.
+
+    Великие бедствия меняют карту сами (`systems/upheaval`). Обычные
+    оставляют вот это: новое русло, пепельную пустошь, мёртвую зону,
+    пустой город. Шрам живёт своей жизнью — его обходят, потом обживают,
+    потом объявляют святым местом, потом забывают, зачем он свят.
+    """
+
+    id: str
+    kind: str                  # ключ вида шрама в disaster.SCARS
+    name: str
+    region_id: str
+    calamity_id: str
+    created: Date
+    danger: int = 1            # 0 — безопасно, 3 — туда не ходят
+    state: str = "свежий"
+    boon: str = ""             # чем он однажды пригодился
+    holy: bool = False         # служат ли над ним
+    site_id: str = ""          # если из шрама вышло место истории
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["created"] = _date_out(self.created)
+        return data
+
+
+@dataclass
+class LostLore:
+    """Знание, погибшее вместе с людьми.
+
+    Умение исчезает не потому, что его нельзя повторить, а потому, что
+    умерли все, кто умел. Через века остаются обрывки — и по ним однажды
+    находят целое.
+    """
+
+    id: str
+    kind: str                  # «письмо», «снадобье», «выплавка», …
+    about: str
+    calamity_id: str
+    region_id: str
+    lost: Date = None
+    hardness: int = 2          # насколько трудно вернуть: 1…3
+    fragment: str = ""         # что от него осталось
+    state: str = "утрачено"
+    found: Date = None
+    found_by: str = ""         # кто нашёл заново
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["lost"] = _date_out(self.lost)
+        data["found"] = _date_out(self.found)
+        return data
+
+
+@dataclass
+class CrisisEra:
+    """Катастрофическая эпоха: цепь бед, ставшая одним временем.
+
+    Шесть бед, идущих одна из другой, — это не шесть событий, а «Век
+    Пепла». Имя берётся из того, что в эпохе было, и у каждого народа
+    оно своё: держава помнит войну, деревня — голодные годы.
+    """
+
+    id: str
+    name: str
+    start: Date
+    end: Date = None
+    calamity_ids: list = field(default_factory=list)
+    voices: list = field(default_factory=list)   # [{кто, имя}]
+    deaths: int = 0
+    depth: int = 0
+    regions: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         data = asdict(self)
