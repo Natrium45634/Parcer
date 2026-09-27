@@ -205,6 +205,9 @@ def tick(ctx, year: int) -> None:
     # Сперва зреющие беды: их знаки видны заранее, и мир успевает
     # прочесть их верно или неверно — иногда беда так и не приходит.
     disaster_sys.tick_pending(ctx, year)
+    # И беды, которым пришёл срок вырасти из прежних: голод после засухи,
+    # мор после голода, восстание после мора.
+    disaster_sys.tick_chains(ctx, year)
     _advance(ctx, year)
     _tick_climate(ctx, year)
     _maybe_start(ctx, year)
@@ -577,6 +580,14 @@ def _depth_of(calamity, spec) -> int:
     if spec.key == "void_incursion" and calamity.severity >= 5:
         depth = 5
     return max(1, min(5, depth))
+
+
+def start_chained(ctx, year: int, spec, rng, severity: int, region_ids,
+                  parent, factor: str = ""):
+    """Беда, выросшая из прежней: у неё названо, через что именно."""
+    return _start_calamity(ctx, year, spec, rng, severity=severity,
+                           region_ids=region_ids, parent=parent,
+                           chain_factor=factor)
 
 
 def start_named(ctx, year: int, spec_key: str, rng, severity: int = 0,
@@ -1025,6 +1036,12 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
 
     _political_outcome(ctx, calamity, spec, plan, rng, year, date)
 
+    # Счёт ущерба по видам, четыре исхода вместо одного и то, что из этой
+    # беды вырастет дальше.
+    disaster_sys.count_damage(ctx, calamity, spec)
+    disaster_sys.four_outcomes(ctx, calamity, spec, plan, rng)
+    disaster_sys.plan_chain(ctx, calamity, spec, rng, year)
+
     world.end_calamity(calamity, date, cat.RESOLUTIONS.get(
         resolution, ("кончилось", False))[0])
     calamity.hero_ids = [figure.id for figure in heroes]
@@ -1402,14 +1419,24 @@ def _worldwide_dark(world, year: int) -> bool:
     return False
 
 
+# С какого давления беда роняет мир в тёмные века. Давление считается не
+# по тяжести, а по тому, что именно сломалось: люди, власть, хозяйство,
+# знание, земли, уклад.
+DARK_FROM = 1.0
+
+
 def _start_dark_age(ctx, calamity, spec, rng, year: int, date) -> None:
     world = ctx.world
-    if calamity.severity < 3:
+    # Тёмные века приходят не от размера беды, а от глубины поломки.
+    # Землетрясение, унёсшее пятую часть людей при целой державе, их не
+    # даёт; малый бунт, убивший род государя и растащивший державу, даёт.
+    pressure = disaster_sys.dark_pressure_of(calamity)
+    if pressure < DARK_FROM:
         return
-    # Тёмные века — редкость, иначе мир никогда не вылезает из темноты.
-    if calamity.severity == 3 and not rng.chance(0.3):
+    if pressure < DARK_FROM + 0.25 and not rng.chance(0.45):
         return
-    if calamity.deaths < 20000 and calamity.severity < 4:
+    if calamity.deaths < 12000 and calamity.severity < 4 \
+            and not calamity.polities_lost:
         return
 
     if calamity.kind == cat.CLIMATE:
@@ -1418,8 +1445,12 @@ def _start_dark_age(ctx, calamity, spec, rng, year: int, date) -> None:
         return
 
     plan = ctx.calamity_plans.get(calamity.id, {})
-    base = {3: (40, 160), 4: (120, 450), 5: (300, 1200)}[min(5, calamity.severity)]
+    base = {1: (20, 70), 2: (30, 110), 3: (40, 160), 4: (120, 450),
+            5: (300, 1200)}[min(5, max(1, calamity.severity))]
     length = int(rng.uniform(*base) * (0.6 + 0.4 * min(2.0, plan.get("duration", 10) / 60.0)))
+    # Давление растягивает тьму: одна и та же тяжесть при разрушенной
+    # власти и знании держит мир в потёмках дольше.
+    length = int(length * (0.6 + 0.35 * min(2.0, pressure)))
     # Длина тьмы соразмерна длине истории: полторы тысячи лет мрака в
     # мире на две тысячи лет — это не тёмные века, это весь мир.
     length = int(length * max(0.25, min(1.0, world.total_years / 10000.0)))

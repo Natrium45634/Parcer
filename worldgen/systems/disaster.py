@@ -677,6 +677,232 @@ def name_actors(ctx, calamity, spec, rng, year: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Цепи: беда, выросшая из беды
+# ---------------------------------------------------------------------------
+# Не «засуха вызвала чуму, потому что так вышло», а: колодцы пересохли,
+# люди сбились у последней воды, болезнь пошла по рукам. Через что одно
+# стало другим — записано у каждой связи.
+
+CHAIN_MAX = 2               # сколько бед может вырасти из одной
+CHAIN_BUSY = 5              # и не плодим их, когда в мире и так тесно
+
+
+def plan_chain(ctx, calamity, spec, rng, year: int) -> None:
+    """Что вырастет из этой беды и через что именно."""
+    links = dis.CHAINS_BY_PARENT.get(spec.key, ())
+    if not links or calamity.severity < 2:
+        return
+    world = ctx.world
+    if len(world.active_calamities) >= CHAIN_BUSY:
+        return
+    queue = getattr(ctx, "disaster_chains", None)
+    if queue is None:
+        queue = ctx.disaster_chains = []
+
+    born = 0
+    for link in links:
+        if born >= CHAIN_MAX:
+            break
+        child_spec = cat.CATALOG_BY_KEY.get(link.child)
+        if child_spec is None:
+            continue
+        weight = link.chance * (0.35 + 0.15 * calamity.severity)
+        if not rng.chance(min(0.85, weight)):
+            continue
+        # Дитя слабее родителя: цепь затухает, иначе одна засуха кончает мир.
+        want = max(1, calamity.severity - 1)
+        levels = [level for level, _ in child_spec.severities]
+        severity = min(levels, key=lambda level: (abs(level - want), level))
+        regions = list(calamity.region_ids[:2]) or list(calamity.region_ids)
+        queue.append({
+            "год": year + rng.randint(*link.delay),
+            "ключ": link.child, "родитель": calamity.id,
+            "через": link.factor, "земли": regions, "тяжесть": severity,
+        })
+        born += 1
+
+
+def tick_chains(ctx, year: int) -> None:
+    """Беды, которым пришёл срок вырасти из прежних."""
+    queue = getattr(ctx, "disaster_chains", None)
+    if not queue:
+        return
+    world = ctx.world
+    from . import calamity as calamity_system
+
+    for item in list(queue):
+        if item["год"] > year:
+            continue
+        queue.remove(item)
+        spec = cat.CATALOG_BY_KEY.get(item["ключ"])
+        parent = world.calamities.get(item["родитель"])
+        if spec is None or parent is None:
+            continue
+        if len(world.active_calamities) >= CHAIN_BUSY:
+            continue
+        rng = ctx.rng("disaster", "chain", year, item["ключ"])
+        child = calamity_system.start_chained(
+            ctx, year, spec, rng, severity=item["тяжесть"],
+            region_ids=item["земли"], parent=parent, factor=item["через"])
+        if child is not None:
+            child.notes.append("выросло из беды «%s»: %s"
+                               % (parent.name, item["через"]))
+
+
+# ---------------------------------------------------------------------------
+# Счёт ущерба и четыре исхода
+# ---------------------------------------------------------------------------
+
+def count_damage(ctx, calamity, spec) -> dict:
+    """Ущерб по видам, каждый 0…1.
+
+    «Погибло десять сотых» — только одна мера, и не главная. Беда,
+    унёсшая два процента людей и всю письменность, для истории страшнее.
+    """
+    world = ctx.world
+    souls = 0
+    for region_id in calamity.region_ids:
+        souls += _souls_in(world, region_id)
+    souls = max(1, souls + calamity.deaths)
+    damage = {}
+    damage[dis.D_SOULS] = min(1.0, calamity.deaths / float(souls))
+    towns = max(1, sum(1 for sid in world.active_settlements
+                       if world.settlements[sid].region_id
+                       in calamity.region_ids) + calamity.settlements_lost)
+    damage[dis.D_WEALTH] = min(1.0, calamity.settlements_lost / float(towns)
+                               + 0.1 * len(calamity.mistakes))
+    damage[dis.D_LAND] = min(1.0, 0.2 * len(calamity.scar_ids)
+                             + (0.5 if spec.key in ("drowning", "sundering")
+                                else 0.0))
+    power = 0.25 * calamity.polities_lost + 0.15 * len(calamity.mistakes)
+    if calamity.kind == cat.POLITICAL:
+        power += 0.25
+    damage[dis.D_POWER] = min(1.0, power)
+    damage[dis.D_LORE] = min(1.0, 0.3 * len(calamity.lore_ids))
+    damage[dis.D_HOST] = min(1.0, 0.12 * len(calamity.battle_ids))
+    faith = 0.0
+    if calamity.kind == cat.RELIGIOUS:
+        faith = 0.5
+    elif calamity.cause in ("гнев божества", "спор богов", "сорванный обряд"):
+        faith = 0.3
+    damage[dis.D_FAITH] = faith
+    damage[dis.D_CUSTOM] = min(1.0, 0.1 * len(calamity.responses)
+                               + 0.2 * len(calamity.gains) / 3.0)
+    calamity.damage = {key: round(value, 3) for key, value in damage.items()
+                       if value > 0.01}
+    return calamity.damage
+
+
+def _souls_in(world, region_id: str) -> int:
+    total = 0
+    for settlement_id in world.active_settlements:
+        settlement = world.settlements[settlement_id]
+        if settlement.region_id == region_id:
+            total += world.settlement_realm(settlement)
+    for tribe_id in world.active_tribes:
+        tribe = world.tribes[tribe_id]
+        if tribe.region_id == region_id:
+            total += tribe.population
+    return total
+
+
+PHYS_BY_RESOLUTION = {
+    "sealed": dis.PHYS_SEALED,
+    "faded": dis.PHYS_LEFT,
+    "driven_back": dis.PHYS_LEFT,
+    "burned_out": dis.PHYS_LEFT,
+    "tribute": dis.PHYS_STAYS,
+    "adapted": dis.PHYS_STAYS,
+    "absorbed": dis.PHYS_STAYS,
+    "endured": dis.PHYS_GONE,
+    "rains": dis.PHYS_GONE,
+    "hero": dis.PHYS_GONE,
+    "heroes": dis.PHYS_GONE,
+    "coalition": dis.PHYS_GONE,
+    "dispersed": dis.PHYS_GONE,
+    "suppressed": dis.PHYS_GONE,
+    "reunited": dis.PHYS_GONE,
+    "shattered": dis.PHYS_STAYS,
+}
+
+
+def four_outcomes(ctx, calamity, spec, plan, rng) -> dict:
+    """Четыре исхода вместо одного.
+
+    «Демоны изгнаны» — это только телесный исход. Держава при этом могла
+    рассыпаться, народ уйти, а летопись запомнить всё победой. Один
+    исход больше не описывает беду целиком.
+    """
+    damage = calamity.damage or {}
+    resolution = plan.get("resolution", "endured")
+
+    phys = PHYS_BY_RESOLUTION.get(resolution, dis.PHYS_GONE)
+    if spec.kind == cat.CLIMATE and phys == dis.PHYS_GONE:
+        phys = dis.PHYS_LEFT
+
+    if calamity.polities_lost:
+        pol = dis.POL_SPLIT
+    elif damage.get(dis.D_POWER, 0.0) >= 0.4 or calamity.mistakes:
+        pol = dis.POL_WEAK
+    elif calamity.gains and rng.chance(0.4):
+        pol = dis.POL_GAINED
+    elif resolution in ("shattered", "absorbed"):
+        pol = dis.POL_NEW
+    else:
+        pol = dis.POL_HELD
+
+    souls = damage.get(dis.D_SOULS, 0.0)
+    if souls >= 0.3:
+        man = dis.MAN_BLED
+    elif resolution == "adapted" or spec.kind == cat.CLIMATE:
+        man = dis.MAN_CHANGED
+    elif calamity.settlements_lost >= 2:
+        man = dis.MAN_MOVED
+    elif any(row.get("итог") == dis.DONE_HELPED
+             for row in calamity.responses):
+        man = dis.MAN_SAVED
+    else:
+        man = dis.MAN_CHANGED
+
+    if calamity.depth >= 4 or pol == dis.POL_SPLIT:
+        hist = dis.HIST_DOOM
+    elif phys == dis.PHYS_GONE and pol in (dis.POL_WEAK, dis.POL_NEW):
+        hist = dis.HIST_PYRRHIC
+    elif phys == dis.PHYS_SEALED and not calamity.cause_known:
+        hist = dis.HIST_FALSE
+    elif not calamity.cause_known and rng.chance(0.5):
+        hist = dis.HIST_DISPUTED
+    elif calamity.severity <= 2 and not calamity.scar_ids:
+        hist = dis.HIST_FORGOTTEN
+    else:
+        hist = dis.HIST_VICTORY
+
+    calamity.outcome = {"телесный": phys, "державный": pol,
+                        "людской": man, "исторический": hist}
+    return calamity.outcome
+
+
+def dark_pressure_of(calamity) -> float:
+    """Давление на тёмные века: не тяжесть, а то, что именно сломалось.
+
+    Землетрясение, унёсшее пятую часть людей при целой державе, тёмных
+    веков не даёт. Малый бунт, убивший род государя и растащивший
+    державу по частям, — даёт.
+    """
+    damage = calamity.damage or {}
+    pressure = (1.1 * damage.get(dis.D_SOULS, 0.0)
+                + 0.9 * damage.get(dis.D_POWER, 0.0)
+                + 0.7 * damage.get(dis.D_WEALTH, 0.0)
+                + 0.8 * damage.get(dis.D_LORE, 0.0)
+                + 0.4 * damage.get(dis.D_LAND, 0.0)
+                + 0.3 * damage.get(dis.D_CUSTOM, 0.0))
+    pressure += 0.08 * calamity.severity
+    if calamity.polities_lost:
+        pressure += 0.15 * min(3, calamity.polities_lost)
+    return max(0.0, min(2.0, pressure))
+
+
+# ---------------------------------------------------------------------------
 # Фазы и живая сила
 # ---------------------------------------------------------------------------
 
@@ -757,4 +983,5 @@ __all__ = ["prepare", "vuln_of", "vuln_kind", "vuln_factor", "hurt_lands",
            "build_works", "forget", "choose_cause", "want_omens", "schedule",
            "tick_pending", "phase_at", "note_phase", "maybe_turn",
            "force_now", "respond", "count_gains", "name_actors",
-           "PROFILE_KEYS"]
+           "plan_chain", "tick_chains", "count_damage", "four_outcomes",
+           "dark_pressure_of", "PROFILE_KEYS"]
