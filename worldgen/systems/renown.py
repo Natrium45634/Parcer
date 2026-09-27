@@ -515,7 +515,9 @@ def _review(ctx, rng, index, weight, year: int) -> None:
     # Потолок: пересмотр поднимает имя, но не делает из старосты
     # переменившего мироздание. Выше двух ступеней над тем, что человек
     # взял при жизни, поднимает только настоящая находка — быль.
-    ceiling = min(10, _born_level(weight) + 2)
+    # Девятая и десятая ступени не даются пересмотром: их зарабатывают
+    # при жизни, и потому их единицы на весь мир.
+    ceiling = min(8, _born_level(weight) + 2)
     if shift:
         weight.level = max(floor, min(ceiling, weight.level + shift))
         if weight.level == before:

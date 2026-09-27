@@ -210,9 +210,12 @@ def _live(ctx, rng, town, settlement, year: int, period: int,
     # --- как город идёт: вверх, ровно или вниз ------------------------
     if souls > town.peak:
         town.peak, town.peak_year = souls, year
-    if souls >= before * 1.08:
+    # Порог подъёма взят по живому городу, а не по бурному: восемь
+    # процентов за десять лет — это редкость даже в молодом мире, и по
+    # такой мерке почти всякий город всю жизнь «стоит на месте».
+    if souls >= before * 1.03:
         town.life = cat.RISING
-    elif souls <= before * 0.92:
+    elif souls <= before * 0.97:
         town.life = cat.FADING
         town.low_year = year
     else:
@@ -264,8 +267,18 @@ def _live(ctx, rng, town, settlement, year: int, period: int,
             _leave_layer(ctx, rng, town, year, "перестройка")
 
     # --- город растёт вширь -------------------------------------------
-    if town.life == cat.RISING and rng.chance(DISTRICT_RATE * period / 10.0):
-        _new_district(ctx, rng, town, settlement, year)
+    # Концы появляются не только на подъёме. Город, простоявший три века
+    # на одном месте, всё равно обрастает слободами: ремесленники
+    # селятся кучно, торг тянет к себе, за стеной наступает посад.
+    # Растущий заводит их быстрее, стоящий — медленнее, мельчающий —
+    # разве что руины внутри стен.
+    want = 3 + settlement.population // 4000
+    if len(town.districts) < want:
+        pace = (DISTRICT_RATE if town.life == cat.RISING
+                else DISTRICT_RATE * 0.45 if town.life == cat.STILL
+                else 0.0)
+        if pace and rng.chance(pace * period / 10.0):
+            _new_district(ctx, rng, town, settlement, year)
 
     # --- чем город кормится и надолго ли ------------------------------
     _trade_turn(ctx, rng, town, settlement, year, period)
