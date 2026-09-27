@@ -834,7 +834,17 @@ def _maybe_schism(ctx, year: int) -> None:
     heretic.home_id = taken[0].id if taken else heretic.home_id
     heretic.origin_region = taken[0].region_id if taken else heretic.origin_region
 
+    # У раскола есть причина, и чаще всего она старая: жрецы прочли
+    # волю бога по-своему, и через сто лет с этим прочтением перестали
+    # соглашаться. Если у главного бога такое расхождение записано,
+    # ересь начинается именно с него, а не из пустоты.
+    because = _drift_reason(world, parent, year)
+    if because:
+        faith.notes.append("с чего началось: %s" % because)
+
     title, text = texts.schism(rng, faith, parent, heretic)
+    if because:
+        text = "%s Спор пошёл не на пустом месте: %s." % (text, because)
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="schism",
         title=title, text=text, importance=4, actors=[heretic.id],
@@ -850,6 +860,26 @@ def _maybe_schism(ctx, year: int) -> None:
             note="война между верами «%s» и «%s»" % (parent.name, faith.name))
         if war is not None:
             war.notes.append("вера: %s" % faith.id)
+
+
+def _drift_reason(world, faith, year: int) -> str:
+    """С какого именно непонимания началась эта ересь.
+
+    Берётся последнее расхождение культа с волей бога — то самое место,
+    где жрецы однажды решили за него. Если бог этой веры такого за собой
+    не помнит, причины нет и выдумывать её не нужно.
+    """
+    head = world.godhead_of(faith.chief_deity_id) \
+        if faith.chief_deity_id else None
+    if head is None or not head.drifts:
+        return ""
+    rows = [item for item in head.drifts
+            if item.get("как") != "возврат"
+            and int(item.get("год", 0)) < year]
+    if not rows:
+        return ""
+    last = rows[-1]
+    return "%s (%d год)" % (last.get("что", ""), int(last.get("год", 0)))
 
 
 # ---------------------------------------------------------------------------

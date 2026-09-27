@@ -320,6 +320,130 @@ def check_stories(world, seed: str) -> list:
     return problems
 
 
+def check_gods(world, seed: str) -> list:
+    """Боги: биография не спорит ни с миром, ни сама с собой.
+
+    Проверяется то, ради чего всё затевалось: у бога есть принцип и мера
+    чужих дел, покровительство лежит в своих пределах и всегда с
+    причиной, запреты и дары настоящие, отношения указывают на
+    существующих богов, пророчества помнят свою правду, а следы
+    первородных лежат в землях, которые в мире есть.
+    """
+    from worldgen import divinity as cat
+
+    problems = []
+    for head in world.godheads.values():
+        deity = world.deities.get(head.deity_id)
+        if deity is None:
+            problems.append("сид «%s»: биография без бога (%s)"
+                            % (seed, head.id))
+            continue
+        where = "бог по имени %s" % deity.given_name
+        if head.origin not in cat.ORIGINS_BY_KEY:
+            problems.append("сид «%s»: у %s происхождение не из списка"
+                            % (seed, where))
+        if not head.principle:
+            problems.append("сид «%s»: у %s нет главной мысли"
+                            % (seed, where))
+        for name, value in (head.values or {}).items():
+            if name not in cat.VALUES:
+                problems.append("сид «%s»: у %s мера, которой нет" % (seed, where))
+                break
+            if not -3 <= int(value) <= 3:
+                problems.append("сид «%s»: у %s мера вышла за предел"
+                                % (seed, where))
+                break
+
+        for race_id, row in (head.favour or {}).items():
+            value = float(row.get("сила", 0.0))
+            if not -1.0 <= value <= 1.0:
+                problems.append("сид «%s»: у %s покровительство вышло за меру"
+                                % (seed, where))
+                break
+            if not row.get("почему"):
+                problems.append("сид «%s»: у %s покровительство без причины"
+                                % (seed, where))
+                break
+            year = int(row.get("год", 0))
+            if year > world.total_years:
+                problems.append("сид «%s»: у %s покровительство изменилось "
+                                "после конца мира" % (seed, where))
+                break
+
+        for item in head.bonds:
+            if item.get("связь") not in cat.BONDS:
+                problems.append("сид «%s»: у %s связь с богом не из списка"
+                                % (seed, where))
+                break
+            if item.get("кто") and item["кто"] not in world.deities:
+                problems.append("сид «%s»: у %s связь с богом, которого нет"
+                                % (seed, where))
+                break
+
+        for item in head.prophecies:
+            if not item.get("слова") or not item.get("правда"):
+                problems.append("сид «%s»: у %s пророчество без смысла"
+                                % (seed, where))
+                break
+            if int(item.get("сбылось", 0)) and \
+                    int(item["сбылось"]) < int(item.get("год", 0)):
+                problems.append("сид «%s»: у %s пророчество поняли раньше, "
+                                "чем сказали" % (seed, where))
+                break
+
+        for item in head.chosen:
+            if item.get("кто") and item["кто"] not in world.figures:
+                problems.append("сид «%s»: у %s избранник, которого нет"
+                                % (seed, where))
+                break
+            if item.get("конец") and int(item["конец"]) < int(item.get("год", 0)):
+                problems.append("сид «%s»: у %s избранник кончил раньше, чем "
+                                "начал" % (seed, where))
+                break
+
+        if not 0.0 <= float(head.drift) <= 1.0:
+            problems.append("сид «%s»: у %s расхождение с культом вне меры"
+                            % (seed, where))
+        for mark in head.marks:
+            if int(mark.get("год", 0)) > world.total_years:
+                problems.append("сид «%s»: у %s веха позже конца мира"
+                                % (seed, where))
+                break
+        if head.gone_year and head.back_year \
+                and head.back_year < head.gone_year:
+            problems.append("сид «%s»: %s вернулся раньше, чем ушёл"
+                            % (seed, where))
+
+    # Мифический век: следы должны лежать в настоящих землях.
+    for myth in world.myths:
+        if not myth.get(cat.AS_IT_WAS):
+            problems.append("сид «%s»: у мифа нет того, как было" % seed)
+        for trace in myth.get("следы", ()):
+            if trace.get("земля") and trace["земля"] not in world.regions:
+                problems.append("сид «%s»: след первородных лежит в земле, "
+                                "которой нет" % seed)
+                break
+            if trace.get("место") and trace["место"] not in world.sites:
+                problems.append("сид «%s»: след первородных указывает на "
+                                "место, которого нет" % seed)
+                break
+        for deity_id in myth.get("кто", ()):
+            if deity_id not in world.deities:
+                problems.append("сид «%s»: в мифе назван бог, которого нет"
+                                % seed)
+                break
+
+    heads = list(world.godheads.values())
+    if len(heads) >= 10:
+        # Мир, где все боги об одном, читается как один бог с разными
+        # именами. Проверяем, что это не так.
+        ideas = {head.principle for head in heads}
+        if len(ideas) < 4:
+            problems.append("сид «%s»: боги все об одном (%d разных мысли)"
+                            % (seed, len(ideas)))
+    return problems
+
+
 def check_towns(world, seed: str) -> list:
     """Города: биография не спорит сама с собой и с миром.
 
@@ -1785,6 +1909,7 @@ def main() -> int:
         failures.extend(check_lives(first, seed))
         failures.extend(check_stories(first, seed))
         failures.extend(check_towns(first, seed))
+        failures.extend(check_gods(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -1839,6 +1964,7 @@ def main() -> int:
             failures.extend(check_lives(first, "карта/" + seed))
             failures.extend(check_stories(first, "карта/" + seed))
             failures.extend(check_towns(first, "карта/" + seed))
+            failures.extend(check_gods(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "
@@ -1878,7 +2004,8 @@ def main() -> int:
                       check_causes, check_people_memory, check_migrations,
                       check_strifes, check_lore, check_upheavals,
                       check_capitals, check_souls, check_tales,
-                      check_lives, check_stories, check_towns):
+                      check_lives, check_stories, check_towns,
+                      check_gods):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
         failures.extend(check_map_world(

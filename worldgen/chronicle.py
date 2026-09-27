@@ -38,6 +38,8 @@ KIND_LABELS = {
     "colony_found": "Новое поселение",
     "settlement_ruined": "Запустение",
     "town_turn": "Перелом в жизни города",
+    "divine_deed": "Дело богов",
+    "mythic_age": "Прежде мира",
     "polity_found": "Рождение страны",
     "polity_fall": "Падение страны",
     "camp_found": "Лагерь",
@@ -1044,6 +1046,241 @@ def _wrap_tale(line: str, width: int = 74) -> str:
     if current:
         out.append(current)
     return ("\n      ").join(out)
+
+
+def render_gods(world) -> str:
+    """Боги и их дела: биография божества, а не запись в справочнике.
+
+    Пантеон в разделе «Пантеон» отвечает на вопрос «кто есть кто». Здесь
+    другое: откуда этот бог взялся, ради какой мысли он есть, чем меряет
+    чужие дела, кому покровительствует и почему именно им, что запрещает
+    и как далеко его собственный культ ушёл от его воли. Плюс то, что
+    было прежде всех богов, — и следы этого, лежащие в земле до сих пор.
+    """
+    from . import divinity as cat
+    from . import narrative_divine as texts
+    from . import pantheon as pan
+
+    rows = ["БОГИ И ИХ ДЕЛА", ""]
+    rows.extend(_myth_block(world, cat))
+
+    if not world.godheads:
+        rows.append("  Ни за одним богом этого мира не записано ничего "
+                    "сверх имени.")
+        return "\n".join(rows)
+
+    heads = []
+    for head in world.godheads.values():
+        deity = world.deities.get(head.deity_id)
+        if deity is not None:
+            heads.append((head, deity))
+    heads.sort(key=lambda pair: (-len(pair[0].marks), pair[0].id))
+
+    origins, gone, silent = {}, 0, 0
+    drift_sum = 0.0
+    for head, _ in heads:
+        origins[head.origin] = origins.get(head.origin, 0) + 1
+        if head.gone_year and not head.back_year:
+            gone += 1
+        if head.silent_since:
+            silent += 1
+        drift_sum += head.drift
+    rows.append("  Богов, за которыми записана их жизнь: %d." % len(heads))
+    rows.append("  Откуда они взялись: %s."
+                % ", ".join("%s — %d" % (cat.ORIGINS_BY_KEY[key].name, count)
+                            for key, count in sorted(
+                                origins.items(), key=lambda p: (-p[1], p[0]))
+                            [:6] if key in cat.ORIGINS_BY_KEY))
+    rows.append("  Ушли из мира: %d. Молчат: %d." % (gone, silent))
+    rows.append("  Культ расходится с волей бога в среднем на %.2f из 1."
+                % (drift_sum / max(1, len(heads))))
+    told = sum(1 for head, _ in heads for item in head.prophecies
+               if item.get("сбылось"))
+    if told:
+        rows.append("  Пророчеств, чей смысл в конце концов поняли: %d."
+                    % told)
+    rows.append("")
+
+    big = [pair for pair in heads if len(pair[0].marks) >= 6][:24]
+    shown = {head.id for head, _ in big}
+    for head, deity in big:
+        rows.extend(_god_block(world, head, deity, cat, texts, pan))
+
+    rest = [pair for pair in heads if pair[0].id not in shown]
+    if rest:
+        rows.append("  ОСТАЛЬНЫЕ")
+        rows.append("")
+        for head, deity in rest[:80]:
+            origin = cat.ORIGINS_BY_KEY.get(head.origin)
+            rows.append("    %-34s %-26s %s"
+                        % (deity.full_name[:34],
+                           origin.name if origin else "—",
+                           head.principle[:44]))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def _myth_block(world, cat) -> list:
+    """То, что было прежде мира, и что от этого осталось."""
+    if not world.myths:
+        return []
+    rows = []
+    for myth in world.myths:
+        rows.append("  ПРЕЖДЕ МИРА — %s" % myth.get("имя", ""))
+        rows.append("  " + "-" * (len(myth.get("имя", "")) + 16))
+        for level in cat.TRUTH_LEVELS:
+            line = myth.get(level, "")
+            if line:
+                rows.append("      %-18s %s" % (level + ":",
+                                                _wrap_myth(line)))
+        traces = myth.get("следы") or ()
+        if traces:
+            rows.append("")
+            rows.append("      ЧТО ОСТАЛОСЬ В САМОМ МИРЕ")
+            for trace in traces:
+                region = world.regions.get(trace.get("земля", ""))
+                site = world.sites.get(trace.get("место", ""))
+                where = []
+                if region is not None:
+                    where.append("земля по имени %s" % region.name)
+                if site is not None:
+                    where.append("место по имени %s" % site.name)
+                rows.append("        %-12s %s%s"
+                            % (trace.get("чем был", ""),
+                               trace.get("что осталось", ""),
+                               " (%s)" % ", ".join(where) if where else ""))
+        rows.append("")
+    return rows
+
+
+def _wrap_myth(line: str, width: int = 70) -> str:
+    words, out, current = (line or "").split(), [], ""
+    for word in words:
+        if current and len(current) + len(word) + 1 > width:
+            out.append(current)
+            current = word
+        else:
+            current = ("%s %s" % (current, word)).strip()
+    if current:
+        out.append(current)
+    return ("\n" + " " * 25).join(out)
+
+
+def _god_block(world, head, deity, cat, texts, pan) -> list:
+    """Один бог: кто он, чем меряет и что за ним числится."""
+    origin = cat.ORIGINS_BY_KEY.get(head.origin)
+    head_line = "%s — %s" % (deity.full_name,
+                             texts.GOD_WORD.get(deity.sex, "бог"))
+    rows = ["  %s" % head_line, "  " + "-" * (len(head_line) + 2)]
+    domains = ", ".join(pan.DOMAINS_BY_KEY[key].name for key in deity.domains
+                        if key in pan.DOMAINS_BY_KEY)
+    rows.append("      сферы: %s; нрав: %s"
+                % (domains or "—",
+                   pan.ALIGNMENT_NAMES.get(deity.alignment, "—")))
+    if origin is not None:
+        rows.append("      откуда: %s" % origin.name)
+    if head.principle:
+        rows.append("      ГЛАВНОЕ: %s." % head.principle)
+    if head.values:
+        rows.append("      чем меряет: %s"
+                    % ", ".join("%s %s" % (name, cat.VALUE_MARKS.get(value, ""))
+                                for name, value in sorted(
+                                    head.values.items(),
+                                    key=lambda p: (-p[1], p[0]))
+                                if value))
+    rows.append("")
+
+    if head.favour:
+        rows.append("      КОМУ И ПОЧЕМУ БЛАГОВОЛИТ")
+        for race_id, row in sorted(head.favour.items(),
+                                   key=lambda p: -float(p[1].get("сила", 0))):
+            race = races_mod.RACES_BY_ID.get(race_id)
+            value = float(row.get("сила", 0.0))
+            rows.append("        %-16s %+.2f  %-18s %s"
+                        % ((race.name if race is not None else race_id)[:16],
+                           value, cat.favour_name(value),
+                           "%s (%d)" % (row.get("почему", ""),
+                                        int(row.get("год", 0)))
+                           if row.get("почему") else ""))
+        rows.append("")
+
+    if head.taboos or head.gifts:
+        rows.append("      ЧЕГО НЕ ПРОЩАЕТ И ЧЕМ ОДАРИВАЕТ")
+        for line in head.taboos:
+            rows.append("        нельзя ..... %s" % line)
+        for gift in head.gifts:
+            rows.append("        даёт ....... %s — %s"
+                        % (gift.get("дар", ""), gift.get("кому", "")))
+        rows.append("")
+
+    if head.symbols:
+        rows.append("      ЗНАКИ")
+        rows.append("        %s" % ", ".join(
+            "%s — %s" % (name, value)
+            for name, value in sorted(head.symbols.items())))
+        for item in head.symbol_fates:
+            rows.append("        %d: %s — %s" % (int(item.get("год", 0)),
+                                                 item.get("знак", ""),
+                                                 item.get("что стало", "")))
+        rows.append("")
+
+    if head.bonds:
+        rows.append("      С ДРУГИМИ БОГАМИ")
+        for item in head.bonds:
+            other = world.deities.get(item.get("кто", ""))
+            rows.append("        %-12s %-28s %s"
+                        % (item.get("связь", ""),
+                           (other.given_name if other is not None
+                            else "?")[:28],
+                           item.get("почему", "")))
+        rows.append("")
+
+    if head.prophecies:
+        rows.append("      ПРОРОЧЕСТВА")
+        for item in head.prophecies:
+            rows.append("        %d: «%s»" % (int(item.get("год", 0)),
+                                              item.get("слова", "")))
+            if item.get("сбылось"):
+                rows.append("             а на деле: %s (поняли в %d году)"
+                            % (item.get("правда", ""),
+                               int(item["сбылось"])))
+            else:
+                rows.append("             читают так: %s"
+                            % "; ".join(item.get("читают", ())))
+        rows.append("")
+
+    if head.drifts:
+        rows.append("      БОГ И ЕГО КУЛЬТ  (расхождение %.2f из 1)"
+                    % head.drift)
+        for item in head.drifts[-5:]:
+            rows.append("        %5d  %-12s %s" % (int(item.get("год", 0)),
+                                                   item.get("как", ""),
+                                                   item.get("что", "")))
+        for note in head.notes:
+            if note.startswith("«"):
+                rows.append("        сам он на это сказал бы: %s" % note)
+        rows.append("")
+
+    if head.chosen:
+        rows.append("      ИЗБРАННИКИ")
+        for item in head.chosen:
+            rows.append("        %5d  %-24s %-34s %s"
+                        % (int(item.get("год", 0)), item.get("имя", "?")[:24],
+                           item.get("дело", "")[:34], item.get("чем", "—")))
+        rows.append("")
+
+    if head.marks:
+        rows.append("      КАК ЭТО ШЛО")
+        for mark in sorted(head.marks, key=lambda item: int(item.get("год", 0))):
+            rows.append("        %5d  %-16s %s"
+                        % (int(mark.get("год", 0)), mark.get("вид", ""),
+                           mark.get("строка", "")))
+        rows.append("")
+    for note in head.notes:
+        if not note.startswith("«"):
+            rows.append("      %s" % texts.cap(note))
+    rows.append("")
+    return rows
 
 
 def render_towns(world) -> str:
@@ -3095,6 +3332,7 @@ def full_text(world) -> str:
         render_lifepaths(world),
         render_stories(world),
         render_towns(world),
+        render_gods(world),
         render_guilds(world),
         render_expeditions(world),
         render_politics(world),

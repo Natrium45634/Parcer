@@ -272,6 +272,44 @@ def _nodes(ctx, year: int) -> list:
                 region_id=settlement.region_id, settlement_id=settlement.id,
                 weight=0.9))
 
+    # --- то, что осталось от богов -------------------------------------
+    # Боги ведут себя как действующие лица, и после них остаётся то, с
+    # чем смертным жить: запреты, которые не блюдут, имена, которых не
+    # произносят, и слова, которых никто не понял.
+    for head in world.godheads.values():
+        deity = world.deities.get(head.deity_id)
+        if deity is None:
+            continue
+        region_id = _deity_region(world, deity)
+        if head.taboos and deity.status == "почитается":
+            out.append(Node(
+                cat.DIVINE_BAN, head.taboos[0], head.born.year if head.born
+                else 1, ref=deity.id, region_id=region_id, weight=1.0))
+        if deity.status != "почитается" and not _faiths_alive(world, deity.id):
+            when = head.silent_since or (head.born.year if head.born else 1)
+            if year - when >= 200:
+                out.append(Node(
+                    cat.LOST_GOD, "бога по имени %s забыли" % deity.given_name,
+                    when, ref=deity.id, region_id=region_id, weight=0.7))
+        for item in head.prophecies:
+            if item.get("сбылось"):
+                continue
+            if year - int(item.get("год", 0)) < ECHO_MIN_AGE:
+                continue
+            out.append(Node(
+                cat.PROPHECY, "«%s»" % item.get("слова", ""),
+                int(item.get("год", 1)), ref=deity.id, region_id=region_id,
+                weight=0.9))
+
+    # --- следы первородных ---------------------------------------------
+    for myth in world.myths:
+        for trace in myth.get("следы", ()):
+            site = world.sites.get(trace.get("место", ""))
+            out.append(Node(
+                cat.FIRST_TRACE, trace.get("что осталось", ""), 1,
+                ref=trace.get("кто", ""), region_id=trace.get("земля", ""),
+                site_id=site.id if site is not None else "", weight=0.5))
+
     # --- живые обиды и новые порядки -----------------------------------
     for fact in list(world.open_facts)[:400]:
         if fact.kind != history.GRUDGE or year - fact.year < ECHO_MIN_AGE:
@@ -733,11 +771,19 @@ def _town_back(ctx, story, node, year: int) -> None:
     этого город рассказывал бы одно и то же без конца.
     """
     world = ctx.world
+    good = story.outcome in ("сладилось", "сладилось наполовину",
+                             "правда не нужна")
+    # Божественные узлы к городу не привязаны: у них своя обратная связь.
+    if node.kind == cat.PROPHECY:
+        if good:
+            _read_prophecy(ctx, story, node, year)
+        return
+    if node.kind == cat.DIVINE_BAN:
+        _ban_answer(ctx, story, node, year)
+        return
     town = world.town_of(node.settlement_id) if node.settlement_id else None
     if town is None:
         return
-    good = story.outcome in ("сладилось", "сладилось наполовину",
-                             "правда не нужна")
     if node.kind == cat.TOWN_SECRET and good:
         for item in town.secrets:
             if item.get(town_cat.RUMOUR) != node.what or item.get("раскрыта"):
@@ -764,6 +810,51 @@ def _town_back(ctx, story, node, year: int) -> None:
         note = "под городом побывали: %s" % node.what
         if note not in town.notes:
             town.notes.append(note)
+
+
+def _read_prophecy(ctx, story, node, year: int) -> None:
+    """Быль дошла до конца — и пророчество оказалось не о том.
+
+    Настоящий смысл всегда мельче ожидаемого, и именно поэтому его
+    находят не жрецы, а случайные люди в каком-нибудь селе.
+    """
+    world = ctx.world
+    head = world.godhead_of(node.ref) if node.ref else None
+    if head is None:
+        return
+    for item in head.prophecies:
+        if item.get("сбылось") or "«%s»" % item.get("слова", "") != node.what:
+            continue
+        item["сбылось"] = int(year)
+        item["как поняли"] = story.title or "быль"
+        head.marks.append({
+            "год": int(year), "вид": "пророчество",
+            "строка": "Наконец поняли, о чём это было: %s."
+                      % item.get("правда", "")})
+        story.notes.append("этим кончилось старое пророчество")
+        break
+
+
+def _ban_answer(ctx, story, node, year: int) -> None:
+    """Запрет нарушали — и теперь видно, чем это кончилось.
+
+    Уладилось миром — бог зачтёт это тем, кто тут живёт; не уладилось —
+    зачтёт тоже, только в другую сторону.
+    """
+    world = ctx.world
+    head = world.godhead_of(node.ref) if node.ref else None
+    settlement = world.settlements.get(story.settlement_id)
+    if head is None or settlement is None or not settlement.race_id:
+        return
+    good = story.outcome in ("сладилось", "сладилось наполовину")
+    row = head.favour.get(settlement.race_id) or {"сила": 0.0}
+    before = float(row.get("сила", 0.0))
+    after = max(-1.0, min(1.0, before + (0.12 if good else -0.15)))
+    head.favour[settlement.race_id] = {
+        "сила": round(after, 3),
+        "почему": ("унялись сами, без кары" if good
+                   else "запрет его тут так и не стали блюсти"),
+        "куда": "вверх" if good else "вниз", "год": int(year)}
 
 
 def _name_it(ctx, rng, story, shape, home) -> None:
@@ -900,6 +991,25 @@ def _act(story, year: int, kind: str, line: str, why: str = "") -> None:
         return
     story.acts.append({"год": int(year), "вид": kind, "строка": line,
                        "из-за": why})
+
+
+def _deity_region(world, deity) -> str:
+    """Где этого бога помнят: земля его главного храма или его народа."""
+    for temple in world.temples.values():
+        if temple.deity_id == deity.id and temple.region_id:
+            return temple.region_id
+    for settlement_id in world.active_settlements:
+        settlement = world.settlements[settlement_id]
+        if settlement.race_id == deity.race_id:
+            return settlement.region_id
+    return ""
+
+
+def _faiths_alive(world, deity_id: str) -> bool:
+    for faith in world.faiths.values():
+        if deity_id in faith.deity_ids and faith.status != "забыта":
+            return True
+    return False
 
 
 def _souls_near(world, region_id: str) -> int:

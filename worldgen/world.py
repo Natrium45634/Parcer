@@ -27,6 +27,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Polity,
                      Region,
                      Reign,
+                     Godhead,
                      Relic, Seed, Settlement, Site, Story, Strife, Tale,
                      Township,
                      Temple,
@@ -98,6 +99,11 @@ class World:
         self.tales = {}                # сказания: местные героические истории
         self.lifepaths = {}            # жизненные пути значимых людей
         self.stories = {}              # были: малые истории мест и людей
+        self.godheads = {}             # биографии богов
+        # Мифы мира: то, что было прежде истории. У каждого четыре слоя
+        # правды, и в мире известен только первый.
+        self.myths = []
+        self._godhead_of = {}          # божество -> id биографии
         self.townships = {}            # биографии городов
         self._town_of = {}             # поселение -> id биографии
         self._town_watch = {}          # рабочие указатели биографий
@@ -948,6 +954,21 @@ class World:
     # Память людей и связи между ними (блок 16)
     # ------------------------------------------------------------------
 
+    def add_godhead(self, **kwargs) -> Godhead:
+        head = Godhead(id=self.next_id("GH"), **kwargs)
+        self.godheads[head.id] = head
+        self._godhead_of[head.deity_id] = head.id
+        return head
+
+    def godhead_of(self, deity_id: str):
+        """Биография этого бога, если она у него есть."""
+        head_id = self._godhead_of.get(deity_id)
+        if head_id is None:
+            self._godhead_of = {item.deity_id: item.id
+                                for item in self.godheads.values()}
+            head_id = self._godhead_of.get(deity_id)
+        return self.godheads.get(head_id) if head_id else None
+
     def add_township(self, **kwargs) -> Township:
         town = Township(id=self.next_id("TW"), **kwargs)
         self.townships[town.id] = town
@@ -1518,6 +1539,7 @@ class World:
             "Сказаний": len(self.tales),
             "Былей": len(self.stories),
             "Городских биографий": len(self.townships),
+            "Божественных биографий": len(self.godheads),
             "Открытых земель": sum(1 for r in self.regions.values()
                                    if r.discovered_year),
             "Тёмных веков": len(self.dark_ages),

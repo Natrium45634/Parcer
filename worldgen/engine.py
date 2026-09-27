@@ -25,7 +25,7 @@ from .rng import normalize_seed, seed_to_int
 from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       citylife,
                       crafts, culture,
-                      diplomacy, embassy,
+                      diplomacy, divinity, embassy,
                       era_events,
                       exploration, founding, geography, guilds, houses,
                       laws, legacy, lifepath, lives, localstory, lore,
@@ -123,6 +123,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     peoples.plan_awakenings(ctx)
     calamity.prepare(ctx)
     religion.prepare(ctx)
+    # Мифический век идёт сразу за верой мира: первородные были прежде
+    # всех богов, и следы их лежат в землях, которые уже построены.
+    divinity.prepare(ctx)
 
     # По настоящей карте ведём ещё и политическую летопись: кто чем владел
     # в такой-то год. Её потом читает вкладка «Страны» картогенератора.
@@ -192,6 +195,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             # Сказания идут следом за чудовищами, местами и вещами: к
             # этому часу в мире уже есть и беда, и те, кто на неё пойдёт.
             tales.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Боги живут своей жизнью прежде городов и былей: их дела
+            # и запреты — такая же причина событий, как война и недород.
+            divinity.upkeep(ctx, year, UPKEEP_PERIOD)
             # Жизнь городов идёт до былей: быль может вырасти из тяготы
             # или тайны города, и к этому часу они уже должны быть.
             township.upkeep(ctx, year, UPKEEP_PERIOD)

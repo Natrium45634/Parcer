@@ -57,10 +57,18 @@ CRAFT = "новое ремесло"          # мастер, которого о
 TOWN_ACHE = "городская тягота"   # тянется годами и всем надоела
 TOWN_SECRET = "городская тайна"  # все знают одно, было другое
 UNDERCITY = "то, что под городом"  # чужой ярус, ход, могильник, канал
+# И четыре, которые даёт вера: боги ведут себя как действующие лица, и
+# после них остаются нарушенные запреты, непонятые пророчества и
+# забытые имена.
+DIVINE_BAN = "нарушенный запрет"   # божий запрет, который тут не блюдут
+LOST_GOD = "забытый бог"           # имя, которого не произносят
+PROPHECY = "тёмное пророчество"    # сказано, но никто не знает о чём
+FIRST_TRACE = "след первородных"   # то, что осталось от спора до мира
 
 NODES = (RUIN, PLACE, THING, TRACE, WAR_END, CALAMITY, DEAD, HOUSE_FALL,
          TONGUE, ROUTE, GRUDGE, MIGRATION, LAW, BEAST, HOLY, CRAFT,
-         TOWN_ACHE, TOWN_SECRET, UNDERCITY)
+         TOWN_ACHE, TOWN_SECRET, UNDERCITY,
+         DIVINE_BAN, LOST_GOD, PROPHECY, FIRST_TRACE)
 
 # Насколько охотно мир рассказывает о каждом узле. Быт и последствия
 # войн — самое частое; древнее зло — редкость.
@@ -69,6 +77,7 @@ NODE_WEIGHT = {
     CALAMITY: 1.1, DEAD: 1.4, HOUSE_FALL: 0.9, TONGUE: 0.6, ROUTE: 0.9,
     GRUDGE: 1.5, MIGRATION: 1.0, LAW: 0.8, BEAST: 0.7, HOLY: 0.8,
     CRAFT: 0.9, TOWN_ACHE: 1.4, TOWN_SECRET: 1.0, UNDERCITY: 1.0,
+    DIVINE_BAN: 1.1, LOST_GOD: 0.7, PROPHECY: 0.9, FIRST_TRACE: 0.5,
 }
 
 
@@ -113,7 +122,7 @@ class Shape:
 SHAPES = (
     # --- бытовое: этого должно быть больше всего -----------------------
     Shape("mezha", "спор о меже",
-          (GRUDGE, LAW, MIGRATION, WAR_END, DEAD, HOUSE_FALL, RUIN, TOWN_ACHE),
+          (GRUDGE, LAW, MIGRATION, WAR_END, DEAD, HOUSE_FALL, RUIN, TOWN_ACHE, DIVINE_BAN),
           acts=(3, 6), epicity=0, weight=2.0,
           genres=("бытовой", "тяжбенный"), fight=0.12),
     Shape("theft", "пропажа снасти",
@@ -141,21 +150,21 @@ SHAPES = (
           (TONGUE, MIGRATION, RUIN, WAR_END, HOLY),
           acts=(3, 6), epicity=0, weight=1.0,
           genres=("камерный", "горький"), fight=0.03),
-    Shape("scribe", "ошибка в своде", (LAW, HOLY, RUIN, DEAD, TOWN_SECRET, UNDERCITY),
+    Shape("scribe", "ошибка в своде", (LAW, HOLY, RUIN, DEAD, TOWN_SECRET, UNDERCITY, LOST_GOD, PROPHECY),
           acts=(4, 8), epicity=1, weight=1.1,
           genres=("книжный", "таинственный"), fight=0.05),
-    Shape("missing", "пропал человек", (ROUTE, WAR_END, BEAST, CALAMITY, UNDERCITY, TOWN_ACHE),
+    Shape("missing", "пропал человек", (ROUTE, WAR_END, BEAST, CALAMITY, UNDERCITY, TOWN_ACHE, DIVINE_BAN, PROPHECY),
           acts=(4, 9), epicity=1, weight=1.6,
           genres=("розыскной", "тревожный"), fight=0.22),
 
     # --- местное: одно поселение или округа ----------------------------
-    Shape("strange", "странность", (TRACE, PLACE, RUIN, CALAMITY, UNDERCITY, TOWN_SECRET),
+    Shape("strange", "странность", (TRACE, PLACE, RUIN, CALAMITY, UNDERCITY, TOWN_SECRET, DIVINE_BAN, LOST_GOD, PROPHECY, FIRST_TRACE),
           acts=(5, 10), epicity=1, weight=1.4,
           genres=("таинственный", "мрачный"), fight=0.18),
-    Shape("blamed", "того, кого сочли виновным", (GRUDGE, DEAD, CALAMITY, TOWN_ACHE, TOWN_SECRET),
+    Shape("blamed", "того, кого сочли виновным", (GRUDGE, DEAD, CALAMITY, TOWN_ACHE, TOWN_SECRET, DIVINE_BAN, PROPHECY),
           acts=(5, 10), epicity=1, weight=1.3,
           genres=("тяжбенный", "мрачный"), fight=0.2),
-    Shape("two_sides", "две правды", (GRUDGE, LAW, HOLY, MIGRATION, RUIN, TOWN_ACHE, TOWN_SECRET),
+    Shape("two_sides", "две правды", (GRUDGE, LAW, HOLY, MIGRATION, RUIN, TOWN_ACHE, TOWN_SECRET, DIVINE_BAN),
           acts=(5, 11), epicity=2, weight=1.4,
           genres=("тяжбенный", "политический"), fight=0.22),
     Shape("after_war", "что осталось после войны",
@@ -163,37 +172,37 @@ SHAPES = (
           acts=(5, 11), epicity=2, weight=1.6,
           genres=("военный", "горький"), fight=0.3),
     Shape("after_beda", "что осталось после беды",
-          (CALAMITY, TRACE, RUIN, ROUTE, UNDERCITY),
+          (CALAMITY, TRACE, RUIN, ROUTE, UNDERCITY, FIRST_TRACE),
           acts=(5, 11), epicity=2, weight=1.3,
           genres=("мрачный", "горький"), fight=0.25),
-    Shape("hidden_kin", "скрытый наследник", (HOUSE_FALL, DEAD, WAR_END, TOWN_SECRET),
+    Shape("hidden_kin", "скрытый наследник", (HOUSE_FALL, DEAD, WAR_END, TOWN_SECRET, PROPHECY),
           acts=(5, 11), epicity=2, weight=1.0,
           genres=("политический", "семейный"), fight=0.2),
-    Shape("beast_near", "зверь переменил повадку", (BEAST, TRACE, CALAMITY, UNDERCITY),
+    Shape("beast_near", "зверь переменил повадку", (BEAST, TRACE, CALAMITY, UNDERCITY, FIRST_TRACE),
           acts=(4, 9), epicity=2, weight=0.9,
           genres=("тревожный", "охотничий"), fight=0.45),
-    Shape("faith_split", "трещина в вере", (HOLY, LAW, MIGRATION, TOWN_ACHE, UNDERCITY),
+    Shape("faith_split", "трещина в вере", (HOLY, LAW, MIGRATION, TOWN_ACHE, UNDERCITY, DIVINE_BAN, LOST_GOD, PROPHECY),
           acts=(5, 10), epicity=2, weight=0.9,
           genres=("духовный", "политический"), fight=0.18),
-    Shape("thing_found", "вещь нашлась", (THING, RUIN, PLACE, DEAD, UNDERCITY),
+    Shape("thing_found", "вещь нашлась", (THING, RUIN, PLACE, DEAD, UNDERCITY, FIRST_TRACE),
           acts=(5, 11), epicity=2, weight=1.1,
           genres=("розыскной", "таинственный"), fight=0.25),
 
     # --- редкое: то, что и должно быть редким ---------------------------
-    Shape("old_door", "открылось запертое", (PLACE, RUIN, TRACE, UNDERCITY, TOWN_SECRET),
+    Shape("old_door", "открылось запертое", (PLACE, RUIN, TRACE, UNDERCITY, TOWN_SECRET, LOST_GOD, FIRST_TRACE),
           acts=(7, 15), epicity=3, weight=0.55,
           genres=("исследовательский", "мрачный"), fight=0.35),
-    Shape("echo", "старое зло подало голос", (TRACE, CALAMITY, PLACE, UNDERCITY),
+    Shape("echo", "старое зло подало голос", (TRACE, CALAMITY, PLACE, UNDERCITY, LOST_GOD, FIRST_TRACE),
           acts=(8, 16), epicity=4, weight=0.3,
           genres=("мрачный", "мистический"), fight=0.45),
-    Shape("last_of", "последний из народа", (TONGUE, MIGRATION, RUIN),
+    Shape("last_of", "последний из народа", (TONGUE, MIGRATION, RUIN, LOST_GOD),
           acts=(6, 12), epicity=3, weight=0.35,
           genres=("горький", "исторический"), fight=0.1),
     Shape("truth_of_war", "истинная причина старой войны",
-          (WAR_END, RUIN, DEAD, LAW, TOWN_SECRET),
+          (WAR_END, RUIN, DEAD, LAW, TOWN_SECRET, PROPHECY),
           acts=(8, 16), epicity=4, weight=0.25,
           genres=("исторический", "политический"), fight=0.15),
-    Shape("myth_true", "то, что считали выдумкой", (PLACE, RUIN, THING, TOWN_SECRET, UNDERCITY),
+    Shape("myth_true", "то, что считали выдумкой", (PLACE, RUIN, THING, TOWN_SECRET, UNDERCITY, LOST_GOD, PROPHECY, FIRST_TRACE),
           acts=(9, 18), epicity=4, weight=0.2,
           genres=("исследовательский", "эпический"), fight=0.3),
 )

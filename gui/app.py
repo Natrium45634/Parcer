@@ -431,6 +431,9 @@ class ChronicleApp(tk.Tk):
         self.towns_text = self._add_text_tab(
             "Жизнь городов", lambda: self._set_text(
                 self.towns_text, chronicle.render_towns(self.world)))
+        self.gods_text = self._add_text_tab(
+            "Боги и их дела", lambda: self._set_text(
+                self.gods_text, chronicle.render_gods(self.world)))
         self.crafts_text = self._add_text_tab(
             "Ремёсла", lambda: self._set_text(
                 self.crafts_text, chronicle.render_crafts(self.world)))
@@ -1398,6 +1401,48 @@ class ChronicleApp(tk.Tk):
                     race = RACES_BY_ID.get(race_id)
                     lines.append("  %-40s %d" % (
                         race.name if race is not None else race_id, dead))
+
+        elif kind == "Deity":
+            # За богом числится не только имя со сферами: принцип, мера
+            # чужих дел, покровительство с причинами и его же культ,
+            # ушедший в сторону.
+            head = world.godhead_of(entity.id)
+            if head is not None:
+                from worldgen import divinity as god_cat
+                origin = god_cat.ORIGINS_BY_KEY.get(head.origin)
+                lines.extend(["", "ЧТО ЗА НИМ ЧИСЛИТСЯ", "-" * 60])
+                if origin is not None:
+                    lines.append("  откуда: %s" % origin.name)
+                if head.principle:
+                    lines.append("  главное: %s" % head.principle)
+                if head.values:
+                    lines.append("  чем меряет: %s" % ", ".join(
+                        "%s %s" % (name, god_cat.VALUE_MARKS.get(value, ""))
+                        for name, value in sorted(head.values.items(),
+                                                  key=lambda p: (-p[1], p[0]))
+                        if value))
+                for line in head.taboos:
+                    lines.append("  нельзя: %s" % line)
+                if head.favour:
+                    lines.extend(["", "КОМУ И ПОЧЕМУ БЛАГОВОЛИТ", "-" * 60])
+                    for race_id, row in sorted(
+                            head.favour.items(),
+                            key=lambda p: -float(p[1].get("сила", 0))):
+                        race = RACES_BY_ID.get(race_id)
+                        value = float(row.get("сила", 0.0))
+                        lines.append("  %-16s %+.2f  %-18s %s" % (
+                            (race.name if race is not None else race_id)[:16],
+                            value, god_cat.favour_name(value),
+                            row.get("почему", "")))
+                if head.marks:
+                    lines.extend(["", "КАК ЭТО ШЛО", "-" * 60])
+                    for mark in sorted(
+                            head.marks,
+                            key=lambda item: int(item.get("год", 0)))[-20:]:
+                        lines.append("  %5d  %-16s %s"
+                                     % (int(mark.get("год", 0)),
+                                        mark.get("вид", ""),
+                                        mark.get("строка", "")))
 
         elif kind == "Faith":
             if entity.deity_ids:

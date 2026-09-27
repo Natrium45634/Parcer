@@ -1508,6 +1508,59 @@ class Cabal:
 
 
 @dataclass
+class Godhead:
+    """Биография бога: что он за существо и что он делал тысячи лет.
+
+    У божества в мире уже есть имя, сферы, мировоззрение и праздник.
+    Здесь лежит второй слой — тот, из-за которого бог начинает порождать
+    историю: откуда он взялся, ради какой мысли он есть, чем меряет
+    чужие дела, кому покровительствует и почему именно, что запрещает,
+    чем одаривает, с кем из богов в ссоре и как далеко его культ ушёл от
+    его же воли.
+
+    Главное здесь — `favour`: покровительство народу не «да/нет», а
+    число с причиной и годом. Богиня леса не любит людей не потому, что
+    люди, а потому, что триста лет назад они свели священную рощу.
+    Начнут беречь — отношение переменится, и это будет записано.
+    """
+
+    id: str
+    deity_id: str
+    origin: str                # ключ происхождения
+    born: Date
+    principle: str = ""        # одна мысль, ради которой этот бог есть
+    values: dict = field(default_factory=dict)   # двенадцать мер
+    favour: dict = field(default_factory=dict)   # раса -> {сила, почему, год}
+    taboos: list = field(default_factory=list)   # чего он не прощает
+    gifts: list = field(default_factory=list)    # чем одаривает и при чём
+    symbols: dict = field(default_factory=dict)  # девять знаков
+    symbol_fates: list = field(default_factory=list)  # что с ними стало
+    bonds: list = field(default_factory=list)    # [{кто, связь, почему, год}]
+    chosen: list = field(default_factory=list)   # [{кто, дело, чем кончилось}]
+    deeds: list = field(default_factory=list)    # [{год, вид, строка}]
+    prophecies: list = field(default_factory=list)  # [{слова, правда, год}]
+    drift: float = 0.0         # насколько культ разошёлся с волей бога
+    drifts: list = field(default_factory=list)   # [{год, как, что}]
+    feast_turns: list = field(default_factory=list)  # что стало с праздником
+    marks: list = field(default_factory=list)    # вехи биографии
+    silent_since: int = 0      # с какого года молчит
+    gone_year: int = 0         # когда ушёл из мира
+    back_year: int = 0         # и когда вернулся
+    notes: list = field(default_factory=list)
+    event_ids: list = field(default_factory=list)
+
+    @property
+    def awake(self) -> bool:
+        """Отвечает ли он смертным прямо сейчас."""
+        return not self.gone_year or bool(self.back_year)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["born"] = _date_out(self.born)
+        return data
+
+
+@dataclass
 class Township:
     """Биография города: почему он есть и чем он стал.
 
