@@ -1832,8 +1832,11 @@ def refugees(ctx, calamity, rng, year: int, date) -> None:
         return
 
     for region_id in dict.fromkeys(ruined):
+        # Сперва считаем, сколько уйдёт, и только потом уводим: если
+        # уходящих мало, из земли не уходит никто, и население остаётся
+        # ровно таким, каким было.
+        going = []
         leaving = 0
-        from_cities = []
         for settlement_id in list(world.active_settlements):
             settlement = world.settlements[settlement_id]
             if settlement.region_id != region_id or settlement.population <= 0:
@@ -1842,19 +1845,16 @@ def refugees(ctx, calamity, rng, year: int, date) -> None:
             gone = int(settlement.population * share)
             if gone <= 0:
                 continue
-            settlement.population -= gone
+            going.append((settlement, gone))
             leaving += gone
-            from_cities.append(settlement)
         if leaving < REFUGEE_MIN:
-            # Слишком мало, чтобы это было исходом: вернём людей на место.
-            for settlement in from_cities:
-                settlement.population += int(leaving / max(1,
-                                                           len(from_cities)))
-            continue
+            continue          # это не исход, а обычная убыль
 
         host = _refuge_city(world, region_id, calamity, rng)
         if host is None:
             continue
+        for settlement, gone in going:
+            settlement.population -= gone
         host.population += leaving
         calamity.notes.append(
             "исход из земли: ушло %d, приняли в городе по имени %s"
