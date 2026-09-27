@@ -155,10 +155,20 @@ class Race:
     terrains: tuple           # предпочитаемые земли (по убыванию желания)
     first_era: int            # индекс эпохи пробуждения
     lifespan: tuple           # (минимум, максимум) лет жизни
+    # Прирост — это разница между рождениями и смертями, а не одна
+    # рождаемость: долгоживущие рожают редко, но и умирают редко, поэтому
+    # у эльфа он ниже людского, но не вдвое.
     growth: float             # базовый прирост населения в год
     expansion: float          # склонность основывать новые поселения
     traits: tuple             # ключевые слова для текстов летописи
     tribe_words: tuple        # «Племя», «Клан», ...
+    # Сколько душ держит одно поселение этой расы против людского. Земля
+    # кормит одинаково, но живут на ней по-разному: дворфский город идёт
+    # вниз ярусами и держит вдвое больше людского при той же округе, а
+    # эльфы селятся широко и редко. Без этого числа выходило, что раса с
+    # немногими городами в горах — это раса из сотни тысяч душ на весь
+    # мир, сколько бы тысячелетий она ни стояла.
+    density: float = 1.0
     settlement_words: tuple = ()   # «Город», «Крепость», ...
     polity_words: tuple = ()       # «Королевство», «Держава», ...
     camp_words: tuple = ()         # «Лагерь», «Логово», ...
@@ -213,7 +223,7 @@ RACES = (
         noun_m="человек", noun_f="женщина",
         category=CIVILIZED, group="Люди", style="human",
         terrains=_t(PLAIN, COAST, HILLS, STEPPE, FOREST, MOUNTAIN, TUNDRA, DESERT),
-        first_era=1, lifespan=(55, 85), growth=0.0062, expansion=1.35,
+        first_era=1, lifespan=(55, 85), growth=0.0062, expansion=1.25,
         traits=("хлебопашцы", "мореходы", "строители дорог", "торговцы"),
         tribe_words=_t("Племя", "Род", "Ватага"),
         settlement_words=_t("Город", "Крепость", "Порт", "Застава", "Торжище"),
@@ -233,7 +243,9 @@ RACES = (
         noun_m="дворф", noun_f="дворфийка",
         category=CIVILIZED, group="Дворфы", style="dwarf",
         terrains=_t(MOUNTAIN, UNDERGROUND, HILLS, TUNDRA, PLAIN),
-        first_era=0, lifespan=(180, 320), growth=0.0040, expansion=0.8,
+        first_era=0, lifespan=(180, 320), growth=0.0048, expansion=1.05,
+        # город идёт вниз ярусами: жильё, склады и вода в камне
+        density=1.9,
         traits=("камнерезы", "рудознатцы", "кузнецы", "хранители рун"),
         tribe_words=_t("Клан", "Род", "Артель"),
         settlement_words=_t("Чертог", "Твердыня", "Рудник", "Город-кузня", "Застава"),
@@ -253,7 +265,9 @@ RACES = (
         noun_m="эльф", noun_f="эльфийка",
         category=CIVILIZED, group="Эльфы", style="elf",
         terrains=_t(FOREST, JUNGLE, HILLS, COAST, PLAIN),
-        first_era=0, lifespan=(600, 1100), growth=0.0032, expansion=0.7,
+        first_era=0, lifespan=(600, 1100), growth=0.0042, expansion=0.9,
+        # селятся широко и редко: роща дороже улицы
+        density=1.0,
         traits=("следопыты", "лучники", "певцы леса", "звездочёты"),
         tribe_words=_t("Ветвь", "Круг", "Сень"),
         settlement_words=_t("Город", "Чертог", "Приют", "Святилище", "Пристань"),
@@ -272,7 +286,9 @@ RACES = (
         adj="Высокоэльфийский", noun_m="высший эльф", noun_f="высшая эльфийка",
         category=CIVILIZED, group="Эльфы", style="high_elf",
         terrains=_t(COAST, ISLANDS, HILLS, PLAIN, MOUNTAIN),
-        first_era=0, lifespan=(900, 1600), growth=0.0028, expansion=0.6,
+        first_era=0, lifespan=(900, 1600), growth=0.0038, expansion=0.85,
+        # город держат малым нарочно
+        density=0.95,
         traits=("чародеи", "звездочёты", "хранители памяти", "зодчие света"),
         tribe_words=_t("Дом", "Круг", "Сень"),
         settlement_words=_t("Город", "Башня", "Чертог", "Святилище", "Гавань"),
@@ -291,7 +307,9 @@ RACES = (
         adj="Тёмноэльфийский", noun_m="тёмный эльф", noun_f="тёмная эльфийка",
         category=CIVILIZED, group="Эльфы", style="dark_elf",
         terrains=_t(UNDERGROUND, SWAMP, FOREST, MOUNTAIN, DESERT),
-        first_era=1, lifespan=(500, 950), growth=0.0034, expansion=0.9,
+        first_era=1, lifespan=(500, 950), growth=0.0044, expansion=1.0,
+        # подземный город тесен и многолюден
+        density=1.35,
         traits=("отравители", "работорговцы", "тенемаги", "паучьи жрецы"),
         tribe_words=_t("Дом", "Гнездо", "Ковен"),
         settlement_words=_t("Город", "Крепость", "Святилище", "Яма", "Подземный город"),
@@ -312,7 +330,7 @@ RACES = (
         noun_m="кошколюд", noun_f="кошколюдка",
         category=CIVILIZED, group="Полулюди", style="catfolk",
         terrains=_t(DESERT, STEPPE, PLAIN, JUNGLE, COAST),
-        first_era=2, lifespan=(50, 75), growth=0.0068, expansion=1.2,
+        first_era=2, lifespan=(50, 75), growth=0.0068, expansion=1.1,
         traits=("караванщики", "воры", "танцоры клинка", "звёздные гадатели"),
         tribe_words=_t("Прайд", "Племя", "Караван"),
         settlement_words=_t("Город", "Оазис", "Торжище", "Застава"),
@@ -331,7 +349,8 @@ RACES = (
         noun_m="волколюд", noun_f="волколюдка",
         category=CIVILIZED, group="Полулюди", style="wolfkin",
         terrains=_t(TUNDRA, FOREST, HILLS, MOUNTAIN, STEPPE),
-        first_era=2, lifespan=(45, 70), growth=0.0072, expansion=1.3,
+        first_era=2, lifespan=(45, 70), growth=0.0072, expansion=1.12,
+        density=0.95,
         traits=("загонщики", "следопыты", "лунные певцы", "воители"),
         tribe_words=_t("Стая", "Племя", "Свора"),
         settlement_words=_t("Городище", "Крепость", "Застава", "Стойбище"),
@@ -350,7 +369,8 @@ RACES = (
         noun_m="медведолюд", noun_f="медведолюдка",
         category=CIVILIZED, group="Полулюди", style="bearkin",
         terrains=_t(MOUNTAIN, FOREST, TUNDRA, HILLS),
-        first_era=2, lifespan=(60, 95), growth=0.0044, expansion=0.85,
+        first_era=2, lifespan=(60, 95), growth=0.0050, expansion=1.0,
+        density=0.9,
         traits=("бортники", "знахари", "берсерки", "хранители очага"),
         tribe_words=_t("Род", "Племя", "Берлога"),
         settlement_words=_t("Городище", "Твердыня", "Застава", "Медвежий двор"),
@@ -369,7 +389,7 @@ RACES = (
         noun_m="лисолюд", noun_f="лисолюдка",
         category=CIVILIZED, group="Полулюди", style="foxkin",
         terrains=_t(FOREST, HILLS, PLAIN, COAST),
-        first_era=2, lifespan=(55, 80), growth=0.0060, expansion=1.15,
+        first_era=2, lifespan=(55, 80), growth=0.0060, expansion=1.08,
         traits=("сказители", "менестрели", "лисьи хитрецы", "травники"),
         tribe_words=_t("Выводок", "Племя", "Круг"),
         settlement_words=_t("Город", "Торжище", "Приют", "Застава"),
@@ -389,6 +409,8 @@ RACES = (
         category=CIVILIZED, group="Полулюди", style="birdkin",
         terrains=_t(MOUNTAIN, ISLANDS, COAST, HILLS, TUNDRA),
         first_era=2, lifespan=(50, 78), growth=0.0050, expansion=1.0,
+        # гнездовья на скалах тесны для многих
+        density=0.85,
         traits=("вестники", "небесные дозорные", "собиратели ветров", "гнездовщики"),
         tribe_words=_t("Стая", "Гнездовье", "Клин"),
         settlement_words=_t("Гнездовье", "Башня", "Утёсный город", "Дозор"),
@@ -411,7 +433,7 @@ RACES = (
         noun_m="ящеролюд", noun_f="ящеролюдка",
         category=BEASTFOLK, group="Зверолюды", style="lizardfolk",
         terrains=_t(SWAMP, JUNGLE, COAST, ISLANDS),
-        first_era=0, lifespan=(70, 120), growth=0.0034, expansion=0.9,
+        first_era=0, lifespan=(70, 120), growth=0.0034, expansion=0.95,
         traits=("болотные охотники", "хранители яиц", "шаманы тины"),
         tribe_words=_t("Выводок", "Племя", "Кладка"),
         chief_titles=_t("вождь", "вождица"),
@@ -424,7 +446,8 @@ RACES = (
         noun_m="змеелюд", noun_f="змеелюдка",
         category=BEASTFOLK, group="Зверолюды", style="serpentfolk",
         terrains=_t(JUNGLE, DESERT, UNDERGROUND, SWAMP),
-        first_era=0, lifespan=(120, 240), growth=0.0022, expansion=0.8,
+        first_era=0, lifespan=(120, 240), growth=0.0030, expansion=0.9,
+        density=1.1,
         traits=("заклинатели", "хранители древних знаний", "ядотворцы"),
         tribe_words=_t("Гнездо", "Племя", "Кольцо"),
         chief_titles=_t("старший", "старшая"),
@@ -450,7 +473,8 @@ RACES = (
         adj="Черепаший", noun_m="черепахолюд", noun_f="черепахолюдка",
         category=BEASTFOLK, group="Зверолюды", style="turtlefolk",
         terrains=_t(COAST, ISLANDS, SWAMP),
-        first_era=1, lifespan=(200, 400), growth=0.0014, expansion=0.5,
+        first_era=1, lifespan=(200, 400), growth=0.0022, expansion=0.7,
+        density=0.9,
         traits=("медлительные мудрецы", "рыболовы", "хранители отмелей"),
         tribe_words=_t("Племя", "Отмель", "Круг"),
         chief_titles=_t("старейший", "старейшая"),
@@ -463,7 +487,7 @@ RACES = (
         adj="Панцирный", noun_m="панцирник", noun_f="панцирница",
         category=BEASTFOLK, group="Зверолюды", style="crabfolk",
         terrains=_t(COAST, ISLANDS, SWAMP),
-        first_era=2, lifespan=(35, 60), growth=0.0062, expansion=0.9,
+        first_era=2, lifespan=(35, 60), growth=0.0062, expansion=0.95,
         traits=("собиратели прибоя", "ломатели раковин", "солевары"),
         tribe_words=_t("Стая", "Племя", "Клешня"),
         chief_titles=_t("вождь", "вождица"),
@@ -480,7 +504,7 @@ RACES = (
         noun_m="орк", noun_f="орчиха",
         category=EVIL, group="Злые расы", style="orc",
         terrains=_t(STEPPE, HILLS, MOUNTAIN, PLAIN, DESERT),
-        first_era=1, lifespan=(35, 60), growth=0.0090, expansion=1.6,
+        first_era=1, lifespan=(35, 60), growth=0.0090, expansion=1.5,
         traits=("налётчики", "костоломы", "почитатели войны"),
         tribe_words=_t("Орда", "Клан", "Свора"),
         camp_words=_t("Лагерь", "Стан", "Костровище", "Орда"),
@@ -494,7 +518,9 @@ RACES = (
         noun_m="гоблин", noun_f="гоблинша",
         category=EVIL, group="Злые расы", style="goblin",
         terrains=_t(UNDERGROUND, HILLS, FOREST, SWAMP),
-        first_era=1, lifespan=(25, 45), growth=0.0120, expansion=1.8,
+        first_era=1, lifespan=(25, 45), growth=0.0120, expansion=1.7,
+        # нора тесна и полна
+        density=1.4,
         traits=("падальщики", "ловушечники", "крикуны"),
         tribe_words=_t("Свора", "Выводок", "Шайка"),
         camp_words=_t("Логово", "Нора", "Яма", "Гнездовище"),
@@ -508,7 +534,9 @@ RACES = (
         noun_m="тролль", noun_f="троллиха",
         category=EVIL, group="Злые расы", style="troll",
         terrains=_t(MOUNTAIN, SWAMP, TUNDRA, UNDERGROUND),
-        first_era=0, lifespan=(150, 300), growth=0.0020, expansion=0.6,
+        first_era=0, lifespan=(150, 300), growth=0.0028, expansion=0.7,
+        # живут порознь: один тролль на долину
+        density=0.7,
         traits=("камнееды", "одиночки", "пожиратели"),
         tribe_words=_t("Род", "Свора"),
         camp_words=_t("Логово", "Пещера", "Мостовище"),
@@ -523,6 +551,7 @@ RACES = (
         category=EVIL, group="Злые расы", style="ogre",
         terrains=_t(HILLS, MOUNTAIN, PLAIN, TUNDRA),
         first_era=2, lifespan=(50, 90), growth=0.0048, expansion=0.9,
+        density=0.7,
         traits=("дубиноносцы", "обжоры", "костоломы"),
         tribe_words=_t("Свора", "Род"),
         camp_words=_t("Стан", "Логово", "Костровище"),
@@ -536,7 +565,9 @@ RACES = (
         noun_m="кобольд", noun_f="кобольдиха",
         category=EVIL, group="Злые расы", style="kobold",
         terrains=_t(UNDERGROUND, MOUNTAIN, HILLS, DESERT),
-        first_era=2, lifespan=(20, 40), growth=0.0130, expansion=1.7,
+        first_era=2, lifespan=(20, 40), growth=0.0130, expansion=1.6,
+        # ходы под горой набиты доверху
+        density=1.5,
         traits=("рудокопы-воришки", "ловушечники", "сторожа драконьих троп"),
         tribe_words=_t("Выводок", "Свора"),
         camp_words=_t("Нора", "Штольня", "Логово", "Яма"),
@@ -550,7 +581,7 @@ RACES = (
         noun_m="гнолл", noun_f="гноллиха",
         category=EVIL, group="Злые расы", style="gnoll",
         terrains=_t(STEPPE, DESERT, PLAIN, HILLS),
-        first_era=2, lifespan=(30, 50), growth=0.0100, expansion=1.5,
+        first_era=2, lifespan=(30, 50), growth=0.0100, expansion=1.4,
         traits=("людоеды", "хохочущие охотники", "работорговцы"),
         tribe_words=_t("Стая", "Свора"),
         camp_words=_t("Стан", "Логово", "Костровище", "Свалка"),

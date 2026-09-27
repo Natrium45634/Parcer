@@ -113,8 +113,9 @@ def great_names(world, out, count: int = 5) -> None:
                 % ("а" if figure.sex == "f" else "", weight.peak_level,
                    weight.peak_year))
         if weight.roles:
-            out("       для истории он%s: %s"
-                % ("а" if figure.sex == "f" else "", ", ".join(weight.roles)))
+            out("       в историю вош%s как: %s"
+                % ("ла" if figure.sex == "f" else "ёл",
+                   ", ".join(renown_cat.role_names(weight.roles, figure.sex))))
         if weight.influence:
             out("       чем повлиял%s: %s"
                 % ("а" if figure.sex == "f" else "",
@@ -134,13 +135,18 @@ def great_names(world, out, count: int = 5) -> None:
                " — великого забыли" if weight.forgotten else ""))
         alive = [item for item in weight.footprint if item.get("жив")]
         dead = [item for item in weight.footprint if not item.get("жив")]
+        # О потомках говорят иначе: род продолжается или прервался.
+        kin = renown_cat.FOOT_KIN
         if alive:
             out("       стоит до сих пор: %s"
                 % "; ".join("%s — %s" % (item.get("вид", ""), item.get("что", ""))
                             for item in alive[:4]))
         if dead:
             out("       этого больше нет: %s"
-                % "; ".join("%s — %s" % (item.get("вид", ""), item.get("что", ""))
+                % "; ".join("%s — %s%s"
+                            % (item.get("вид", ""), item.get("что", ""),
+                               " (род прервался)" if item.get("вид") == kin
+                               else "")
                             for item in dead[:3]))
         for voice in (renown_cat.AS_WAS, renown_cat.AS_JUDGED):
             line = (weight.voices or {}).get(voice)

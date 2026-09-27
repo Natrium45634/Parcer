@@ -35,11 +35,13 @@ TRIBE_CAPACITY = 5200.0
 CROWD_POWER = 0.55
 
 # Доли расколов по категориям рас. Без этого зверолюды и злые расы —
-# самые плодовитые — вытеснили бы из летописи все прочие народы.
+# самые плодовитые — вытеснили бы из летописи все прочие народы. Но и
+# слишком малая доля им не годится: орда из двадцати тысяч на весь мир —
+# это не орда, а шайка, и нашествие от неё не страшнее набега.
 CATEGORY_SPLIT_WEIGHT = {
-    races_mod.CIVILIZED: 0.5,
-    races_mod.BEASTFOLK: 0.3,
-    races_mod.EVIL: 0.2,
+    races_mod.CIVILIZED: 0.42,
+    races_mod.BEASTFOLK: 0.32,
+    races_mod.EVIL: 0.26,
 }
 # Народ просыпается народом, а не горсткой. Сорок душ — это семья,
 # и первые пятьсот лет мира уходили на то, чтобы эта семья доросла до
@@ -272,6 +274,9 @@ def _tribe_capacity(ctx, tribe, crowd: int, year: int) -> float:
     race = races_mod.get_race(tribe.race_id)
     region = world.regions.get(tribe.region_id)
     capacity = TRIBE_CAPACITY * (region.capacity if region else 1.0)
+    # Живут на одной земле по-разному: гоблинская нора набита доверху, а
+    # тролли сидят по одному на долину.
+    capacity *= race.density
     if race.category == races_mod.BEASTFOLK:
         capacity *= 1.4          # зверолюдам города не нужны, племена крупнее
     capacity *= ctx.fate_bounty(year)

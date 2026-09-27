@@ -1134,18 +1134,24 @@ def _renown_block(world, weight, figure, cat, texts) -> list:
                     % (weight.peak_level, weight.peak_year))
     rows.append("      слава при жизни %d из ста, помнят теперь %d"
                 % (weight.fame, weight.memory))
+    she = figure.sex == "f"
     rows.append("      незаменимость: %.2f — %s"
                 % (weight.unique,
-                   "заменить его было бы некем" if weight.unique >= 0.55
-                   else "на его месте мог оказаться другой"))
+                   ("заменить её было бы некем" if she
+                    else "заменить его было бы некем") if weight.unique >= 0.55
+                   else ("на её месте могла оказаться другая" if she
+                         else "на его месте мог оказаться другой")))
     if weight.influence:
-        rows.append("      чем повлиял: %s"
-                    % ", ".join("%s %d" % (name, value)
-                                for name, value in sorted(
-                                    weight.influence.items(),
-                                    key=lambda p: (-p[1], p[0]))[:6]))
+        rows.append("      чем повлиял%s: %s"
+                    % ("а" if she else "",
+                       ", ".join("%s %d" % (name, value)
+                                 for name, value in sorted(
+                                     weight.influence.items(),
+                                     key=lambda p: (-p[1], p[0]))[:6])))
     if weight.roles:
-        rows.append("      для истории он: %s" % ", ".join(weight.roles))
+        rows.append("      в историю вош%s как: %s"
+                    % ("ла" if figure.sex == "f" else "ёл",
+                       ", ".join(cat.role_names(weight.roles, figure.sex))))
     if weight.destiny:
         rows.append("      судьба: %s — %s"
                     % (cat.destiny_name(weight.destiny, figure.sex),
@@ -1159,16 +1165,23 @@ def _renown_block(world, weight, figure, cat, texts) -> list:
     rows.append("")
 
     if weight.footprint:
-        rows.append("      ЧТО ПОСЛЕ НЕГО ОСТАЛОСЬ")
+        rows.append("      ЧТО ПОСЛЕ %s ОСТАЛОСЬ" % ("НЕЁ" if she else "НЕГО"))
         for item in weight.footprint:
+            # У потомков свои слова: «этого больше нет» о живых людях не
+            # говорят, а о прервавшемся роде говорят именно так.
+            if item.get("вид") == cat.FOOT_KIN:
+                state = ("род продолжается" if item.get("жив")
+                         else "род прервался")
+            else:
+                state = ("стоит до сих пор" if item.get("жив")
+                         else "этого больше нет")
             rows.append("        %-14s %-34s %s"
                         % (item.get("вид", ""), str(item.get("что", ""))[:34],
-                           "стоит до сих пор" if item.get("жив")
-                           else "этого больше нет"))
+                           state))
         rows.append("")
 
     if weight.voices:
-        rows.append("      ШЕСТЬ ГОЛОСОВ О НЁМ")
+        rows.append("      ШЕСТЬ ГОЛОСОВ О %s" % ("НЕЙ" if she else "НЁМ"))
         for voice in cat.VOICES:
             line = weight.voices.get(voice)
             if line:

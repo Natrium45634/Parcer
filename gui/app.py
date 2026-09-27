@@ -1304,9 +1304,11 @@ class ChronicleApp(tk.Tk):
             if weight is not None:
                 from worldgen import renown as weigh_cat
                 lines.extend(["", "ВЕС В ИСТОРИИ", "-" * 60])
-                lines.append("  ступень %d из десяти — %s"
+                lines.append("  ступень %d из десяти — %s: %s"
                              % (weight.level,
-                                weigh_cat.LEVEL_NAMES.get(weight.level, "")))
+                                weigh_cat.LEVEL_NAMES.get(weight.level, ""),
+                                weigh_cat.level_about(weight.level,
+                                                      entity.sex)))
                 if weight.peak_level != weight.level:
                     lines.append("  выше всего стоял на %d (%d год)"
                                  % (weight.peak_level, weight.peak_year))
@@ -1318,9 +1320,16 @@ class ChronicleApp(tk.Tk):
                         for name, value in sorted(weight.influence.items(),
                                                   key=lambda p: -p[1])[:6]))
                 if weight.roles:
-                    lines.append("  для истории: %s" % ", ".join(weight.roles))
+                    lines.append("  в историю вош%s как: %s"
+                                 % ("ла" if entity.sex == "f" else "ёл",
+                                    ", ".join(weigh_cat.role_names(
+                                        weight.roles, entity.sex))))
                 if weight.destiny:
-                    lines.append("  судьба: %s" % weight.destiny)
+                    lines.append("  судьба: %s — %s"
+                                 % (weigh_cat.destiny_name(weight.destiny,
+                                                           entity.sex),
+                                    weigh_cat.destiny_about(weight.destiny,
+                                                            entity.sex)))
                 for item in weight.footprint[:8]:
                     lines.append("  осталось: %-12s %-30s %s"
                                  % (item.get("вид", ""),

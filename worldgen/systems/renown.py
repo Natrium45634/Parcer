@@ -22,10 +22,13 @@
 
 from __future__ import annotations
 
+import math
+
 from .. import artifacts as artifacts_cat
 from .. import lifepaths as life_cat
 from .. import tales as tales_cat
 from .. import narrative_renown as texts
+from .. import races as races_mod
 from .. import renown as cat
 from ..models import ACTIVE, RUINED
 from ..timeline import plural
@@ -42,6 +45,17 @@ FADE = 0.86                # во столько раз тает память з
 RAISE_RATE = 0.25
 LOWER_RATE = 0.07
 FLOOR_GAP = 3
+# Убыль веса дел: сумма возводится в эту степень, и сотое дело добавляет
+# меньше первого. Без неё летопись великих состояла из эльфов и дворфов —
+# у них просто больше лет, чтобы набрать дел.
+DEED_DAMP = 0.88
+# И убыль за долгий век: дела тысячелетнего эльфа приводятся к тому, что
+# он успел за свой век, а не за человеческий.
+AGE_DAMP = 0.35
+# Насколько слышно человека в его народе: от горстки до миллионов.
+HEARD_LOW = 0.65
+HEARD_STEP = 0.17
+HEARD_HIGH = 1.25
 
 
 def upkeep(ctx, year: int, period: int) -> None:
@@ -50,6 +64,9 @@ def upkeep(ctx, year: int, period: int) -> None:
         return
     rng = ctx.rng("renown", year)
     index = _index(world)
+    # Сколько душ у каждого народа в этот век: слава разносится людьми, и
+    # без этого числа её не посчитать.
+    souls = world.population_by_race()
 
     # 1. Имена тех, кто умер за этот век.
     fresh = 0
@@ -66,7 +83,7 @@ def upkeep(ctx, year: int, period: int) -> None:
             continue
         if world.renown_of(figure.id) is not None:
             continue
-        if _weigh(ctx, rng, index, figure, year) is not None:
+        if _weigh(ctx, rng, index, figure, year, souls) is not None:
             fresh += 1
         if fresh > 400:
             break
@@ -147,9 +164,23 @@ def _index(world) -> dict:
 # Счёт дел
 # ---------------------------------------------------------------------------
 
-def _weigh(ctx, rng, index, figure, year: int):
-    """Собрать вес человека из того, что он на самом деле оставил."""
+def _weigh(ctx, rng, index, figure, year: int, souls=None):
+    """Собрать вес человека из того, что он на самом деле оставил.
+
+    Три поправки держат счёт честным между расами. Долгий век: дела и
+    годы приводятся к тому, что человек успел за свой век, а не за
+    чужой, — тысячелетнее правление эльфа весит больше человеческого
+    тридцатилетнего, но не в тридцать раз. Десятое дело: сумма дел идёт
+    с убылью, иначе тот, кто всю жизнь был при событиях, обгоняет того,
+    кто одно событие и совершил. Слышимость: славу разносят люди, и о
+    человеке из народа в три миллиона узнают дальше, чем о человеке из
+    народа в тридцать тысяч, — не потому, что он сделал больше.
+    """
     world = ctx.world
+    race = races_mod.get_race(figure.race_id)
+    span = 70.0
+    if race is not None and race.lifespan:
+        span = max(20.0, (race.lifespan[0] + race.lifespan[1]) / 2.0)
     score = 0.0
     influence = {}
     foots = []
@@ -168,16 +199,28 @@ def _weigh(ctx, rng, index, figure, year: int):
 
     # --- события, где он действовал -----------------------------------
     loud = 0
-    for event_id in figure.deeds[:120]:
+    raw = 0.0
+    deeds = {}
+    for event_id in figure.deeds[:160]:
         event = world.event(event_id)
         if event is None:
             continue
         weight = (event.importance ** 1.7) * 0.5
-        score += weight
-        influence[_event_influence(event.kind)] = \
-            influence.get(_event_influence(event.kind), 0.0) + weight
+        raw += weight
+        where = _event_influence(event.kind)
+        deeds[where] = deeds.get(where, 0.0) + weight
         if event.importance >= 4:
             loud += 1
+    # Двадцатое дело весит меньше первого, а долгий век сам по себе даёт
+    # больше дел: эльф успевает вдесятеро больше человека просто потому,
+    # что живёт вдесятеро дольше. Поэтому накопленное приводится к одной
+    # мерке — к тому, что человек успел за свой век, а не за чужой.
+    age_scale = (70.0 / span) ** AGE_DAMP
+    if raw > 0:
+        damp = (raw ** DEED_DAMP) / raw * age_scale
+        score += raw * damp
+        for where, value in deeds.items():
+            influence[where] = influence.get(where, 0.0) + value * damp
 
     # --- что после него осталось ---------------------------------------
     for polity in index["держава"].get(figure.id, ())[:4]:
@@ -218,12 +261,17 @@ def _weigh(ctx, rng, index, figure, year: int):
                     - reign.start.year)
         ruled += years
         polity = world.polities.get(reign.polity_id)
-        value = 3.0 + years * 0.22
+        # Доля жизни, отданной престолу, весит больше самих годов: тот,
+        # кто правил полжизни, был государем по-настоящему, сколько бы
+        # лет его раса ни жила. И сверх того понемногу за сами годы —
+        # долгое правление всё же переменило больше.
+        value = (3.0 + 14.0 * min(1.0, years / span)
+                 + 4.0 * (max(0, years) / 100.0) ** 0.4)
         if polity is not None:
             value += min(12.0, len(polity.settlement_ids) * 0.5)
         score += value
         influence[cat.POWER] = influence.get(cat.POWER, 0.0) + value
-    if ruled >= 25:
+    if ruled >= max(15.0, span * 0.22):
         roles.append("самовластец" if figure.alignment <= -2 else "хранитель")
 
     # --- законы: их пишут не все ---------------------------------------
@@ -266,6 +314,16 @@ def _weigh(ctx, rng, index, figure, year: int):
                               "id": "", "жив": True})
                 score += 2.0
                 break
+
+    # Слава разносится людьми: у многочисленного народа о человеке знают
+    # дальше. Поправка мягкая — от 0.72 у горстки до 1.15 у миллионов, —
+    # но её хватает, чтобы летопись не состояла из одних долгожителей
+    # малых народов.
+    if souls:
+        reach = int(souls.get(figure.race_id, 0))
+        heard = HEARD_LOW + HEARD_STEP * max(0.0, math.log10(max(2000, reach))
+                                             - 3.3)
+        score *= min(HEARD_HIGH, heard)
 
     if score < MIN_SCORE:
         return None
@@ -397,7 +455,7 @@ def _roles(figure, weight, roles: list, path) -> list:
     out = list(roles)
     if weight.level >= 7 and "спаситель" not in out:
         out.append("спаситель" if figure.alignment >= 1
-                   else "приносящий беду")
+                   else "вестник беды")
     if figure.death_cause and "убит" in figure.death_cause \
             and figure.alignment >= 1 and "мученик" not in out:
         out.append("мученик")

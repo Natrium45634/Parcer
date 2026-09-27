@@ -436,6 +436,10 @@ def upkeep(ctx, year: int, period: int) -> None:
         race = races_mod.get_race(settlement.race_id)
         region = world.regions.get(settlement.region_id)
         capacity = max(1.0, 7000.0 * (region.capacity if region else 1.0))
+        # Земля кормит одинаково, а живут на ней по-разному: дворфский
+        # город уходит вниз ярусами и держит вдвое больше людского при
+        # той же округе, эльфийский стоит редким и малым.
+        capacity *= race.density
         capacity *= bounty
         # Землю город делит с соседями — но легко: ёмкость земли и так
         # считается на один город, а не на всю округу сразу.

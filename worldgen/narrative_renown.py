@@ -35,14 +35,17 @@ def man_ref(figure) -> str:
 # ---------------------------------------------------------------------------
 
 LEVEL_FRAMES = (
-    "Вес его в истории — %(level)d из десяти: %(about)s.",
-    "По счёту дел это %(level)d ступень из десяти — %(about)s.",
-    "История ставит его на %(level)d ступень: %(about)s.",
+    ("Вес его в истории — %(level)d из десяти: %(about)s.",
+     "Вес её в истории — %(level)d из десяти: %(about)s."),
+    ("По счёту дел это %(level)d ступень из десяти — %(about)s.",
+     "По счёту дел это %(level)d ступень из десяти — %(about)s."),
+    ("История ставит его на %(level)d ступень: %(about)s.",
+     "История ставит её на %(level)d ступень: %(about)s."),
 )
 
 
 def level_line(rng, level: int, sex: str = "m") -> str:
-    return rng.choice(LEVEL_FRAMES) % {
+    return cat.in_sex(LEVEL_FRAMES, rng, sex) % {
         "level": level, "about": cat.level_about(level, sex)}
 
 
@@ -73,24 +76,29 @@ def review_line(rng, before: int, after: int, why: str,
 # ---------------------------------------------------------------------------
 
 ROLE_FRAMES = (
-    "Для истории он %(role)s: %(about)s.",
-    "Чем он оказался для истории — %(role)s, %(about)s.",
+    ("В историю он вошёл как %(role)s: %(about)s.",
+     "В историю она вошла как %(role)s: %(about)s."),
+    ("Чем он оказался для истории — %(role)s: %(about)s.",
+     "Чем она оказалась для истории — %(role)s: %(about)s."),
 )
 
 
-def role_line(rng, role: str) -> str:
-    return rng.choice(ROLE_FRAMES) % {"role": role,
-                                      "about": cat.ROLE_ABOUT.get(role, "")}
+def role_line(rng, role: str, sex: str = "m") -> str:
+    return cat.in_sex(ROLE_FRAMES, rng, sex) % {
+        "role": cat.role_name(role, sex),
+        "about": cat.role_about(role, sex)}
 
 
 DESTINY_FRAMES = (
-    "Жизнь его вышла такой формы: %(key)s — %(about)s.",
-    "Судьба его из тех, что зовут «%(key)s»: %(about)s.",
+    ("Жизнь его вышла такой формы: %(key)s — %(about)s.",
+     "Жизнь её вышла такой формы: %(key)s — %(about)s."),
+    ("Судьба его из тех, что зовут «%(key)s»: %(about)s.",
+     "Судьба её из тех, что зовут «%(key)s»: %(about)s."),
 )
 
 
 def destiny_line(rng, key: str, sex: str = "m") -> str:
-    return rng.choice(DESTINY_FRAMES) % {
+    return cat.in_sex(DESTINY_FRAMES, rng, sex) % {
         "key": cat.destiny_name(key, sex),
         "about": cat.destiny_about(key, sex)}
 
@@ -160,13 +168,15 @@ DEEDS_AS_WAS = (
 # ---------------------------------------------------------------------------
 
 CLIMAX_FRAMES = (
-    "Вершина его жизни — %(what)s (%(year)d год).",
-    "Выше всего он поднялся в %(year)d году: %(what)s.",
+    ("Вершина его жизни — %(what)s (%(year)d год).",
+     "Вершина её жизни — %(what)s (%(year)d год)."),
+    ("Выше всего он поднялся в %(year)d году: %(what)s.",
+     "Выше всего она поднялась в %(year)d году: %(what)s."),
 )
 
 
-def climax_line(rng, what: str, year: int) -> str:
-    return rng.choice(CLIMAX_FRAMES) % {"what": what, "year": year}
+def climax_line(rng, what: str, year: int, sex: str = "m") -> str:
+    return cat.in_sex(CLIMAX_FRAMES, rng, sex) % {"what": what, "year": year}
 
 
 def aura_line(key: str, sex: str = "m") -> str:

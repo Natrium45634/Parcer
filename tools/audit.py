@@ -244,6 +244,56 @@ def m_myth_traces(world):
     return sum(len(myth.get("следы", ())) for myth in world.myths)
 
 
+# --- расы ---------------------------------------------------------------------
+# Мир, где одна раса заняла всё, а от прочих осталось по деревне, —
+# это не история мира, а история одного народа. Меры ниже и есть
+# записанный образ: рас в мире много, у главных из них есть числом
+# народ, и вымирание — исключение, а не правило.
+
+def _race_souls(world):
+    from worldgen.races import RACES_BY_ID
+    souls = world.population_by_race()
+    return {race_id: value for race_id, value in souls.items()
+            if race_id in RACES_BY_ID
+            and RACES_BY_ID[race_id].first_era < 9 and value > 0}
+
+
+def m_races_alive(world):
+    return len(_race_souls(world))
+
+
+def m_races_gone(world):
+    return len(world.notes.get("народов больше нет") or {})
+
+
+def m_race_top_share(world):
+    souls = _race_souls(world)
+    if not souls:
+        return 0.0
+    return _share(max(souls.values()), sum(souls.values()))
+
+
+def m_races_weighty(world):
+    """Сколько рас держит хотя бы сотую долю мира."""
+    souls = _race_souls(world)
+    total = sum(souls.values())
+    if not total:
+        return 0
+    return sum(1 for value in souls.values() if value >= total * 0.01)
+
+
+def m_race_towns(world):
+    """У скольких оседлых рас есть хотя бы по три своих города."""
+    from worldgen.races import RACES_BY_ID
+    counts = {}
+    for settlement_id in world.active_settlements:
+        race_id = world.settlements[settlement_id].race_id
+        counts[race_id] = counts.get(race_id, 0) + 1
+    return sum(1 for race_id, count in counts.items()
+               if count >= 3 and race_id in RACES_BY_ID
+               and RACES_BY_ID[race_id].settles)
+
+
 # --- вес людей ---------------------------------------------------------------
 
 def m_weighed(world):
@@ -357,6 +407,16 @@ MEASURES = (
     Measure("вес", "тяжёлых имён без титула", m_weigh_untitled, 1, None,
             "штук", "вес считается по делам, а не по должности",
             min_years=3000),
+    Measure("расы", "дожило до конца", m_races_alive, 8, None, "из 21",
+            "мир не сводится к трём народам"),
+    Measure("расы", "ушло из мира", m_races_gone, None, 7, "штук",
+            "вымирание — исключение, а не правило", min_years=3000),
+    Measure("расы", "доля крупнейшей", m_race_top_share, None, 0.55, "доля",
+            "одна раса не занимает весь мир"),
+    Measure("расы", "держат сотую долю мира", m_races_weighty, 5, None,
+            "штук", "у главных народов есть числом народ"),
+    Measure("расы", "оседлых с тремя городами", m_race_towns, 4, None, "штук",
+            "города строит не одна раса"),
 )
 
 
