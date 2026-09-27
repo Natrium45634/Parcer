@@ -3490,6 +3490,18 @@ def render_disasters(world) -> str:
 
     rows = ["БЕДА И ТО, ЧТО ОТ НЕЁ ОСТАЛОСЬ", ""]
 
+    # --- правила мира, которые переменила беда ---------------------------
+    changed = world.notes.get("правила мира") or []
+    if changed:
+        rows.append("  Правила мира, которые переменила беда")
+        for item in changed:
+            rows.append("    %d — %s" % (int(item.get("год", 0)),
+                                         item.get("что", "")))
+            if item.get("беда"):
+                rows.append("        переменила беда по имени «%s»"
+                            % item["беда"])
+        rows.append("")
+
     # --- времена бед ---------------------------------------------------
     eras = sorted((item for item in world.crisis_eras.values() if item.name),
                   key=lambda item: item.start.year)
@@ -3531,6 +3543,11 @@ def render_disasters(world) -> str:
             if calamity.cause_year and calamity.cause != dis.UNKNOWN_CAUSE:
                 line += ", тянется с %d года" % calamity.cause_year
             rows.append(line)
+            depth = dis.DEPTHS.get(calamity.depth)
+            if depth is not None:
+                rows.append("        глубина: %s — %s" % depth)
+            if calamity.scale:
+                rows.append("        размах: %s" % calamity.scale)
             if calamity.cause_hidden and not calamity.cause_known:
                 rows.append("        а на деле: %s — и мир этого не узнал"
                             % calamity.cause_hidden)
@@ -3566,6 +3583,9 @@ def render_disasters(world) -> str:
             if calamity.gains:
                 rows.append("        поднялись на этом: %s"
                             % "; ".join(calamity.gains[:3]))
+            for note in calamity.notes:
+                if note.startswith(("исход из земли", "переменилось правило")):
+                    rows.append("        %s" % note)
         rows.append("")
 
     # --- фронт -----------------------------------------------------------

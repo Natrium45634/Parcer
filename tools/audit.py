@@ -410,6 +410,23 @@ def m_habits(world):
     return _share(with_habit, len(rows))
 
 
+def m_rules_changed(world):
+    """Правил мира, переменившихся от самой глубокой беды."""
+    return len(world.notes.get("правила мира") or [])
+
+
+def m_exodus(world):
+    """Исходов из разорённых земель: беда не только убивает, но и гонит."""
+    return sum(1 for calamity in world.calamities.values()
+               for note in calamity.notes if note.startswith("исход из земли"))
+
+
+def m_old_enemies(world):
+    """Держав, у которых после беды завёлся старый враг."""
+    return sum(1 for polity in world.polities.values()
+               for note in polity.notes if note.startswith("старый враг"))
+
+
 # --- расы ---------------------------------------------------------------------
 # Мир, где одна раса заняла всё, а от прочих осталось по деревне, —
 # это не история мира, а история одного народа. Меры ниже и есть
@@ -628,6 +645,12 @@ MEASURES = (
             "земля учится: дамбы, амбары, стены, карантин"),
     Measure("наука", "городов с привычкой", m_habits, 0.1, None, "доля",
             "уклад держат веками, забыв причину"),
+    Measure("мир", "правил переменилось", m_rules_changed, None, 5, "из 7",
+            "мир меняется от самых глубоких бед, но не каждый век"),
+    Measure("мир", "исходов из земель", m_exodus, 1, None, "штук",
+            "разорённая земля пустеет не только мёртвыми", min_years=3000),
+    Measure("мир", "держав со старым врагом", m_old_enemies, 1, None, "штук",
+            "после беды остаётся тот, кто не пришёл", min_years=3000),
 )
 
 

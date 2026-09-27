@@ -574,7 +574,71 @@ def versions(rng, calamity, told: dict) -> tuple:
             " ".join(lines))
 
 
+# ---------------------------------------------------------------------------
+# Правило мира, исход и старый враг
+# ---------------------------------------------------------------------------
+
+RULE_FRAMES = (
+    "После этого в мире переменилось само правило: %(rule)s.",
+    "Считают, что с того года мир стал другим: %(rule)s.",
+    "И это оказалось не последствием, а переменой: %(rule)s.",
+)
+
+RULE_TAILS = (
+    "Спорить об этом было не с кем: видели все.",
+    "Старые книги с того года стали врать, и переписать их не сумели.",
+    "Те, кто помнил прежний порядок, к концу века вымерли.",
+    "Дальше и вера, и обычай ссылались уже на это.",
+)
+
+
+def rule_changed(rng, calamity, rule: str, world) -> tuple:
+    """Беда, после которой в мире переменилось само правило."""
+    where = region_list(world, calamity.region_ids, limit=3)
+    text = "%s %s Всё это — беда по имени «%s», прошедшая по землям %s." % (
+        cap(rng.choice(RULE_FRAMES) % {"rule": rule}),
+        rng.choice(RULE_TAILS), calamity.name, where)
+    return ("Переменилось правило мира: %s" % rule, text)
+
+
+REFUGE_FRAMES = (
+    "Из земли по имени %(where)s ушли %(souls)s — и ушли не назад.",
+    "%(where_cap)s опустела не только мёртвыми: %(souls)s снялись и пошли "
+    "искать, где живут.",
+    "Уходили семьями и целыми концами: из земли по имени %(where)s ушли "
+    "%(souls)s.",
+)
+
+REFUGE_HOST = (
+    "Приняли их в городе по имени %(host)s, и город стал больше себя.",
+    "Дошли до города по имени %(host)s — дальше идти было некуда.",
+    "Город по имени %(host)s открыл ворота, и об этом потом спорили.",
+)
+
+REFUGE_TAILS = (
+    "Своими их там считали не сразу и не все.",
+    "Через два поколения об этом помнили только по наречию в одном конце "
+    "города.",
+    "Тем, кто пришёл, дела не хватило, и это вышло городу боком.",
+    "Половину пути не прошли, и о них летопись не говорит.",
+    "Из тех, кто дошёл, назад не вернулся почти никто.",
+)
+
+
+def refuge(rng, calamity, region, host, leaving: int, world) -> tuple:
+    """Исход из разорённой земли и город, который его принял."""
+    where = region.name if region is not None else "—"
+    data = {"where": where, "where_cap": cap(where),
+            "souls": souls(leaving), "host": host.name}
+    text = "%s %s %s Гнала их беда по имени «%s»." % (
+        cap(rng.choice(REFUGE_FRAMES) % data),
+        rng.choice(REFUGE_HOST) % data, rng.choice(REFUGE_TAILS),
+        calamity.name)
+    return ("Исход: %s" % where, text)
+
+
 __all__ = ["omen", "prevented", "turn_point", "phase_turn", "response",
+           "rule_changed", "refuge",
            "era_closed", "versions",
            "front_hold", "front_step", "front_city", "front_end",
            "scar_left", "scar_turn", "lore_lost", "lore_fragments",

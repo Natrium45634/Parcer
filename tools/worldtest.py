@@ -1843,8 +1843,10 @@ def audit(world) -> list:
             note("шрамы не живут: состояний всего %d" % len(states))
         for scar in scars:
             region = world.regions.get(scar.region_id)
-            if region is None or region.drowned:
-                bad("шрам «%s» остался в земле, которой нет" % scar.name)
+            if (region is None or region.drowned) \
+                    and scar.state != dis_cat.SCAR_FORGOTTEN:
+                bad("шрам «%s» остался в земле, которой нет, и мир его всё "
+                    "ещё помнит" % scar.name)
                 break
     elif world.total_years >= 3000 and len(calamities) >= 20:
         note("беды этого мира не оставили на земле ни следа")

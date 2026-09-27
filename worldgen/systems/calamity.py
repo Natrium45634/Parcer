@@ -1062,6 +1062,11 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
     # что шли до неё без передышки.
     disaster_sys.tell_versions(ctx, calamity, spec, rng, year, date)
     disaster_sys.era_watch(ctx, calamity, year, date)
+    # Беда пятой глубины переменяет само правило мира; всякая тяжёлая
+    # оставляет старого врага и того, кого помнят добром; а разорённая
+    # земля пустеет не только мёртвыми.
+    disaster_sys.change_rule(ctx, calamity, rng, year, date)
+    disaster_sys.old_enemy(ctx, calamity, spec, rng, year)
 
     world.end_calamity(calamity, date, cat.RESOLUTIONS.get(
         resolution, ("кончилось", False))[0])
@@ -1083,6 +1088,9 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
     disaster_sys.close_front(
         ctx, calamity, rng, year, date,
         won=bool(cat.RESOLUTIONS.get(resolution, ("", False))[1]))
+    # Исход считаем после фронта: бегут и из разорённых земель, и из тех,
+    # что остались за чужими.
+    disaster_sys.refugees(ctx, calamity, rng, year, date)
 
     _leave_relics(ctx, calamity, spec, rng, year, date)
     # Земля не поднимается сразу: следующая такая беда ляжет тяжелее.

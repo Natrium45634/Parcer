@@ -1473,9 +1473,11 @@ def check_disasters(world, seed: str) -> list:
             problems.append("сид «%s»: шрам «%s» стоит в пустой земле"
                             % (seed, scar.name))
             break
-        if region.drowned:
-            problems.append("сид «%s»: шрам «%s» остался под водой"
-                            % (seed, scar.name))
+        if region.drowned and scar.state != dis.SCAR_FORGOTTEN:
+            # Утонувшая земля забирает шрам с собой: помнить его некому.
+            # Не забытый шрам под водой — это недоведённая запись.
+            problems.append("сид «%s»: шрам «%s» остался под водой, а мир его "
+                            "всё ещё помнит" % (seed, scar.name))
             break
         if scar.state not in dis.SCAR_STATES:
             problems.append("сид «%s»: у шрама «%s» неведомое состояние «%s»"
@@ -1570,6 +1572,33 @@ def check_disasters(world, seed: str) -> list:
                 problems.append("сид «%s»: у земли %s уязвимость «%s» вне меры"
                                 % (seed, region.name, kind))
                 break
+
+    # Правило мира переменяется один раз и только самой глубокой бедой.
+    changed = world.notes.get("правила мира") or []
+    seen = set()
+    for row in changed:
+        rule = row.get("что", "")
+        if rule not in dis.WORLD_RULES:
+            problems.append("сид «%s»: переменилось неведомое правило мира "
+                            "«%s»" % (seed, rule))
+            break
+        if rule in seen:
+            problems.append("сид «%s»: правило мира «%s» переменилось дважды"
+                            % (seed, rule))
+            break
+        seen.add(rule)
+        if int(row.get("год", 0)) > world.total_years:
+            problems.append("сид «%s»: правило мира переменилось после конца "
+                            "истории" % seed)
+            break
+    deep = {item.name for item in world.calamities.values()
+            if item.depth >= 5}
+    for row in changed:
+        if row.get("беда") and row["беда"] not in deep:
+            problems.append("сид «%s»: правило мира переменила беда «%s», "
+                            "которая для этого недостаточно глубока"
+                            % (seed, row["беда"]))
+            break
 
     return problems
 

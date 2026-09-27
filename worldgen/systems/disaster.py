@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from .. import catastrophe as cat
 from .. import disaster as dis
+from .. import history
 from .. import narrative_disaster as texts
 from ..models import ACTIVE
 
@@ -1069,6 +1070,14 @@ def age_scars(ctx, year: int, period: int) -> None:
     """Шрам живёт своей жизнью, и живёт он дольше тех, кто его помнит."""
     world = ctx.world
     for scar in list(world.scars.values()):
+        # Земля может уйти под воду и после того, как на ней остался шрам:
+        # тогда шрам уходит вместе с ней, и помнить его больше некому.
+        region = world.regions.get(scar.region_id)
+        if region is None or region.drowned:
+            if scar.state != dis.SCAR_FORGOTTEN:
+                scar.state = dis.SCAR_FORGOTTEN
+                scar.notes.append("%d: ушёл под воду вместе с землёй" % year)
+            continue
         if scar.state == dis.SCAR_FORGOTTEN:
             continue
         age = year - scar.created.year
@@ -1715,6 +1724,175 @@ def _era_voices(world, era, rng) -> list:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Онтологическая беда: та, после которой в мире переменилось правило
+# ---------------------------------------------------------------------------
+# Пять ступеней глубины кончаются пятой: поверхностная, поколенческая,
+# историческая, цивилизационная — и онтологическая. Последняя меняет не
+# державу и не уклад, а само правило мира. Это не новая физика: это
+# запись в памяти мира, на которую дальше ссылаются вера, обычай и
+# летопись.
+
+def change_rule(ctx, calamity, rng, year: int, date) -> str:
+    """Беда пятой глубины переменяет правило мира."""
+    if calamity.depth < 5:
+        return ""
+    world = ctx.world
+    changed = world.notes.setdefault("правила мира", [])
+    taken = {row.get("что") for row in changed}
+    free = [rule for rule in dis.WORLD_RULES if rule not in taken]
+    if not free:
+        return ""          # все правила этого мира уже переменились
+    rule = rng.choice(free)
+    changed.append({"год": int(year), "что": rule, "беда": calamity.name})
+    calamity.notes.append("переменилось правило мира: %s" % rule)
+    title, text = texts.rule_changed(rng, calamity, rule, world)
+    world.add_event(
+        date=date, era_index=world.era_index_at(year), kind="world_rule",
+        title=title, text=text, importance=5, subjects=[calamity.id],
+        region_id=calamity.region_ids[0] if calamity.region_ids else "")
+    return rule
+
+
+# ---------------------------------------------------------------------------
+# Старый враг: беда меняет отношения держав
+# ---------------------------------------------------------------------------
+# «Нашествие отбито» — и на этом обычно всё. А между державами после
+# такого остаётся то, что переживёт и победителей: обида на того, кто не
+# пришёл на помощь, и память о том, кто пришёл.
+
+ENEMY_FROM = 3              # с какой тяжести беда оставляет след в политике
+
+
+def old_enemy(ctx, calamity, spec, rng, year: int) -> None:
+    """Кто после беды стал старым врагом, а кто — тем, кого помнят добром."""
+    if calamity.severity < ENEMY_FROM:
+        return
+    world = ctx.world
+    hurt = sorted(calamity.deaths_by_polity.items(),
+                  key=lambda pair: (-pair[1], pair[0]))
+    if not hurt:
+        return
+    victim = world.polities.get(hurt[0][0])
+    if victim is None or victim.ended is not None:
+        return
+
+    # Тот, кто на этой беде поднялся, — сосед, занявший опустевшие земли,
+    # или тот, кто не пришёл, когда звали. Обида ложится на него.
+    others = [world.polities[pid] for pid in world.active_polities
+              if pid != victim.id]
+    if not others:
+        return
+    near = [item for item in others
+            if set(item.region_ids) & set(calamity.region_ids)]
+    pool = near or others
+    blamed = rng.choice(sorted(pool, key=lambda item: item.id))
+    history.leave(world, history.GRUDGE, year, victim.id, blamed.id,
+                  weight=0.3 + 0.1 * calamity.severity,
+                  note="не пришли, когда шла беда по имени «%s»"
+                       % calamity.name)
+    line = "старый враг с беды «%s»: %s" % (calamity.name, blamed.name)
+    if line not in victim.notes:
+        victim.notes.append(line)
+
+    # А кто пришёл — того помнят добром, и это тоже след, а не строчка.
+    if len(pool) > 1 and rng.chance(0.45):
+        friend = rng.choice(sorted([item for item in pool
+                                    if item.id != blamed.id],
+                                   key=lambda item: item.id))
+        history.leave(world, history.FAVOUR, year, victim.id, friend.id,
+                      weight=0.25 + 0.08 * calamity.severity,
+                      note="пришли на помощь в беду по имени «%s»"
+                           % calamity.name)
+        line = "помнят добром с беды «%s»: %s" % (calamity.name, friend.name)
+        if line not in victim.notes:
+            victim.notes.append(line)
+
+
+# ---------------------------------------------------------------------------
+# Беженцы: беда не только убивает, но и гонит
+# ---------------------------------------------------------------------------
+# Разорённая земля пустеет не только мёртвыми. Люди уходят — и город,
+# куда они пришли, становится вдвое больше себя, с чужим наречием на
+# улицах и с теми, кому тут нечем заняться.
+
+REFUGEE_SHARE = (0.1, 0.3)  # какая доля уцелевших уходит из разорённой земли
+REFUGEE_MIN = 300           # ниже этого числа исход не считают исходом
+
+
+def refugees(ctx, calamity, rng, year: int, date) -> None:
+    """Куда ушли те, кто ушёл, и что стало с городом, который их принял."""
+    world = ctx.world
+    ruined = [row["земля"] for row in calamity.front
+              if row.get("состояние") in (dis.LAND_RUINED, dis.LAND_LOST)]
+    if not ruined:
+        ruined = list(calamity.region_ids[:1]) if calamity.settlements_lost \
+            else []
+    if not ruined:
+        return
+
+    for region_id in dict.fromkeys(ruined):
+        leaving = 0
+        from_cities = []
+        for settlement_id in list(world.active_settlements):
+            settlement = world.settlements[settlement_id]
+            if settlement.region_id != region_id or settlement.population <= 0:
+                continue
+            share = rng.uniform(*REFUGEE_SHARE)
+            gone = int(settlement.population * share)
+            if gone <= 0:
+                continue
+            settlement.population -= gone
+            leaving += gone
+            from_cities.append(settlement)
+        if leaving < REFUGEE_MIN:
+            # Слишком мало, чтобы это было исходом: вернём людей на место.
+            for settlement in from_cities:
+                settlement.population += int(leaving / max(1,
+                                                           len(from_cities)))
+            continue
+
+        host = _refuge_city(world, region_id, calamity, rng)
+        if host is None:
+            continue
+        host.population += leaving
+        calamity.notes.append(
+            "исход из земли: ушло %d, приняли в городе по имени %s"
+            % (leaving, host.name))
+        town = world.town_of(host.id) if hasattr(world, "town_of") else None
+        if town is not None:
+            town.notes.append("принял беженцев беды «%s»" % calamity.name)
+        region = world.regions.get(region_id)
+        title, text = texts.refuge(rng, calamity, region, host, leaving, world)
+        world.add_event(
+            date=date, era_index=world.era_index_at(year), kind="refuge",
+            title=title, text=text, importance=3,
+            subjects=[calamity.id, host.id], region_id=host.region_id,
+            race_id=host.race_id)
+
+
+def _refuge_city(world, region_id: str, calamity, rng):
+    """Куда бегут: в ближний город из целой земли, а не куда попало."""
+    region = world.regions.get(region_id)
+    near = set(region.neighbors) if region is not None else set()
+    hurt = set(calamity.region_ids)
+    pairs = []
+    for settlement_id in world.active_settlements:
+        settlement = world.settlements[settlement_id]
+        if settlement.region_id == region_id or settlement.population < 400:
+            continue
+        # Из-под беды не бегут в беду: земли, по которым она шла, не в счёт.
+        if settlement.region_id in hurt:
+            continue
+        weight = float(settlement.population)
+        if settlement.region_id in near:
+            weight *= 4.0      # ближний город принимает первым
+        pairs.append((settlement, weight))
+    if not pairs:
+        return None
+    return rng.weighted(pairs)
+
+
 __all__ = ["prepare", "vuln_of", "vuln_kind", "vuln_factor", "hurt_lands",
            "build_works", "forget", "choose_cause", "want_omens", "schedule",
            "tick_pending", "phase_at", "note_phase", "maybe_turn",
@@ -1724,4 +1902,5 @@ __all__ = ["prepare", "vuln_of", "vuln_kind", "vuln_factor", "hurt_lands",
            "lose_lore", "find_lore", "wants_front", "open_front",
            "move_front", "close_front", "front_states",
            "tell_versions", "era_watch", "close_era",
+           "change_rule", "old_enemy", "refugees",
            "PROFILE_KEYS"]
