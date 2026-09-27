@@ -1429,6 +1429,151 @@ def check_calamities(world, seed: str) -> list:
     return problems
 
 
+def check_disasters(world, seed: str) -> list:
+    """Живая катастрофа: причины, фронт, шрамы, утраты и времена бед.
+
+    Смысловые правила, которые нельзя нарушать: причина не позже беды,
+    шрам не в утонувшей земле, знание не найдено раньше, чем потеряно,
+    роль города не спорит с тем, что стало с землёй, и эпоха не короче
+    своей первой беды.
+    """
+    from worldgen import disaster as dis
+
+    problems = []
+
+    for calamity in world.calamities.values():
+        if calamity.cause_year and calamity.cause_year > calamity.start.year:
+            problems.append("сид «%s»: у беды «%s» причина позже самой беды"
+                            % (seed, calamity.name))
+            break
+        for omen in calamity.omens:
+            if int(omen.get("год", 0)) > calamity.start.year:
+                problems.append("сид «%s»: знак беды «%s» позже её начала"
+                                % (seed, calamity.name))
+                break
+        for scar_id in calamity.scar_ids:
+            if scar_id not in world.scars:
+                problems.append("сид «%s»: у беды «%s» потерян шрам"
+                                % (seed, calamity.name))
+                break
+        for lore_id in calamity.lore_ids:
+            if lore_id not in world.lost_lore:
+                problems.append("сид «%s»: у беды «%s» потеряна утрата"
+                                % (seed, calamity.name))
+                break
+        for kind, value in (calamity.damage or {}).items():
+            if kind not in dis.DAMAGE_KINDS or not 0.0 <= value <= 1.0:
+                problems.append("сид «%s»: у беды «%s» ущерб вида «%s» вне "
+                                "меры" % (seed, calamity.name, kind))
+                break
+
+    for scar in world.scars.values():
+        region = world.regions.get(scar.region_id)
+        if region is None:
+            problems.append("сид «%s»: шрам «%s» стоит в пустой земле"
+                            % (seed, scar.name))
+            break
+        if region.drowned:
+            problems.append("сид «%s»: шрам «%s» остался под водой"
+                            % (seed, scar.name))
+            break
+        if scar.state not in dis.SCAR_STATES:
+            problems.append("сид «%s»: у шрама «%s» неведомое состояние «%s»"
+                            % (seed, scar.name, scar.state))
+            break
+        if scar.calamity_id and scar.calamity_id not in world.calamities:
+            problems.append("сид «%s»: у шрама «%s» нет своей беды"
+                            % (seed, scar.name))
+            break
+        if scar.kind not in dis.SCARS_BY_KEY:
+            problems.append("сид «%s»: у шрама «%s» неведомый вид"
+                            % (seed, scar.name))
+            break
+
+    for lore in world.lost_lore.values():
+        if lore.kind not in dis.LORE_BY_KEY:
+            problems.append("сид «%s»: утрата «%s» неведомого вида"
+                            % (seed, lore.kind))
+            break
+        if lore.state not in dis.LORE_STATES:
+            problems.append("сид «%s»: у утраты «%s» неведомое состояние"
+                            % (seed, lore.kind))
+            break
+        if lore.found is not None and lore.lost is not None \
+                and lore.found.ordinal < lore.lost.ordinal:
+            problems.append("сид «%s»: утрата «%s» найдена раньше, чем "
+                            "потеряна" % (seed, lore.kind))
+            break
+        if lore.state == dis.LORE_FOUND and lore.found is None:
+            problems.append("сид «%s»: утрата «%s» найдена без года"
+                            % (seed, lore.kind))
+            break
+
+    for calamity in world.calamities.values():
+        for row in calamity.front:
+            state = row.get("состояние", "")
+            if state not in dis.LAND_STATES:
+                problems.append("сид «%s»: у земли в фронте беды «%s» "
+                                "неведомое состояние «%s»"
+                                % (seed, calamity.name, state))
+                break
+            if row["земля"] not in world.regions:
+                problems.append("сид «%s»: фронт беды «%s» идёт по пустой "
+                                "земле" % (seed, calamity.name))
+                break
+            if int(row.get("год", 0)) < calamity.start.year:
+                problems.append("сид «%s»: фронт беды «%s» пошёл раньше самой "
+                                "беды" % (seed, calamity.name))
+                break
+            role = row.get("роль", "")
+            if role and role not in dis.CITY_ROLES:
+                problems.append("сид «%s»: у города в фронте беды «%s» "
+                                "неведомая роль «%s»"
+                                % (seed, calamity.name, role))
+                break
+            if role == dis.ROLE_STOOD and state == dis.LAND_HELD:
+                problems.append("сид «%s»: город «выстоял» в земле, которую "
+                                "заняли (беда «%s»)" % (seed, calamity.name))
+                break
+
+    for era in world.crisis_eras.values():
+        if era.end is not None and era.end.ordinal < era.start.ordinal:
+            problems.append("сид «%s»: время бед «%s» кончилось раньше начала"
+                            % (seed, era.name or era.id))
+            break
+        if era.end is not None and not era.name:
+            problems.append("сид «%s»: закрытое время бед осталось без имени"
+                            % seed)
+            break
+        if len(era.calamity_ids) < 2:
+            problems.append("сид «%s»: время бед «%s» из одной беды"
+                            % (seed, era.name or era.id))
+            break
+        for calamity_id in era.calamity_ids:
+            calamity = world.calamities.get(calamity_id)
+            if calamity is None:
+                problems.append("сид «%s»: у времени бед «%s» потеряна беда"
+                                % (seed, era.name or era.id))
+                break
+            if calamity.start.year < era.start.year - 1:
+                problems.append("сид «%s»: беда «%s» старше своего времени бед"
+                                % (seed, calamity.name))
+                break
+
+    names = [era.name for era in world.crisis_eras.values() if era.name]
+    if len(names) != len(set(names)):
+        problems.append("сид «%s»: у двух времён бед одно имя" % seed)
+
+    for region in world.regions.values():
+        for kind, value in (region.vulnerability or {}).items():
+            if kind not in dis.VULNERABLE_BY_KEY or not 0.0 <= value <= 1.0:
+                problems.append("сид «%s»: у земли %s уязвимость «%s» вне меры"
+                                % (seed, region.name, kind))
+                break
+
+    return problems
+
+
 def check_causes(world, seed: str) -> list:
     """Причинность: следы, зёрна и цепи событий.
 
@@ -2031,6 +2176,7 @@ def main() -> int:
         failures.extend(check_wars(first, seed))
         failures.extend(check_politics(first, seed))
         failures.extend(check_calamities(first, seed))
+        failures.extend(check_disasters(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
         failures.extend(check_tongues(first, seed))
@@ -2088,6 +2234,7 @@ def main() -> int:
             failures.extend(check_wars(first, "карта/" + seed))
             failures.extend(check_politics(first, "карта/" + seed))
             failures.extend(check_calamities(first, "карта/" + seed))
+            failures.extend(check_disasters(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_tongues(first, "карта/" + seed))
@@ -2142,7 +2289,8 @@ def main() -> int:
             failures.append("своя карта, сид «%s»: мир изменился после "
                             "сохранения" % seed)
         for check in (check_nobility, check_wars, check_politics,
-                      check_calamities, check_faiths, check_nations,
+                      check_calamities, check_disasters,
+                      check_faiths, check_nations,
                       check_tongues, check_embassies, check_things,
                       check_causes, check_people_memory, check_migrations,
                       check_strifes, check_lore, check_upheavals,

@@ -919,6 +919,12 @@ def _skill_back(ctx, story, node, year: int) -> None:
     lore = world.lost_lore.get(node.ref)
     if lore is None or lore.state == dis_cat.LORE_FOUND:
         return
+    if lore.hardness >= 4:
+        # Умение, которое вернуть некому, не возвращает и быль: она может
+        # только рассказать, чего лишились.
+        lore.notes.append("быль «%s» дошла до обрывков и дальше не прошла"
+                          % (story.title or "быль"))
+        return
     finder = ""
     for item in story.cast:
         figure = world.figures.get(item["кто"])

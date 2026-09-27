@@ -702,7 +702,7 @@ class LostLore:
     calamity_id: str
     region_id: str
     lost: Date = None
-    hardness: int = 2          # насколько трудно вернуть: 1…3
+    hardness: int = 2          # насколько трудно вернуть: 1…3, а 4 — некому
     fragment: str = ""         # что от него осталось
     state: str = "утрачено"
     found: Date = None

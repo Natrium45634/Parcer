@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from . import disaster as dis
-from .narrative_calamity import cap, region_list
+from .narrative_calamity import cap, region_list, souls
 from .timeline import years_text
 
 
@@ -301,6 +301,8 @@ LOST_HARD = {
     1: "Вернуть это было можно, и лет через сто вернули бы.",
     2: "Чтобы вернуть это, нужен был человек, которого не было.",
     3: "Вернуть это было почти нельзя: умели немногие, и не осталось никого.",
+    4: "Вернуть это было некому: последний, кто умел, умер, и учить он "
+       "никого не успел.",
 }
 
 
@@ -309,7 +311,7 @@ def lore_lost(rng, lore, kind, calamity, world) -> tuple:
     region = world.regions.get(lore.region_id)
     where = region.name if region is not None else "—"
     lines = [cap(rng.choice(LOST_FRAMES) % {"about": kind.about}),
-             LOST_HARD.get(min(3, max(1, kind.hardness)), ""),
+             LOST_HARD.get(min(4, max(1, lore.hardness)), ""),
              "Это случилось в земле по имени %s, в беде по имени «%s»."
              % (where, calamity.name)]
     if kind.fragment:
@@ -374,6 +376,206 @@ def lore_found(rng, lore, finder: str, age: int, world, sex: str = "") -> tuple:
     return ("Найдено заново: %s" % lore.kind, text)
 
 
+# ---------------------------------------------------------------------------
+# Фронт
+# ---------------------------------------------------------------------------
+
+HOLD_FRAMES = (
+    "Дальше они не пошли: %(about)s.",
+    "Ход остановился, и остановило его вот что: %(about)s.",
+    "Тот год они простояли на месте — %(about)s.",
+)
+
+HOLD_TAILS = (
+    "Земля по имени %(where)s получила %(years)s, и это были не пустые годы.",
+    "%(where_cap)s выиграла %(years)s — в них успели вывезти и хлеб, и людей.",
+    "Земля по имени %(where)s держалась %(years)s, и держалась не войском.",
+)
+
+
+def front_hold(rng, calamity, hold, region, years: int, role: str = "",
+               city_name: str = "") -> tuple:
+    """Фронт встал, и у этого есть названная причина."""
+    where = region.name if region is not None else "—"
+    data = {"about": hold.about, "where": where, "where_cap": cap(where),
+            "years": years_text(years)}
+    parts = [cap(rng.choice(HOLD_FRAMES) % data),
+             rng.choice(HOLD_TAILS) % data]
+    if city_name and role:
+        line = front_city(rng, role, city_name)
+        if line:
+            parts.append(line)
+    parts.append("Речь о беде по имени «%s»." % calamity.name)
+    return ("Их задержало: %s" % hold.key, " ".join(parts))
+
+
+STEP_HELD = (
+    "Землю по имени %(where)s заняли и стали держать.",
+    "%(where_cap)s перешла к ним, и они в ней остались.",
+    "Землю по имени %(where)s взяли без большого шума и посадили своих.",
+)
+
+STEP_RUINED = (
+    "Землю по имени %(where)s прошли насквозь и оставили пустой.",
+    "%(where_cap)s разорили и не стали держать: держать было нечего.",
+    "По земле по имени %(where)s прошли, взяли что взяли и ушли дальше.",
+)
+
+ROLE_LINES = {
+    dis.ROLE_GATE: "Через город по имени %s они и вошли: эти ворота потом "
+                   "поминали в каждом своде.",
+    dis.ROLE_FIRST: "Первым взяли город по имени %s, и весть о нём успела "
+                    "дойти дальше, чем они.",
+    dis.ROLE_KEEP: "Город по имени %s стал последним: за ним уже никого "
+                   "не было.",
+    dis.ROLE_SHELTER: "В город по имени %s сошлись те, кто ушёл, и город "
+                      "стал вдвое больше себя.",
+    dis.ROLE_STOOD: "Город по имени %s выстоял — и с этого дня считал себя "
+                    "не таким, как соседи.",
+    dis.ROLE_BOUGHT: "Город по имени %s откупился, и соседи не забыли ему "
+                     "этого никогда.",
+}
+
+
+def front_step(rng, calamity, region, state: str, role: str,
+               city_name: str = "") -> tuple:
+    """Фронт сдвинулся на одну землю — и у главного города своя роль."""
+    where = region.name if region is not None else "—"
+    data = {"where": where, "where_cap": cap(where)}
+    frames = STEP_RUINED if state == dis.LAND_RUINED else STEP_HELD
+    lines = [cap(rng.choice(frames) % data)]
+    if city_name and role:
+        line = front_city(rng, role, city_name)
+        if line:
+            lines.append(line)
+    lines.append("Шла тогда беда по имени «%s»." % calamity.name)
+    return ("%s: %s" % (calamity.name, where), " ".join(lines))
+
+
+def front_city(rng, role: str, city_name: str) -> str:
+    """Строка о роли города — её вставляют туда, где о городе речь."""
+    frame = ROLE_LINES.get(role)
+    return (frame % city_name) if frame else ""
+
+
+END_WON = (
+    "Их выбили, но не отовсюду: %(where)s так и осталась за ними.",
+    "Победу записали, а земли по имени %(where)s в ней не было.",
+    "Отбились — и на том сошлись, что дальние земли уже не вернуть: %(where)s.",
+)
+
+END_LOST = (
+    "Они остались: %(where)s теперь их, и это признали молча.",
+    "Землю по имени %(where)s не вернули ни тогда, ни после.",
+    "Кончилось тем, что границу передвинули: %(where)s отошла им.",
+)
+
+END_TAILS = (
+    "Через век там говорили уже на другом наречии.",
+    "Те, кто ушёл оттуда, звали себя по старой земле ещё триста лет.",
+    "На картах это исправили не сразу и не везде.",
+    "Своды обеих сторон считают этот год по-разному.",
+)
+
+
+def front_end(rng, calamity, kept, world, won: bool) -> tuple:
+    """Чем кончился фронт: что осталось за чужими."""
+    where = region_list(world, kept, limit=3)
+    frames = END_WON if won else END_LOST
+    text = "%s %s" % (cap(rng.choice(frames) % {"where": where}),
+                      rng.choice(END_TAILS))
+    return ("Что осталось за ними: %s" % where, text)
+
+
+# ---------------------------------------------------------------------------
+# Катастрофическая эпоха
+# ---------------------------------------------------------------------------
+
+ERA_FRAMES = (
+    "Годы с %(from)d по %(to)d слились в одно время, и у времени нашлось "
+    "имя: %(name)s.",
+    "Позже эти годы перестали разбирать по бедам и стали звать одним "
+    "словом: %(name)s (%(from)d–%(to)d).",
+    "%(name)s — так назвали то, что шло с %(from)d по %(to)d год.",
+)
+
+ERA_COUNTS = (
+    "Бед в нём было %(count)d, и каждая следующая ложилась на то, что "
+    "оставила прежняя.",
+    "Считают в нём %(count)d беды, но живших тогда это деление не "
+    "занимало.",
+    "Из %(count)d бед ни одна не была последней, и это и делало их одним "
+    "временем.",
+)
+
+ERA_TOLLS = (
+    "Не досчитались за это время %(souls)s.",
+    "Счёт ушедших за эти годы — %(souls)s.",
+    "Людей за это время не стало на %(souls)s.",
+)
+
+ERA_TAILS = (
+    "Начало его в сводах разных народов стоит в разных годах, и спорить "
+    "об этом перестали.",
+    "Кончилось оно не победой, а тем, что беды перестали приходить.",
+    "Тех, кто помнил его начало, к концу уже не было.",
+    "Всё, что мир умел до него, он потом собирал заново.",
+)
+
+
+def era_closed(rng, era, world) -> tuple:
+    """Время бед кончилось и получило имя."""
+    data = {"name": era.name, "count": len(era.calamity_ids),
+            "from": era.start.year,
+            "to": era.end.year if era.end else era.start.year,
+            "souls": souls(era.deaths)}
+    lines = [cap(rng.choice(ERA_FRAMES) % data),
+             rng.choice(ERA_COUNTS) % data]
+    if era.deaths > 0:
+        lines.append(rng.choice(ERA_TOLLS) % data)
+    if era.regions:
+        lines.append("Земли: %s." % region_list(world, era.regions, limit=4))
+    if era.voices:
+        said = "; ".join(item["оборот"] for item in era.voices[:4])
+        lines.append("Имя у него не одно: %s." % said)
+    lines.append(rng.choice(ERA_TAILS))
+    return ("Время бед: %s" % era.name, " ".join(lines))
+
+
+VERSION_FRAMES = (
+    "О том, что это было, спорят до сих пор.",
+    "Одного рассказа об этом нет и не было.",
+    "Свести это к одной истории не удалось никому.",
+)
+
+
+def versions(rng, calamity, told: dict) -> tuple:
+    """Шесть рассказов об одном, и ни один не отменяет остальных.
+
+    Первая строка — правда, и она стоит первой не потому, что победила:
+    просто с чем-то надо сравнивать остальные пять.
+    """
+    lines = [rng.choice(VERSION_FRAMES)]
+    truth = told.get(dis.V_TRUE)
+    if truth and truth != dis.UNKNOWN_CAUSE:
+        lines.append("На деле причиной было вот что: %s." % truth)
+        if not calamity.cause_known:
+            lines.append("Этого мир так и не узнал.")
+    else:
+        # Бывает и так: настоящей причины не знал никто, и спорить было
+        # не с чем — спорили всё равно.
+        lines.append("Настоящей причины не назвал никто, и это не помешало "
+                     "спорить.")
+    for voice in dis.VERSIONS:
+        if voice == dis.V_TRUE or voice not in told:
+            continue
+        lines.append("%s — %s." % (cap(voice), told[voice]))
+    return ("Шесть рассказов о беде по имени «%s»" % calamity.name,
+            " ".join(lines))
+
+
 __all__ = ["omen", "prevented", "turn_point", "phase_turn", "response",
+           "era_closed", "versions",
+           "front_hold", "front_step", "front_city", "front_end",
            "scar_left", "scar_turn", "lore_lost", "lore_fragments",
            "lore_found"]

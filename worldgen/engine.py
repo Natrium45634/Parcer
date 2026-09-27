@@ -242,6 +242,10 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             raise GenerationCancelled()
 
     tongues.close(ctx, total)
+    # Время бед, которое так и не кончилось к последнему году, всё равно
+    # получает имя: иначе последняя эпоха мира остаётся безымянной.
+    disaster_sys.close_era(ctx, total, ctx.date_in(
+        ctx.rng("disaster", "era-close", total), total), force=True)
     _finalize(world)
     if progress is not None:
         progress(1.0, "Готово")

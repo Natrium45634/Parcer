@@ -3476,6 +3476,191 @@ def render_memory(world) -> str:
     return "\n".join(rows).rstrip()
 
 
+def render_disasters(world) -> str:
+    """Живая катастрофа: время бед, шрамы земли, забытое и шесть рассказов.
+
+    Справочник бедствий (`render_calamities`) отвечает на вопрос «что и
+    какой ценой». Этот отвечает на другие: почему это случилось, кто что
+    об этом рассказал, что беда оставила на земле и чего мир после неё
+    больше не умеет.
+    """
+    from . import catastrophe as cat
+    from . import disaster as dis
+    from .narrative_calamity import number
+
+    rows = ["БЕДА И ТО, ЧТО ОТ НЕЁ ОСТАЛОСЬ", ""]
+
+    # --- времена бед ---------------------------------------------------
+    eras = sorted((item for item in world.crisis_eras.values() if item.name),
+                  key=lambda item: item.start.year)
+    if eras:
+        rows.append("  Времена бед")
+        for era in eras:
+            rows.append("    %s — %d–%d, бед %d, глубина %d" % (
+                era.name, era.start.year,
+                era.end.year if era.end else era.start.year,
+                len(era.calamity_ids), era.depth))
+            if era.deaths:
+                rows.append("        не досчитались: %s" % number(era.deaths))
+            names = [world.calamities[cid].name for cid in era.calamity_ids
+                     if cid in world.calamities]
+            if names:
+                rows.append("        беды: %s" % ", ".join(names))
+            for voice in era.voices:
+                rows.append("        %s" % voice["оборот"])
+            if era.regions:
+                lands = [world.regions[rid].name for rid in era.regions
+                         if rid in world.regions]
+                rows.append("        земли: %s" % ", ".join(lands[:8]))
+        rows.append("")
+
+    # --- причины, предвестники и решения --------------------------------
+    told = [item for item in world.calamities.values() if item.cause]
+    told.sort(key=lambda item: item.start.ordinal)
+    heavy = [item for item in told if item.severity >= 3][:24]
+    if heavy:
+        rows.append("  Отчего это случилось")
+        for calamity in heavy:
+            spec = cat.CATALOG_BY_KEY.get(calamity.key)
+            rows.append("    %s (%d, %s)" % (
+                calamity.name, calamity.start.year,
+                spec.title.lower() if spec else calamity.key))
+            line = "        причина: %s" % calamity.cause
+            # «Неизвестно, тянется с такого-то года» — это не причина, а
+            # путаница: у безымянной причины нет и начала.
+            if calamity.cause_year and calamity.cause != dis.UNKNOWN_CAUSE:
+                line += ", тянется с %d года" % calamity.cause_year
+            rows.append(line)
+            if calamity.cause_hidden and not calamity.cause_known:
+                rows.append("        а на деле: %s — и мир этого не узнал"
+                            % calamity.cause_hidden)
+            if calamity.trigger:
+                rows.append("        спустило беду: %s" % calamity.trigger)
+            if calamity.chain_factor:
+                rows.append("        выросло из прежней беды: %s"
+                            % calamity.chain_factor)
+            for omen in calamity.omens[:3]:
+                rows.append("        знак (%d): %s — %s" % (
+                    omen.get("год", 0), omen.get("знак", ""),
+                    omen.get("прочтение", "")))
+            for item in calamity.responses[:4]:
+                who = world.polities.get(item.get("держава", ""))
+                rows.append("        решили (%d%s): %s — %s" % (
+                    int(item.get("год", 0)),
+                    (", " + who.name) if who is not None else "",
+                    item.get("решение", ""), item.get("итог", "")))
+            for item in calamity.mistakes[:3]:
+                rows.append("        ошибка (%d): %s"
+                            % (int(item.get("год", 0)), item.get("что", "")))
+            if calamity.prevented and calamity.prevented != dis.STOP_NONE:
+                rows.append("        %s" % calamity.prevented)
+            if calamity.damage:
+                bits = ["%s %d%%" % (kind, round(100 * value))
+                        for kind, value in calamity.damage.items()
+                        if value >= 0.05]
+                if bits:
+                    rows.append("        ущерб: %s" % ", ".join(bits))
+            if calamity.outcome:
+                rows.append("        исходы: %s" % "; ".join(
+                    "%s" % value for value in calamity.outcome.values()))
+            if calamity.gains:
+                rows.append("        поднялись на этом: %s"
+                            % "; ".join(calamity.gains[:3]))
+        rows.append("")
+
+    # --- фронт -----------------------------------------------------------
+    fronts = [item for item in world.calamities.values() if len(item.front) > 2]
+    fronts.sort(key=lambda item: item.start.ordinal)
+    if fronts:
+        rows.append("  Как они шли по землям")
+        for calamity in fronts[:12]:
+            rows.append("    %s (%d–%s)" % (
+                calamity.name, calamity.start.year,
+                calamity.end.year if calamity.end else "—"))
+            for item in calamity.front:
+                region = world.regions.get(item["земля"])
+                line = "        %d  %s — %s" % (
+                    item.get("год", 0),
+                    region.name if region else item["земля"],
+                    item.get("состояние", ""))
+                if item.get("чем"):
+                    line += " (%s)" % item["чем"]
+                if item.get("роль"):
+                    line += " | %s: %s" % (item["город"], item["роль"])
+                rows.append(line)
+        rows.append("")
+
+    # --- шрамы -----------------------------------------------------------
+    if world.scars:
+        rows.append("  Шрамы земли")
+        for scar in sorted(world.scars.values(),
+                           key=lambda item: item.created.ordinal):
+            region = world.regions.get(scar.region_id)
+            calamity = world.calamities.get(scar.calamity_id)
+            rows.append("    %s — %s, %d год%s" % (
+                scar.name, scar.state, scar.created.year,
+                (", земля %s" % region.name) if region else ""))
+            kind = dis.SCARS_BY_KEY.get(scar.kind)
+            if kind is not None:
+                rows.append("        %s" % kind.about)
+            if calamity is not None:
+                rows.append("        оставила беда по имени «%s»"
+                            % calamity.name)
+            for note in scar.notes:
+                rows.append("        %s" % note)
+        rows.append("")
+
+    # --- потерянное знание ----------------------------------------------
+    if world.lost_lore:
+        rows.append("  Чего мир больше не умеет")
+        for lore in sorted(world.lost_lore.values(),
+                           key=lambda item: item.lost.ordinal
+                           if item.lost else 0):
+            region = world.regions.get(lore.region_id)
+            rows.append("    %s — %s, утрачено в %d году%s" % (
+                lore.kind, lore.state,
+                lore.lost.year if lore.lost else 0,
+                (", земля %s" % region.name) if region else ""))
+            rows.append("        %s" % lore.about)
+            if lore.fragment:
+                rows.append("        осталось: %s" % lore.fragment)
+            if lore.found is not None:
+                rows.append("        вернулось в %d году, вернул(а): %s"
+                            % (lore.found.year, lore.found_by or "неизвестно"))
+        rows.append("")
+
+    # --- шесть рассказов --------------------------------------------------
+    spoken = [item for item in world.calamities.values()
+              if len(item.versions) >= 4]
+    spoken.sort(key=lambda item: (-item.severity, item.start.ordinal))
+    if spoken:
+        rows.append("  Об одном и том же — шестью голосами")
+        for calamity in spoken[:10]:
+            rows.append("    %s (%d)" % (calamity.name, calamity.start.year))
+            for voice in dis.VERSIONS:
+                if voice in calamity.versions:
+                    rows.append("        %s: %s"
+                                % (voice, calamity.versions[voice]))
+        rows.append("")
+
+    # --- чему научились земли -------------------------------------------
+    learned = [region for region in world.regions.values() if region.works]
+    if learned:
+        rows.append("  Чему беда научила земли")
+        for region in sorted(learned, key=lambda item: item.name):
+            works = []
+            for item in region.works:
+                what = item.get("что", "")
+                if what and what not in works:
+                    works.append(what)
+            rows.append("    %s — %s" % (region.name, ", ".join(works)))
+        rows.append("")
+
+    if len(rows) <= 2:
+        rows.append("  Беды в этом мире следов не оставили.")
+    return "\n".join(rows)
+
+
 def full_text(world) -> str:
     """Полный экспорт: летопись + справочники."""
     return "\n\n".join((
@@ -3506,6 +3691,7 @@ def full_text(world) -> str:
         render_pantheon(world),
         render_faiths(world),
         render_calamities(world),
+        render_disasters(world),
         render_sagas(world),
         render_causes(world),
         render_memory(world),

@@ -1159,6 +1159,12 @@ LORE_CHANCE = 0.3           # у большой беды знание гибне
 LORE_MAX = 2
 LORE_FRAGMENT_AFTER = 100   # раньше этого обрывки ещё не ищут
 LORE_FRAGMENT_CHANCE = 0.14
+# Трудность 4 — «вернуть некому»: последний, кто умел, умер, и никаких
+# обрывков для того, чтобы собрать целое, не хватит. Такое знание уходит
+# из мира навсегда, и без этого утрата ничего не стоит: за десять тысяч
+# лет иначе возвращается всё.
+LORE_NEVER = 4
+LORE_NEVER_CHANCE = {3: 0.6, 2: 0.2}
 # Насколько легко вернуть знание по трудности 1…3 — за десятилетие.
 # Дорожные карты чертят заново за век-полтора; письмо народа, которого
 # не стало, не возвращается почти никогда, и это главное в утрате.
@@ -1198,10 +1204,16 @@ def lose_lore(ctx, calamity, spec, rng, year: int, date) -> None:
             continue          # дважды одно и то же не забывают
         had.add(kind.key)
         region_id = rng.choice(calamity.region_ids)
+        hardness = kind.hardness
+        forever = LORE_NEVER_CHANCE.get(hardness, 0.0)
+        if forever and rng.chance(forever):
+            hardness = LORE_NEVER
         lore = world.add_lost_lore(
             kind=kind.key, about=kind.about, calamity_id=calamity.id,
-            region_id=region_id, lost=date, hardness=kind.hardness,
+            region_id=region_id, lost=date, hardness=hardness,
             fragment=kind.fragment, state=dis.LORE_LOST)
+        if hardness == LORE_NEVER:
+            lore.notes.append("вернуть это некому: последний, кто умел, умер")
         calamity.lore_ids.append(lore.id)
         made += 1
         # Забытое умение — это не только грусть: земля без него слабее.
@@ -1239,6 +1251,8 @@ def find_lore(ctx, year: int, period: int) -> None:
                 kind="lore_fragments", title=title, text=text, importance=2,
                 subjects=[lore.id], region_id=lore.region_id)
             continue
+        if lore.hardness >= LORE_NEVER:
+            continue          # обрывки есть, а собрать их некому
         hard = max(1, min(3, lore.hardness))
         if not rng.chance(LORE_FIND_CHANCE[hard - 1]):
             continue
@@ -1286,10 +1300,428 @@ def _lore_finder(world, lore, rng, year: int) -> tuple:
     return "город по имени %s" % city.name, "", "m"
 
 
+# ---------------------------------------------------------------------------
+# Фронт: нашествие идёт по землям
+# ---------------------------------------------------------------------------
+# «Вторжение в пяти землях» — сводка, а не событие. События — это то, что
+# первой пала земля у пролома, что перевал держали одиннадцать лет, что
+# столица досталась им последней и что две земли так и остались за ними.
+
+FRONT_FROM = 2              # с какой тяжести у беды есть направление
+FRONT_STEP = 0.3            # с какой охотой фронт двигается за год
+FRONT_HOLD_CHANCE = 0.4     # и как часто земля его задерживает
+FRONT_HOLD_MAX = 2          # дважды на одной земле — и хватит
+
+
+def wants_front(calamity, spec) -> bool:
+    """Есть ли у этой беды направление.
+
+    Мор и голод идут по всем землям сразу, а нашествие — откуда-то куда-то,
+    и это разные истории. Направление есть у того, у чего есть войско или
+    чужая воля: нашествия, завоевания, священной войны.
+    """
+    if calamity.severity < FRONT_FROM or len(calamity.region_ids) < 2:
+        return False
+    return spec.kind in (cat.INVASION, cat.POLITICAL, cat.RELIGIOUS)
+
+
+def open_front(ctx, calamity, spec, rng, year: int) -> None:
+    """Где пролом и куда они пойдут дальше."""
+    if not wants_front(calamity, spec):
+        return
+    world = ctx.world
+    first = calamity.region_ids[0]
+    calamity.front.append({
+        "земля": first, "год": int(year), "состояние": dis.LAND_HELD,
+        "чем": "с этого начали", "город": "", "роль": "",
+    })
+    city = _front_city(world, first)
+    if city is not None:
+        calamity.front[-1]["город"] = city.name
+        calamity.front[-1]["роль"] = dis.ROLE_GATE if rng.chance(0.55) \
+            else dis.ROLE_FIRST
+
+
+def move_front(ctx, calamity, spec, rng, year: int) -> None:
+    """Фронт за год: шаг вперёд, или задержка, и у задержки есть причина."""
+    if not calamity.front:
+        return
+    world = ctx.world
+    # Пока задержка не вышла, они стоят — и стоят по названной причине.
+    stop = _front_stop(calamity)
+    if stop > year:
+        return
+
+    ahead = _front_ahead(calamity)
+    if not ahead:
+        return
+    if not rng.chance(FRONT_STEP * max(0.3, min(2.0, calamity.force))):
+        return
+
+    region_id = ahead[0]
+    region = world.regions.get(region_id)
+    has_fort = any(world.fortresses[fid].region_id == region_id
+                   for fid in world.active_fortresses)
+    held_here = sum(1 for row in calamity.front
+                    if row["земля"] == region_id
+                    and row.get("состояние") == dis.LAND_THREAT)
+    pairs = dis.holds_for(region, has_fort)
+    if pairs and held_here < FRONT_HOLD_MAX and rng.chance(FRONT_HOLD_CHANCE):
+        hold = rng.weighted(list(pairs))
+        years = rng.randint(*hold.years)
+        row = {"земля": region_id, "год": int(year),
+               "состояние": dis.LAND_THREAT, "чем": hold.about,
+               "город": "", "роль": "", "до": int(year + years)}
+        # Пока держат, город за спиной у линии наполняется теми, кто ушёл;
+        # а если держат выкупом, то платит его тот самый город.
+        city = _front_city(world, region_id)
+        if city is not None:
+            if hold.key == "выкуп":
+                row["город"], row["роль"] = city.name, dis.ROLE_BOUGHT
+            elif rng.chance(0.35):
+                row["город"], row["роль"] = city.name, dis.ROLE_SHELTER
+        calamity.front.append(row)
+        if calamity.severity >= 3:
+            title, text = texts.front_hold(rng, calamity, hold, region, years,
+                                           row["роль"], row["город"])
+            world.add_event(
+                date=ctx.date_in(rng, year),
+                era_index=world.era_index_at(year), kind="front_hold",
+                title=title, text=text, importance=3,
+                subjects=[calamity.id], region_id=region_id)
+        return
+
+    # Земля взята. Разорена или занята — это разные вещи: разорённую
+    # бросают, занятую держат.
+    state = dis.LAND_RUINED if rng.chance(0.45) else dis.LAND_HELD
+    row = {"земля": region_id, "год": int(year), "состояние": state,
+           "чем": "", "город": "", "роль": ""}
+    city = _front_city(world, region_id)
+    if city is not None:
+        role = _city_role(calamity, city, rng, state)
+        if role:
+            row["город"], row["роль"] = city.name, role
+    calamity.front.append(row)
+    if calamity.severity >= 3:
+        title, text = texts.front_step(rng, calamity, region, state,
+                                       row["роль"], row["город"])
+        world.add_event(
+            date=ctx.date_in(rng, year), era_index=world.era_index_at(year),
+            kind="front_step", title=title, text=text, importance=3,
+            subjects=[calamity.id], region_id=region_id)
+
+
+def close_front(ctx, calamity, rng, year: int, date, won: bool) -> None:
+    """Чем кончился фронт: что вернули, а что осталось за ними."""
+    if not calamity.front:
+        return
+    world = ctx.world
+    taken = []
+    for row in calamity.front:
+        if row.get("состояние") in (dis.LAND_HELD, dis.LAND_RUINED):
+            taken.append(row["земля"])
+    if not taken:
+        return
+    # Даже победой возвращают не всё: за дальние земли уже не идут. Но
+    # «осталась за врагом» — не слово в летописи, а положение дел: земля,
+    # в которой живут прежние города прежней державы, за чужими не
+    # остаётся, чем бы её ни называли.
+    kept = []
+    for region_id in taken:
+        back = won and rng.chance(0.8)
+        if not back and _still_theirs(world, region_id):
+            back = True
+        calamity.front.append({
+            "земля": region_id, "год": int(year),
+            "состояние": dis.LAND_FREED if back else dis.LAND_LOST,
+            "чем": "", "город": "", "роль": "",
+        })
+        if not back:
+            kept.append(region_id)
+    if not kept:
+        return
+    title, text = texts.front_end(rng, calamity, kept, world, won)
+    world.add_event(
+        date=date, era_index=world.era_index_at(year), kind="front_end",
+        title=title, text=text, importance=4, subjects=[calamity.id],
+        region_id=kept[0])
+
+
+def _still_theirs(world, region_id: str) -> bool:
+    """Живут ли в земле прежние города прежней державы.
+
+    Если живут — землю отбили, как бы ни шёл фронт: державы не теряют
+    земель, в которых стоят их же города с их же людьми.
+    """
+    for settlement_id in world.active_settlements:
+        settlement = world.settlements[settlement_id]
+        if settlement.region_id != region_id:
+            continue
+        polity = world.polities.get(settlement.polity_id)
+        if polity is not None and polity.ended is None:
+            return True
+    return False
+
+
+def front_states(calamity) -> dict:
+    """Что с каждой землёй на нынешний час: последняя запись и есть ответ."""
+    out = {}
+    for row in calamity.front:
+        out[row["земля"]] = row.get("состояние", dis.LAND_CLEAR)
+    return out
+
+
+def _front_ahead(calamity) -> list:
+    """Земли, до которых фронт ещё не дошёл, — в порядке хода."""
+    states = front_states(calamity)
+    return [region_id for region_id in calamity.region_ids
+            if states.get(region_id, dis.LAND_CLEAR)
+            in (dis.LAND_CLEAR, dis.LAND_THREAT)]
+
+
+def _front_stop(calamity) -> int:
+    """До какого года они стоят, если стоят."""
+    stop = 0
+    for row in calamity.front:
+        if row.get("состояние") == dis.LAND_THREAT:
+            stop = max(stop, int(row.get("до", 0)))
+    return stop
+
+
+def _front_city(world, region_id: str):
+    """Главный город земли: о нём и пойдёт речь."""
+    cities = [world.settlements[sid] for sid in world.active_settlements
+              if world.settlements[sid].region_id == region_id]
+    if not cities:
+        return None
+    return max(cities, key=lambda item: (item.population, item.id))
+
+
+def _city_role(calamity, city, rng, state: str) -> str:
+    """Чем этот город был в этом нашествии.
+
+    Роль не бросается костью вслепую, и она не спорит с тем, что стало с
+    землёй. Последним оплотом бывает тот, за кем и правда никого не
+    осталось. «Взят первым» бывает один на всё нашествие. А «выстоял» —
+    только там, где округу выжгли, а город не взяли.
+    """
+    if len(_front_ahead(calamity)) <= 1:
+        return dis.ROLE_KEEP
+    if city.is_capital and rng.chance(0.5):
+        return dis.ROLE_KEEP
+    pairs = []
+    # Первым берут один город, и это тот, что сразу за проломом.
+    taken = sum(1 for row in calamity.front[1:]
+                if row.get("состояние") in (dis.LAND_HELD, dis.LAND_RUINED))
+    if taken <= 1:
+        pairs.append((dis.ROLE_FIRST, 1.6))
+    if state == dis.LAND_RUINED:
+        pairs.append((dis.ROLE_STOOD, 1.2))
+    if not pairs:
+        return ""
+    pairs.append(("", 1.4))
+    return rng.weighted(pairs)
+
+
+# ---------------------------------------------------------------------------
+# Шесть версий одного события
+# ---------------------------------------------------------------------------
+# «Как было на деле» знает только летопись. Держава записала своё, вера
+# объяснила своё, уцелевшие помнят один день, враги — малый поход, а
+# поздние своды нашли причину поскучнее. Все шесть версий держатся рядом,
+# и ни одна не отменяет остальных.
+
+VERSION_FROM = 2            # с какой тяжести у беды заводятся версии
+VERSION_SHARE = 0.6         # и как часто заводятся вообще
+
+
+def tell_versions(ctx, calamity, spec, rng, year: int = 0, date=None) -> dict:
+    """Кто что про эту беду рассказал.
+
+    Версий не бывает у мелочи: про недород в одной волости никто не спорит.
+    Версии заводятся там, где было что делить, — и чем беда глубже, тем
+    больше голосов её пересказывают.
+    """
+    if calamity.severity < VERSION_FROM:
+        return {}
+    if calamity.severity < 4 and not rng.chance(VERSION_SHARE):
+        return {}
+    world = ctx.world
+
+    # Правда всегда одна и всегда первая: настоящая причина, даже если
+    # мир её не узнал.
+    truth = calamity.cause_hidden or calamity.cause or "причину не назвали"
+    told = {dis.V_TRUE: truth}
+
+    voices = [dis.V_STATE, dis.V_SURVIVOR, dis.V_FOLK]
+    if calamity.kind in (cat.INVASION, cat.POLITICAL, cat.RELIGIOUS):
+        voices.append(dis.V_ENEMY)
+    if world.faiths:
+        voices.append(dis.V_FAITH)
+    # Поздние своды появляются только если после беды было кому писать.
+    if calamity.severity >= 3:
+        voices.append(dis.V_LATER)
+
+    for voice in voices:
+        rows = dis.VERSION_TWIST.get(voice, ())
+        if not rows:
+            continue
+        told[voice] = rng.choice(rows)
+    calamity.versions = told
+
+    # Спор о том, что это было, — отдельная запись: без неё шесть версий
+    # лежат в данных и в летопись не попадают.
+    if date is not None and len(told) >= 4:
+        title, text = texts.versions(rng, calamity, told)
+        world.add_event(
+            date=date, era_index=world.era_index_at(year),
+            kind="calamity_versions", title=title, text=text,
+            importance=3 if calamity.severity < 4 else 4,
+            subjects=[calamity.id],
+            region_id=calamity.region_ids[0] if calamity.region_ids else "")
+    return told
+
+
+# ---------------------------------------------------------------------------
+# Катастрофическая эпоха
+# ---------------------------------------------------------------------------
+# Шесть бед, идущих одна из другой, — это не шесть событий, а одно время,
+# и у времени есть имя. Имя берётся из того, что в эпохе было, и у каждого
+# народа оно своё: держава помнит войну, деревня — голодные годы.
+
+ERA_FROM = 3                # с какой тяжести беда тянет за собой эпоху
+ERA_NEED = 3                # сколько бед подряд делают из них одно время
+ERA_GAP = 60                # и какой разрыв ещё считается «подряд»
+ERA_DEPTH = 2               # глубина, ниже которой беда в эпоху не входит
+# Эпоха — сгущение, а не полтысячи лет с бедой раз в век. Набралось на три
+# века — время закрывается, и следующая беда открывает уже новое.
+ERA_MAX = 280
+
+
+def era_watch(ctx, calamity, year: int, date) -> None:
+    """Беда открывает эпоху, входит в открытую или закрывает её.
+
+    Эпоха не объявляется заранее: она набирается. Пока беды идут одна за
+    другой без передышки, они складываются в одно время; как только мир
+    получает сто лет покоя, время кончается и получает имя.
+    """
+    world = ctx.world
+    if calamity.severity < ERA_FROM or calamity.depth < ERA_DEPTH:
+        return
+    rng = ctx.rng("disaster", "era", calamity.id)
+    era = world.crisis_eras.get(world.era_open)
+    last = getattr(ctx, "era_last", 0)
+    if era is not None and era.end is None:
+        # В открытое время беда входит, только если пришла ему вслед: через
+        # три поколения покоя это уже не то же время, а другое.
+        if (last and year - last > ERA_GAP) or \
+                year - era.start.year > ERA_MAX:
+            close_era(ctx, year, date, force=True)
+            era = None
+    if era is None or era.end is not None:
+        era = world.add_crisis_era(name="", start=date)
+        world.era_open = era.id
+        era.notes.append("открыта бедой «%s»" % calamity.name)
+    era.calamity_ids.append(calamity.id)
+    era.deaths += calamity.deaths
+    era.depth = max(era.depth, calamity.depth)
+    for region_id in calamity.region_ids:
+        if region_id not in era.regions:
+            era.regions.append(region_id)
+    calamity.era_id = era.id
+    ctx.era_last = year
+    _ = rng
+
+
+def close_era(ctx, year: int, date, force: bool = False) -> None:
+    """Покой длиннее века — и набранное время становится эпохой с именем.
+
+    Эпоха из двух бед — это не эпоха, а две беды: такую закрываем молча
+    и не даём ей имени. `force` — последний зов на исходе истории: время,
+    которое так и не кончилось, всё равно получает имя.
+    """
+    world = ctx.world
+    era = world.crisis_eras.get(world.era_open)
+    if era is None or era.end is not None:
+        return
+    last = getattr(ctx, "era_last", 0)
+    if not force and (not last or year - last < ERA_GAP):
+        return
+    world.era_open = ""
+    era.end = date
+    if len(era.calamity_ids) < ERA_NEED:
+        era.notes.append("в одно время не сложилось: бед было мало")
+        world.crisis_eras.pop(era.id, None)
+        for calamity_id in era.calamity_ids:
+            calamity = world.calamities.get(calamity_id)
+            if calamity is not None:
+                calamity.era_id = ""
+        return
+
+    rng = ctx.rng("disaster", "era-name", era.id)
+    era.name = _era_name(world, era, rng)
+    era.voices = _era_voices(world, era, rng)
+    title, text = texts.era_closed(rng, era, world)
+    world.add_event(
+        date=date, era_index=world.era_index_at(year), kind="crisis_era",
+        title=title, text=text, importance=5,
+        subjects=[era.id] + era.calamity_ids[:6],
+        region_id=era.regions[0] if era.regions else "")
+
+
+def _era_name(world, era, rng) -> str:
+    """Имя эпохи — из того, что в ней было тяжелее всего."""
+    weighted = []
+    for calamity_id in era.calamity_ids:
+        calamity = world.calamities.get(calamity_id)
+        if calamity is None:
+            continue
+        for word in dis.ERA_WORDS.get(calamity.key, ()):
+            weighted.append((word, float(calamity.severity)))
+    taken = {item.name for item in world.crisis_eras.values() if item.name}
+    for _ in range(12):
+        name = rng.weighted(weighted) if weighted \
+            else rng.choice(dis.ERA_GENERIC)
+        if name not in taken:
+            return name
+    # Тёзки бывают и у эпох: тогда зовут по числу бед, а не по счёту.
+    for name in dis.ERA_GENERIC:
+        if name not in taken:
+            return name
+    return "%s (%d–%d)" % (dis.ERA_GENERIC[0], era.start.year,
+                           era.end.year if era.end else era.start.year)
+
+
+def _era_voices(world, era, rng) -> list:
+    """У каждого своё имя для одного и того же времени."""
+    pool = []
+    for calamity_id in era.calamity_ids:
+        calamity = world.calamities.get(calamity_id)
+        if calamity is None:
+            continue
+        pool.extend(dis.ERA_WORDS.get(calamity.key, ()))
+    # Имена не повторяем: три голоса, зовущие время одним словом, — это
+    # один голос, а не три.
+    pool = sorted({name for name in pool if name != era.name})
+    out = []
+    for who, frame in dis.ERA_VOICES:
+        if not pool:
+            break
+        if not rng.chance(0.7):
+            continue
+        name = rng.choice(pool)
+        pool.remove(name)
+        out.append({"кто": who, "имя": name, "оборот": frame % name})
+    return out
+
+
 __all__ = ["prepare", "vuln_of", "vuln_kind", "vuln_factor", "hurt_lands",
            "build_works", "forget", "choose_cause", "want_omens", "schedule",
            "tick_pending", "phase_at", "note_phase", "maybe_turn",
            "force_now", "respond", "count_gains", "name_actors",
            "plan_chain", "tick_chains", "count_damage", "four_outcomes",
            "dark_pressure_of", "leave_scars", "age_scars",
-           "lose_lore", "find_lore", "PROFILE_KEYS"]
+           "lose_lore", "find_lore", "wants_front", "open_front",
+           "move_front", "close_front", "front_states",
+           "tell_versions", "era_watch", "close_era",
+           "PROFILE_KEYS"]

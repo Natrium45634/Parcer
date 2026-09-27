@@ -322,11 +322,114 @@ def oldest_town(world, out) -> None:
     out("")
 
 
+def worst_time(world, out) -> None:
+    """Четвёртый портрет: самое тяжёлое время мира и что от него осталось.
+
+    Числа говорят, не сломалось ли. Портрет говорит другое: стоит ли это
+    читать. Поэтому здесь не сводка по бедам, а одно время целиком — со
+    своими именами у разных народов, шрамами на земле, забытыми умениями
+    и спором о том, что это вообще было.
+    """
+    from worldgen import disaster as dis
+
+    out("=" * 78)
+    out("САМОЕ ТЯЖЁЛОЕ ВРЕМЯ МИРА")
+    out("=" * 78)
+
+    eras = [item for item in world.crisis_eras.values() if item.name]
+    if not eras:
+        out("  Времён бед в этом мире не сложилось: беды приходили порознь.")
+        out("")
+        return
+    era = max(eras, key=lambda item: item.deaths)
+    out("  %s — %d–%d, бед %d, глубина %d" % (
+        era.name, era.start.year, era.end.year if era.end else era.start.year,
+        len(era.calamity_ids), era.depth))
+    if era.deaths:
+        out("       не досчитались за это время: %s" % _souls(era.deaths))
+    lands = [world.regions[rid].name for rid in era.regions
+             if rid in world.regions]
+    if lands:
+        out("       земли: %s" % ", ".join(lands[:8]))
+    for voice in era.voices:
+        out("       %s" % voice["оборот"])
+    out("")
+
+    for calamity_id in era.calamity_ids:
+        calamity = world.calamities.get(calamity_id)
+        if calamity is None:
+            continue
+        out("    %s (%d–%s), тяжесть %d, глубина %d" % (
+            calamity.name, calamity.start.year,
+            calamity.end.year if calamity.end else "—",
+            calamity.severity, calamity.depth))
+        line = "         причина: %s" % (calamity.cause or "не названа")
+        if calamity.cause_year and calamity.cause != dis.UNKNOWN_CAUSE:
+            line += ", тянется с %d года" % calamity.cause_year
+        out(line)
+        if calamity.cause_hidden and not calamity.cause_known:
+            out("         а на деле: %s — и мир этого не узнал"
+                % calamity.cause_hidden)
+        if calamity.trigger:
+            out("         спустило: %s" % calamity.trigger)
+        if calamity.chain_factor:
+            out("         выросло из прежней беды: %s" % calamity.chain_factor)
+        for omen in calamity.omens[:2]:
+            out("         знак (%d): %s — %s" % (
+                int(omen.get("год", 0)), omen.get("знак", ""),
+                omen.get("прочтение", "")))
+        for item in calamity.responses[:3]:
+            out("         решили (%d): %s — %s" % (int(item.get("год", 0)),
+                                                   item.get("решение", ""),
+                                                   item.get("итог", "")))
+        for item in calamity.mistakes[:2]:
+            out("         ошибка (%d): %s" % (int(item.get("год", 0)),
+                                              item.get("что", "")))
+        if calamity.damage:
+            bits = ["%s %d%%" % (kind, round(100 * value))
+                    for kind, value in calamity.damage.items() if value >= 0.05]
+            if bits:
+                out("         ущерб: %s" % ", ".join(bits))
+        if calamity.outcome:
+            out("         исходы: %s" % "; ".join(calamity.outcome.values()))
+        if calamity.gains:
+            out("         поднялись: %s" % "; ".join(calamity.gains[:2]))
+        for row in calamity.front[:8]:
+            region = world.regions.get(row["земля"])
+            line = "         фронт %d: %s — %s" % (
+                int(row.get("год", 0)),
+                region.name if region else row["земля"],
+                row.get("состояние", ""))
+            if row.get("чем"):
+                line += " (%s)" % row["чем"]
+            if row.get("роль"):
+                line += " | %s: %s" % (row["город"], row["роль"])
+            out(line)
+        for voice in dis.VERSIONS:
+            if voice in calamity.versions:
+                out("         %s: %s" % (voice, calamity.versions[voice]))
+        for scar_id in calamity.scar_ids:
+            scar = world.scars.get(scar_id)
+            if scar is None:
+                continue
+            out("         след: %s — %s%s" % (
+                scar.name, scar.state,
+                ("; " + "; ".join(scar.notes)) if scar.notes else ""))
+        for lore_id in calamity.lore_ids:
+            lore = world.lost_lore.get(lore_id)
+            if lore is None:
+                continue
+            out("         утрата: %s — %s (%s)" % (lore.kind, lore.about,
+                                                   lore.state))
+        out("")
+
+
 def portraits(world, out) -> None:
-    """Три портрета мира: величайшие имена, ушедшие народы, старый город."""
+    """Четыре портрета мира: имена, ушедшие народы, старый город, злое время."""
     great_names(world, out)
     peoples_gone(world, out)
     oldest_town(world, out)
+    worst_time(world, out)
 
 
 # ---------------------------------------------------------------------------
@@ -1687,6 +1790,129 @@ def audit(world) -> list:
                                    for pair in ends.most_common(3)))))
         if len(cabals) >= 10 and len(ends) < 3:
             note("заговоры этого мира кончаются всегда одинаково")
+
+    # 32. Живая катастрофа: беда как история, а не как число погибших.
+    from worldgen import disaster as dis_cat
+
+    calamities = list(world.calamities.values())
+    if calamities:
+        named = sum(1 for item in calamities
+                    if item.cause and item.cause != dis_cat.UNKNOWN_CAUSE)
+        hidden = sum(1 for item in calamities if item.cause_hidden)
+        omens = sum(len(item.omens) for item in calamities)
+        answered = sum(1 for item in calamities if item.responses)
+        mistakes = sum(1 for item in calamities if item.mistakes)
+        stopped = sum(1 for item in calamities
+                      if item.prevented
+                      and item.prevented != dis_cat.STOP_NONE)
+        found.append(("=", "беды: %d; причина названа у %d, известная не та "
+                      "у %d; знаков %d; власть отвечала в %d, ошиблась в %d; "
+                      "отведено заранее %d"
+                      % (len(calamities), named, hidden, omens, answered,
+                         mistakes, stopped)))
+        if named * 10 < len(calamities) * 8:
+            bad("у большинства бед причина не названа: %d из %d"
+                % (named, len(calamities)))
+        heavy = [item for item in calamities if item.severity >= 3]
+        if heavy and not any(item.responses for item in heavy):
+            bad("на тяжёлые беды власть не отвечала ни разу")
+        for item in calamities:
+            if item.cause_year and item.cause_year > item.start.year:
+                bad("у беды «%s» причина позже самой беды" % item.name)
+                break
+            if item.damage and max(item.damage.values()) > 1.0:
+                bad("у беды «%s» ущерб больше единицы" % item.name)
+                break
+
+    # 33. Шрамы земли и потерянное знание: что беда оставила после себя.
+    scars = list(world.scars.values())
+    if scars:
+        states = Counter(item.state for item in scars)
+        kinds = Counter(item.kind for item in scars)
+        kept = sum(1 for item in scars
+                   if item.state != dis_cat.SCAR_FORGOTTEN)
+        found.append(("=", "шрамы земли: %d, видов %d, состояния %s; мир ещё "
+                      "помнит %d"
+                      % (len(scars), len(kinds),
+                         ", ".join("%s — %d" % pair
+                                   for pair in states.most_common(4)), kept)))
+        top, count = kinds.most_common(1)[0]
+        if len(scars) >= 12 and count * 4 > len(scars):
+            note("шрамы однообразны: «%s» — %d из %d" % (top, count, len(scars)))
+        if len(scars) >= 12 and len(states) < 3:
+            note("шрамы не живут: состояний всего %d" % len(states))
+        for scar in scars:
+            region = world.regions.get(scar.region_id)
+            if region is None or region.drowned:
+                bad("шрам «%s» остался в земле, которой нет" % scar.name)
+                break
+    elif world.total_years >= 3000 and len(calamities) >= 20:
+        note("беды этого мира не оставили на земле ни следа")
+
+    lore = list(world.lost_lore.values())
+    if lore:
+        back = sum(1 for item in lore if item.state == dis_cat.LORE_FOUND)
+        found.append(("=", "утрачено умений: %d, вернулось %d, видов %d"
+                      % (len(lore), back,
+                         len({item.kind for item in lore}))))
+        if back == len(lore) and len(lore) >= 6:
+            note("всё утраченное вернулось — утрата ничего не стоит")
+        for item in lore:
+            if item.found is not None and item.lost is not None \
+                    and item.found.ordinal < item.lost.ordinal:
+                bad("умение «%s» найдено раньше, чем потеряно" % item.kind)
+                break
+
+    # 34. Времена бед и шесть рассказов об одном.
+    eras = [item for item in world.crisis_eras.values() if item.name]
+    if eras:
+        spans = [(item.end.year if item.end else item.start.year)
+                 - item.start.year for item in eras]
+        found.append(("=", "времён бед: %d, в среднем по %d лет и %.1f беды; "
+                      "с многими именами %d"
+                      % (len(eras), round(sum(spans) / float(len(spans))),
+                         sum(len(item.calamity_ids)
+                             for item in eras) / float(len(eras)),
+                         sum(1 for item in eras if item.voices))))
+        longest = max(spans)
+        if longest > 600:
+            note("время бед длиной %d лет — это уже не эпоха, а весь мир"
+                 % longest)
+        for era in eras:
+            if len(era.calamity_ids) < 2:
+                bad("время бед «%s» собрано из одной беды" % era.name)
+                break
+    elif world.total_years >= 5000 and len(calamities) >= 40:
+        note("за всю историю беды ни разу не сложились в одно время")
+
+    spoken = [item for item in calamities if len(item.versions) >= 4]
+    if spoken:
+        found.append(("=", "бед, о которых спорят: %d из %d"
+                      % (len(spoken), len(calamities))))
+
+    # 35. Фронт: нашествие шло по землям или легло на них сразу.
+    fronts = [item for item in calamities if item.front]
+    if fronts:
+        rows = sum(len(item.front) for item in fronts)
+        lost = sum(1 for item in fronts
+                   if any(row.get("состояние") == dis_cat.LAND_LOST
+                          for row in item.front))
+        holds = sum(1 for item in fronts for row in item.front
+                    if row.get("состояние") == dis_cat.LAND_THREAT)
+        roles = Counter(row["роль"] for item in fronts for row in item.front
+                        if row.get("роль"))
+        found.append(("=", "фронтов: %d, записей %d, задержек %d; земли "
+                      "остались за чужими в %d; роли городов: %s"
+                      % (len(fronts), rows, holds, lost,
+                         ", ".join("%s — %d" % pair
+                                   for pair in roles.most_common(4)))))
+        for item in fronts:
+            for row in item.front:
+                if row.get("роль") == dis_cat.ROLE_STOOD \
+                        and row.get("состояние") == dis_cat.LAND_HELD:
+                    bad("город «выстоял» в земле, которую заняли (беда «%s»)"
+                        % item.name)
+                    break
 
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:

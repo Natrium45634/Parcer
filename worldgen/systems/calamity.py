@@ -252,6 +252,9 @@ def upkeep(ctx, year: int, period: int) -> None:
     # находят заново — сперва обрывками, потом целым.
     disaster_sys.age_scars(ctx, year, period)
     disaster_sys.find_lore(ctx, year, period)
+    # Век покоя — и набранное время бед становится эпохой с именем.
+    disaster_sys.close_era(ctx, year, ctx.date_in(
+        ctx.rng("disaster", "era-close", year), year))
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +507,8 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     calamity.depth = _depth_of(calamity, spec)
 
     _bind_polities(ctx, calamity)
+    # У нашествия есть направление: где пролом и куда они пойдут дальше.
+    disaster_sys.open_front(ctx, calamity, spec, rng, year)
     _plan(ctx, calamity, spec, rng, duration, severity)
     if spec.kind == cat.CLIMATE:
         # Пока лёд идёт, мир не растёт: это чувствуется сразу, а не потом.
@@ -788,6 +793,9 @@ def _advance(ctx, year: int) -> None:
             # И тогда же в столицах решают, что с этим делать.
             disaster_sys.respond(ctx, calamity, spec, plan, rng, year)
 
+        # Фронт за год: шаг вперёд или задержка, и у задержки есть причина.
+        disaster_sys.move_front(ctx, calamity, spec, rng, year)
+
         _damage(ctx, calamity, spec, plan, rng, year)
 
         if year in plan["battles"]:
@@ -1050,6 +1058,10 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
     disaster_sys.count_damage(ctx, calamity, spec)
     disaster_sys.four_outcomes(ctx, calamity, spec, plan, rng)
     disaster_sys.plan_chain(ctx, calamity, spec, rng, year)
+    # Кто что про это рассказал — и не вошла ли беда в одно время с теми,
+    # что шли до неё без передышки.
+    disaster_sys.tell_versions(ctx, calamity, spec, rng, year, date)
+    disaster_sys.era_watch(ctx, calamity, year, date)
 
     world.end_calamity(calamity, date, cat.RESOLUTIONS.get(
         resolution, ("кончилось", False))[0])
@@ -1064,6 +1076,13 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
         actors=[figure.id for figure in heroes[:4] + commanders[:2]],
         subjects=[calamity.id], region_id=calamity.region_ids[0],
         race_id=calamity.race_id)
+
+    # Чем кончился фронт: даже победой возвращают не всё.
+    # Что считать победой, уже сказано в самом каталоге исходов: второе
+    # поле пары и значит «беду одолели», а не «беда кончилась сама».
+    disaster_sys.close_front(
+        ctx, calamity, rng, year, date,
+        won=bool(cat.RESOLUTIONS.get(resolution, ("", False))[1]))
 
     _leave_relics(ctx, calamity, spec, rng, year, date)
     # Земля не поднимается сразу: следующая такая беда ляжет тяжелее.

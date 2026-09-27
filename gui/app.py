@@ -378,6 +378,9 @@ class ChronicleApp(tk.Tk):
              "Погибло", "Исход", "Следов"),
             (230, 150, 130, 110, 70, 100, 100, 190, 70), self._on_calamity_open,
             filler=lambda: self._fill_calamities())
+        self.disaster_text = self._add_text_tab(
+            "След бедствий", lambda: self._set_text(
+                self.disaster_text, chronicle.render_disasters(self.world)))
         self.politics_text = self._add_text_tab(
             "Политика",
             filler=lambda: self._set_text(self.politics_text,

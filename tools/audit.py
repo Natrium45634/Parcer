@@ -244,6 +244,172 @@ def m_myth_traces(world):
     return sum(len(myth.get("следы", ())) for myth in world.myths)
 
 
+# --- беда и её след ---------------------------------------------------------
+
+def _heavy_calamities(world):
+    return [item for item in world.calamities.values() if item.severity >= 3]
+
+
+def m_cause_named(world):
+    """У беды названа причина, а не «случилось само»."""
+    from worldgen import disaster as dis
+    rows = list(world.calamities.values())
+    known = sum(1 for item in rows
+                if item.cause and item.cause != dis.UNKNOWN_CAUSE)
+    return _share(known, len(rows))
+
+
+def m_cause_hidden(world):
+    """И у части бед известная причина — не настоящая."""
+    rows = list(world.calamities.values())
+    return _share(sum(1 for item in rows if item.cause_hidden), len(rows))
+
+
+def m_omens_read(world):
+    """Знаки читают верно не всегда — иначе мир перестаёт быть опасным."""
+    from worldgen import disaster as dis
+    right = seen = 0
+    for calamity in world.calamities.values():
+        for omen in calamity.omens:
+            seen += 1
+            if omen.get("прочтение") == dis.READ_RIGHT:
+                right += 1
+    return _share(right, seen)
+
+
+def m_prevented(world):
+    """Беды, отведённые до начала: их должно быть мало, но должно быть."""
+    from worldgen import disaster as dis
+    rows = [item for item in world.calamities.values()
+            if item.prevented and item.prevented != dis.STOP_NONE]
+    return len(rows)
+
+
+def m_responses(world):
+    """Власть отвечает на беду делом, а не только терпит."""
+    rows = _heavy_calamities(world)
+    return _share(sum(1 for item in rows if item.responses), len(rows))
+
+
+def m_mistakes(world):
+    """И ошибается: беду делают бедой решения в столицах."""
+    rows = _heavy_calamities(world)
+    return _share(sum(1 for item in rows if item.mistakes), len(rows))
+
+
+def m_chained(world):
+    """Беда рождает беду — но цепь затухает, а не съедает мир."""
+    rows = list(world.calamities.values())
+    grown = sum(1 for item in rows
+                if any("выросло из беды" in note for note in item.notes))
+    return _share(grown, len(rows))
+
+
+def m_scar_kinds(world):
+    """Шрамы разные: в ходу не два вида на весь мир."""
+    return len({item.kind for item in world.scars.values()})
+
+
+def m_scar_top(world):
+    """И ни один вид не занимает больше четверти всех шрамов."""
+    rows = list(world.scars.values())
+    if not rows:
+        return None
+    counts = {}
+    for item in rows:
+        counts[item.kind] = counts.get(item.kind, 0) + 1
+    return _share(max(counts.values()), len(rows))
+
+
+def m_scar_states(world):
+    """Шрам живёт: его обходят, обживают, освящают, забывают."""
+    return len({item.state for item in world.scars.values()})
+
+
+def m_scar_remembered(world):
+    """Часть шрамов мир всё-таки помнит — не всё уходит в забвение."""
+    from worldgen import disaster as dis
+    rows = list(world.scars.values())
+    kept = sum(1 for item in rows if item.state != dis.SCAR_FORGOTTEN)
+    return _share(kept, len(rows))
+
+
+def m_lore_lost(world):
+    """Знание гибнет: у большой беды это главный убыток."""
+    return len(world.lost_lore)
+
+
+def m_lore_kept(world):
+    """И не всё возвращается: иначе утрата ничего не значит."""
+    from worldgen import disaster as dis
+    rows = list(world.lost_lore.values())
+    lost = sum(1 for item in rows if item.state != dis.LORE_FOUND)
+    return _share(lost, len(rows))
+
+
+def m_versions(world):
+    """О большой беде рассказывают по-разному, и это записано."""
+    rows = _heavy_calamities(world)
+    return _share(sum(1 for item in rows if len(item.versions) >= 4), len(rows))
+
+
+def m_eras(world):
+    """Времена бед — редкость: не всякое столетие зовётся Веком Пепла."""
+    return len([item for item in world.crisis_eras.values() if item.name])
+
+
+def m_era_length(world):
+    """И они сгущение, а не полтысячи лет с бедой раз в век."""
+    rows = [item for item in world.crisis_eras.values()
+            if item.name and item.end is not None]
+    if not rows:
+        return None
+    spans = [item.end.year - item.start.year for item in rows]
+    return round(sum(spans) / float(len(spans)))
+
+
+def m_era_voices(world):
+    """У времени бед не одно имя: у каждого народа своё."""
+    rows = [item for item in world.crisis_eras.values() if item.name]
+    return _share(sum(1 for item in rows if item.voices), len(rows))
+
+
+def m_front_lands(world):
+    """У нашествия есть ход по землям, а не список сразу."""
+    rows = [item for item in world.calamities.values() if item.front]
+    if not rows:
+        return None
+    return round(sum(len(item.front) for item in rows) / float(len(rows)), 1)
+
+
+def m_front_kept(world):
+    """И победой возвращают не всё: часть земель остаётся за чужими."""
+    from worldgen import disaster as dis
+    kept = 0
+    for calamity in world.calamities.values():
+        if any(row.get("состояние") == dis.LAND_LOST
+               for row in calamity.front):
+            kept += 1
+    rows = [item for item in world.calamities.values() if item.front]
+    return _share(kept, len(rows))
+
+
+def m_learned(world):
+    """Земля учится: после беды в ней появляются дамбы и амбары."""
+    rows = list(world.regions.values())
+    return _share(sum(1 for item in rows if item.works), len(rows))
+
+
+def m_habits(world):
+    """А город оставляет это в укладе и держит, забыв причину."""
+    from worldgen import township as town_cat
+    rows = list(world.townships.values())
+    with_habit = sum(1 for item in rows
+                     if any(mark.get("вид") == town_cat.HABIT
+                            for mark in item.marks))
+    return _share(with_habit, len(rows))
+
+
 # --- расы ---------------------------------------------------------------------
 # Мир, где одна раса заняла всё, а от прочих осталось по деревне, —
 # это не история мира, а история одного народа. Меры ниже и есть
@@ -417,6 +583,51 @@ MEASURES = (
             "штук", "у главных народов есть числом народ"),
     Measure("расы", "оседлых с тремя городами", m_race_towns, 4, None, "штук",
             "города строит не одна раса"),
+    Measure("беда", "причина названа", m_cause_named, 0.8, None, "доля",
+            "у беды есть причина, а не «случилось само»"),
+    Measure("беда", "известная причина — не та", m_cause_hidden, 0.08, 0.6,
+            "доля", "мир не всегда знает, отчего это было"),
+    Measure("беда", "знаки прочли верно", m_omens_read, 0.1, 0.65, "доля",
+            "предупреждение — не подарок: нужен тот, кто умеет читать"),
+    Measure("беда", "отведено до начала", m_prevented, 1, None, "штук",
+            "люди иногда успевают, иначе мир безнадёжен", min_years=3000),
+    Measure("беда", "власть ответила делом", m_responses, 0.5, None, "доля",
+            "на беду отвечают решениями, а не только терпят"),
+    Measure("беда", "решения вышли ошибкой", m_mistakes, 0.05, 0.6, "доля",
+            "беду делают бедой решения в столицах"),
+    Measure("беда", "выросло из прежней", m_chained, 0.05, 0.45, "доля",
+            "цепь бед затухает, а не съедает мир"),
+    Measure("шрамы", "видов в ходу", m_scar_kinds, 8, None, "из 29",
+            "следы бед разные, а не два на весь мир"),
+    Measure("шрамы", "доля самого частого", m_scar_top, None, 0.3, "доля",
+            "ни один след не занимает четверть всех"),
+    Measure("шрамы", "состояний в ходу", m_scar_states, 3, None, "из 5",
+            "шрам живёт: его обходят, обживают, освящают, забывают"),
+    Measure("шрамы", "мир ещё помнит", m_scar_remembered, 0.12, None, "доля",
+            "не всё уходит в забвение — место, которого боятся, помнят"),
+    Measure("утраты", "знаний потеряно", m_lore_lost, 3, None, "штук",
+            "большая беда уносит не только людей", min_years=3000),
+    Measure("утраты", "так и не вернулось", m_lore_kept, 0.18, None, "доля",
+            "если возвращается всё, утрата ничего не значит",
+            min_years=3000),
+    Measure("память", "о беде спорят", m_versions, 0.3, None, "доля",
+            "одного рассказа о большой беде не бывает"),
+    Measure("память", "времён бед", m_eras, 1, None, "штук",
+            "цепь бед складывается в одно время с именем",
+            min_years=3000),
+    Measure("память", "длина времени бед", m_era_length, 60, 320, "лет",
+            "эпоха — сгущение, а не полтысячи лет", min_years=3000),
+    Measure("память", "у времени много имён", m_era_voices, 0.5, None, "доля",
+            "держава помнит войну, деревня — голодные годы",
+            min_years=3000),
+    Measure("фронт", "записей о ходе", m_front_lands, 3.0, None, "штук",
+            "нашествие идёт по землям, а не ложится сразу"),
+    Measure("фронт", "земли остались за чужими", m_front_kept, 0.05, 0.5,
+            "доля", "победой возвращают не всё, но и не теряют своих земель"),
+    Measure("наука", "земель с делами людей", m_learned, 0.15, None, "доля",
+            "земля учится: дамбы, амбары, стены, карантин"),
+    Measure("наука", "городов с привычкой", m_habits, 0.1, None, "доля",
+            "уклад держат веками, забыв причину"),
 )
 
 
