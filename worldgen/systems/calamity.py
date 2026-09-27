@@ -19,13 +19,16 @@
 from __future__ import annotations
 
 from . import causes as causes_sys
+from . import disaster as disaster_sys
 from . import houses as houses_mod
 from . import succession
 from . import upheaval
 from .. import catastrophe as cat
+from .. import disaster as dis
 from .. import history
 from .. import narrative
 from .. import narrative_calamity as texts
+from .. import narrative_disaster as dis_texts
 from .. import races as races_mod
 from ..models import ACTIVE, MINOR, RUINED
 from ..morph import accusative_noun, genitive_phrase, phrase
@@ -199,6 +202,9 @@ def _prepare_from_map(ctx) -> None:
 # ---------------------------------------------------------------------------
 
 def tick(ctx, year: int) -> None:
+    # Сперва зреющие беды: их знаки видны заранее, и мир успевает
+    # прочесть их верно или неверно — иногда беда так и не приходит.
+    disaster_sys.tick_pending(ctx, year)
     _advance(ctx, year)
     _tick_climate(ctx, year)
     _maybe_start(ctx, year)
@@ -236,6 +242,9 @@ def _tick_climate(ctx, year: int) -> None:
 def upkeep(ctx, year: int, period: int) -> None:
     ctx.world.refresh_populations()
     _close_dark_ages(ctx, year)
+    # Дамбы не чинят, амбары стоят пустыми, устав никто не читал двести
+    # лет: земля забывает, чему её учила прежняя беда.
+    disaster_sys.forget(ctx, year, period)
 
 
 # ---------------------------------------------------------------------------
@@ -393,11 +402,29 @@ def _maybe_start(ctx, year: int) -> None:
     spec = _pick_spec(ctx, year, rng)
     if spec is None:
         return
+    # Часть бед приходит с предвестниками: их видно за годы, и у мира
+    # есть время прочесть знак — или не прочесть.
+    if disaster_sys.want_omens(ctx, spec, rng):
+        severity = spec.severity(rng)
+        count = min(len(world.regions), spec.regions_count(rng, severity))
+        region_ids = _pick_regions(ctx, rng, spec, count, None, severity)
+        if region_ids:
+            disaster_sys.schedule(ctx, year, spec, rng, severity, region_ids)
+            return
     _start_calamity(ctx, year, spec, rng)
 
 
+def start_scheduled(ctx, year: int, spec, rng, severity: int, region_ids,
+                    omens=None, prevented: str = ""):
+    """Беда, которая созрела: знаки были, срок пришёл."""
+    return _start_calamity(ctx, year, spec, rng, severity=severity,
+                           region_ids=region_ids, omens=omens,
+                           prevented=prevented)
+
+
 def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
-                    parent=None, relic=None, region_ids=None, duration=0):
+                    parent=None, relic=None, region_ids=None, duration=0,
+                    omens=None, prevented: str = "", chain_factor: str = ""):
     world = ctx.world
     severity = severity or spec.severity(rng)
     # Долгие перемены климата длятся ровно столько, сколько вписано в карту.
@@ -453,6 +480,22 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     if spec.key in upheaval.GREAT:
         ctx.calamity_last[GREAT_MEMORY] = year
 
+    # Почему это случилось и что спустило беду именно в этот год. Причина
+    # тянется веками, спуск длится один день — и в летописи это разные
+    # строки.
+    story = disaster_sys.choose_cause(ctx, spec, rng, year, parent)
+    calamity.cause = story["причина"]
+    calamity.cause_hidden = story["скрытая"]
+    calamity.cause_known = story["известна"]
+    calamity.cause_year = story["год причины"]
+    calamity.trigger = story["спуск"]
+    if omens:
+        calamity.omens = list(omens)
+    calamity.prevented = prevented or dis.STOP_NONE
+    calamity.chain_factor = chain_factor
+    calamity.scale = _scale_of(world, calamity, spec)
+    calamity.depth = _depth_of(calamity, spec)
+
     _bind_polities(ctx, calamity)
     _plan(ctx, calamity, spec, rng, duration, severity)
     if spec.kind == cat.CLIMATE:
@@ -497,6 +540,43 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     if spec.key in upheaval.GREAT:
         upheaval.aftermath(ctx, calamity, spec, rng, year, date)
     return calamity
+
+
+def _scale_of(world, calamity, spec) -> str:
+    """Масштаб беды: сколько земель задело, а не сколько унесло.
+
+    Масштаб и тяжесть — разные вещи. Всемирная перемена чар может почти
+    никого не убить и при этом переписать правила, по которым живёт мир.
+    """
+    count = len(calamity.region_ids)
+    total = max(1, len(world.regions))
+    share = count / float(total)
+    if spec.worldwide or share >= 0.75:
+        return dis.SCALE_WORLD if calamity.severity < 5 else dis.SCALE_CIV
+    if share >= 0.35:
+        return dis.SCALE_MANY
+    if count >= 2:
+        return dis.SCALE_LAND
+    return dis.SCALE_LOCAL
+
+
+def _depth_of(calamity, spec) -> int:
+    """Глубина перемены: на сколько после беды мир стал другим.
+
+    Считается от тяжести, но не равна ей: политический распад меняет
+    державу (третья ступень) при небольшом счёте погибших, а магический
+    прорыв высшей тяжести способен переменить само правило мира.
+    """
+    depth = 1 + calamity.severity // 2
+    if spec.kind in (cat.POLITICAL,) and calamity.severity >= 3:
+        depth = max(depth, 3)
+    if spec.kind in (cat.MAGIC, cat.INVASION) and calamity.severity >= 4:
+        depth = max(depth, 4)
+    if spec.key in upheaval.GREAT and calamity.severity >= 5:
+        depth = 5
+    if spec.key == "void_incursion" and calamity.severity >= 5:
+        depth = 5
+    return max(1, min(5, depth))
 
 
 def start_named(ctx, year: int, spec_key: str, rng, severity: int = 0,
@@ -675,6 +755,22 @@ def _advance(ctx, year: int) -> None:
         spec = cat.get_spec(calamity.key)
         rng = ctx.rng("calamity", calamity_id, year)
 
+        # Беда идёт фазами: первый удар, самое худшее, привыкание,
+        # отступление. Смена фазы — это и повод для перелома: именно в
+        # такие годы падают крепости и приходит помощь от соседей.
+        phase, base = disaster_sys.phase_at(spec, plan, calamity, year)
+        if disaster_sys.note_phase(world, calamity, phase, year, base):
+            if calamity.severity >= 3 and calamity.phase_log[:-1]:
+                title, text = dis_texts.phase_turn(
+                    rng, calamity, phase, world)
+                world.add_event(
+                    date=ctx.date_in(rng, year),
+                    era_index=world.era_index_at(year), kind="calamity_phase",
+                    title=title, text=text, importance=2,
+                    subjects=[calamity.id],
+                    region_id=calamity.region_ids[0])
+            disaster_sys.maybe_turn(ctx, calamity, spec, plan, rng, year)
+
         _damage(ctx, calamity, spec, plan, rng, year)
 
         if year in plan["battles"]:
@@ -725,6 +821,10 @@ def _damage(ctx, calamity, spec, plan, rng, year: int) -> None:
     annual = 1.0 - (1.0 - total) ** (1.0 / window)
     if year - calamity.start.year > window:
         annual *= LINGER_SHARE
+    # Живая сила беды: фаза (она перераспределяет урон по годам), переломы
+    # и решения людей, и готовность самих земель. Одна и та же беда в
+    # земле с дамбами и в земле, забывшей их чинить, — две разные беды.
+    annual *= disaster_sys.force_now(world, calamity, spec, plan, year)
     if annual <= 0:
         return
 
@@ -933,6 +1033,8 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
         race_id=calamity.race_id)
 
     _leave_relics(ctx, calamity, spec, rng, year, date)
+    # Земля не поднимается сразу: следующая такая беда ляжет тяжелее.
+    disaster_sys.hurt_lands(world, calamity, spec)
     _start_dark_age(ctx, calamity, spec, rng, year, date)
     ctx.calamity_plans.pop(calamity.id, None)
 

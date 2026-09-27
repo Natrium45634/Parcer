@@ -23,6 +23,7 @@ from .eras import build_eras
 from . import fates
 from .rng import normalize_seed, seed_to_int
 from .systems import (aristocracy, artifacts, cabals, calamity, causes,
+                      disaster as disaster_sys,
                       citylife,
                       crafts, culture,
                       diplomacy, divinity, embassy,
@@ -123,6 +124,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
 
     peoples.plan_awakenings(ctx)
     calamity.prepare(ctx)
+    # Склад мира: из каких причин в этом мире вообще растут беды, и
+    # насколько земли к ним готовы.
+    disaster_sys.prepare(ctx)
     religion.prepare(ctx)
     # Мифический век идёт сразу за верой мира: первородные были прежде
     # всех богов, и следы их лежат в землях, которые уже построены.
