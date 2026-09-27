@@ -91,7 +91,8 @@ DESTINY_FRAMES = (
 
 def destiny_line(rng, key: str, sex: str = "m") -> str:
     return rng.choice(DESTINY_FRAMES) % {
-        "key": key, "about": cat.destiny_about(key, sex)}
+        "key": cat.destiny_name(key, sex),
+        "about": cat.destiny_about(key, sex)}
 
 
 # ---------------------------------------------------------------------------

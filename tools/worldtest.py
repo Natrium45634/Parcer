@@ -127,7 +127,7 @@ def great_names(world, out, count: int = 5) -> None:
                    weight.climax.get("что", "")))
         if weight.destiny:
             out("       судьба: %s — %s"
-                % (weight.destiny,
+                % (renown_cat.destiny_name(weight.destiny, figure.sex),
                    renown_cat.destiny_about(weight.destiny, figure.sex)))
         out("       слава при жизни %d из ста, помнят теперь %d%s"
             % (weight.fame, weight.memory,

@@ -1148,7 +1148,7 @@ def _renown_block(world, weight, figure, cat, texts) -> list:
         rows.append("      для истории он: %s" % ", ".join(weight.roles))
     if weight.destiny:
         rows.append("      судьба: %s — %s"
-                    % (weight.destiny,
+                    % (cat.destiny_name(weight.destiny, figure.sex),
                        cat.destiny_about(weight.destiny, figure.sex)))
     if weight.aura:
         rows.append("      %s" % texts.aura_line(weight.aura, figure.sex))

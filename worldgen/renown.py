@@ -252,6 +252,24 @@ DESTINIES = (
 )
 
 
+# Имя судьбы тоже бывает с родом: «нашёл и потерял» о женщине читается
+# вразнобой с её же описанием. Ключ хранится в мужском роде — по нему и
+# ищется женский.
+DESTINY_FEMALE = {
+    "случайный герой": "случайная героиня",
+    "герой поневоле": "героиня поневоле",
+    "ложный герой": "ложная героиня",
+    "продолжатель": "продолжательница",
+    "последний в роду": "последняя в роду",
+    "нашёл и потерял": "нашла и потеряла",
+}
+
+
+def destiny_name(key: str, sex: str = "m") -> str:
+    """Как называется эта судьба — в нужном роде."""
+    return DESTINY_FEMALE.get(key, key) if sex == "f" else key
+
+
 def destiny_about(key: str, sex: str = "m") -> str:
     """Чем была эта судьба — в нужном роде."""
     pair = DESTINIES_BY_KEY.get(key)
@@ -514,7 +532,8 @@ __all__ = ["LEVEL_NAMES", "LEVEL_ABOUT", "TIERS", "tier_of", "level_for",
            "INFLUENCES", "INFLUENCE_ABOUT", "POWER", "WAR", "FAITH",
            "CULTURE", "CRAFT", "MAGIC", "WEALTH", "PEOPLE", "LAND", "ORDER",
            "BLOOD", "COSMOS", "ROLES", "ROLE_ABOUT", "DESTINIES",
-           "DESTINIES_BY_KEY", "destiny_about", "level_about",
+           "DESTINIES_BY_KEY", "destiny_about", "destiny_name",
+           "DESTINY_FEMALE", "level_about",
            "aura_about", "AURA_FEMALE", "FOOTPRINTS", "FOOT_WEIGHT", "FOOT_INFLUENCE",
            "FOOT_STATE", "FOOT_HOUSE", "FOOT_LAW", "FOOT_FAITH",
            "FOOT_SCHOOL", "FOOT_CITY", "FOOT_FORT", "FOOT_GUILD",
