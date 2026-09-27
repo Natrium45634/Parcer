@@ -41,25 +41,31 @@ LEVEL_FRAMES = (
 )
 
 
-def level_line(rng, level: int) -> str:
+def level_line(rng, level: int, sex: str = "m") -> str:
     return rng.choice(LEVEL_FRAMES) % {
-        "level": level, "about": cat.LEVEL_ABOUT.get(level, "")}
+        "level": level, "about": cat.level_about(level, sex)}
 
 
 RISE_FRAMES = (
-    "С %(from)d ступени он поднялся до %(to)d: %(why)s.",
-    "Имя его выросло с %(from)d до %(to)d — %(why)s.",
+    ("С %(from)d ступени он поднялся до %(to)d: %(why)s.",
+     "С %(from)d ступени она поднялась до %(to)d: %(why)s."),
+    ("Имя его выросло с %(from)d до %(to)d — %(why)s.",
+     "Имя её выросло с %(from)d до %(to)d — %(why)s."),
 )
 
 FALL_FRAMES = (
-    "С %(from)d ступени он осел до %(to)d: %(why)s.",
-    "Имя его осыпалось с %(from)d до %(to)d — %(why)s.",
+    ("С %(from)d ступени он осел до %(to)d: %(why)s.",
+     "С %(from)d ступени она осела до %(to)d: %(why)s."),
+    ("Имя его осыпалось с %(from)d до %(to)d — %(why)s.",
+     "Имя её осыпалось с %(from)d до %(to)d — %(why)s."),
 )
 
 
-def review_line(rng, before: int, after: int, why: str) -> str:
+def review_line(rng, before: int, after: int, why: str,
+                sex: str = "m") -> str:
     rows = RISE_FRAMES if after > before else FALL_FRAMES
-    return rng.choice(rows) % {"from": before, "to": after, "why": why}
+    return cat.in_sex(rows, rng, sex) % {"from": before, "to": after,
+                                         "why": why}
 
 
 # ---------------------------------------------------------------------------
@@ -83,9 +89,9 @@ DESTINY_FRAMES = (
 )
 
 
-def destiny_line(rng, key: str) -> str:
+def destiny_line(rng, key: str, sex: str = "m") -> str:
     return rng.choice(DESTINY_FRAMES) % {
-        "key": key, "about": cat.DESTINIES_BY_KEY.get(key, "")}
+        "key": key, "about": cat.destiny_about(key, sex)}
 
 
 # ---------------------------------------------------------------------------
@@ -126,20 +132,25 @@ def foot_line(kind: str, what: str) -> str:
 # Шесть голосов
 # ---------------------------------------------------------------------------
 
-def voice_line(rng, voice: str, was: str) -> str:
+def voice_line(rng, voice: str, was: str, sex: str = "m") -> str:
     """Что говорит об этом каждый из шести голосов."""
     if voice == cat.AS_WAS:
         return was
     rows = cat.VOICE_TWIST.get(voice)
-    return rng.choice(rows) if rows else was
+    return cat.in_sex(rows, rng, sex) if rows else was
 
 
 DEEDS_AS_WAS = (
-    "делал он то, что мог, и вышло не всё",
-    "сделанного за ним числится меньше, чем сказано",
-    "главное он сделал один раз и больше не повторил",
-    "дел за ним много, и половина вышла боком",
-    "он сделал ровно то, о чём его просили, и не больше",
+    ("делал он то, что мог, и вышло не всё",
+     "делала она то, что могла, и вышло не всё"),
+    ("сделанного за ним числится меньше, чем сказано",
+     "сделанного за ней числится меньше, чем сказано"),
+    ("главное он сделал один раз и больше не повторил",
+     "главное она сделала один раз и больше не повторила"),
+    ("дел за ним много, и половина вышла боком",
+     "дел за ней много, и половина вышла боком"),
+    ("он сделал ровно то, о чём его просили, и не больше",
+     "она сделала ровно то, о чём её просили, и не больше"),
 )
 
 
@@ -157,8 +168,9 @@ def climax_line(rng, what: str, year: int) -> str:
     return rng.choice(CLIMAX_FRAMES) % {"what": what, "year": year}
 
 
-def aura_line(key: str) -> str:
-    return "%s: %s" % (cap(key), cat.AURAS_BY_KEY.get(key, ""))
+def aura_line(key: str, sex: str = "m") -> str:
+    name, about = cat.aura_about(key, sex)
+    return "%s: %s" % (cap(name), about)
 
 
 __all__ = ["cap", "forms", "man_ref", "level_line", "review_line",

@@ -44,6 +44,9 @@ from worldgen import rulers                                      # noqa: E402
 from worldgen import narrative_tongues                           # noqa: E402
 from worldgen import narrative_war                               # noqa: E402
 from worldgen import names as names_mod
+from worldgen import renown as renown_cat
+from worldgen import township as township_cat
+from worldgen import narrative_town as township_texts
 from worldgen.morph import genitive_noun                         # noqa: E402
 from worldgen.systems import war as war_system                   # noqa: E402
 from worldgen import warfare                                     # noqa: E402
@@ -67,6 +70,257 @@ BANDS = ((0.01, 0.19), (0.19, 0.38), (0.38, 0.58), (0.58, 0.79), (0.79, 0.999))
 MALE_MARKS = ("Младший", "Старший", "Второй", "Третий", "Иной")
 RANK_FORMS = (("импер", ("импер",)), ("герцог", ("герцог",)),
               ("княж", ("княз", "княг")), ("ханств", ("хан",)))
+
+
+# ---------------------------------------------------------------------------
+# Три портрета: имена, народы, города
+# ---------------------------------------------------------------------------
+
+def great_names(world, out, count: int = 5) -> None:
+    """Кто в этом мире вышел в величайшие — и чем он это заслужил.
+
+    Порядок — по весу в истории, а не по титулу: пахарь, спасший город,
+    стоит впереди государя без дел. Поэтому у каждого имени печатается
+    не должность, а след: державы, города, веры, законы, вещи, сказания
+    и потомки, которые после него остались.
+    """
+    out("=" * 78)
+    out("ПЯТЬ ВЕЛИЧАЙШИХ ИМЁН")
+    out("=" * 78)
+    weights = [item for item in world.renowns.values()
+               if item.figure_id in world.figures]
+    if not weights:
+        out("  За всю историю мир не взвесил ни одного имени.")
+        out("")
+        return
+    weights.sort(key=lambda item: (-item.level, -item.score, -item.peak_level,
+                                   item.born_year))
+    out("  Взвешено имён: %d из %d личностей; в высших ступенях (9–10): %d."
+        % (len(world.renowns), len(world.figures),
+           sum(1 for item in world.renowns.values() if item.level >= 9)))
+    out("")
+    for place, weight in enumerate(weights[:count], start=1):
+        figure = world.figures[weight.figure_id]
+        out("  %d. %s — ступень %d, %s"
+            % (place, figure.name, weight.level,
+               renown_cat.LEVEL_NAMES.get(weight.level, "")))
+        out("       %s" % renown_cat.level_about(weight.level, figure.sex))
+        out("       %s, %s; счёт дел %.1f"
+            % (race_name(figure.race_id), figure.lifespan_text(),
+               weight.score))
+        if weight.peak_level != weight.level:
+            out("       выше всего стоял%s на %d ступени (%d год), потом осел"
+                % ("а" if figure.sex == "f" else "", weight.peak_level,
+                   weight.peak_year))
+        if weight.roles:
+            out("       для истории он%s: %s"
+                % ("а" if figure.sex == "f" else "", ", ".join(weight.roles)))
+        if weight.influence:
+            out("       чем повлиял%s: %s"
+                % ("а" if figure.sex == "f" else "",
+                   ", ".join("%s %d" % (name, value) for name, value
+                             in sorted(weight.influence.items(),
+                                       key=lambda pair: (-pair[1], pair[0]))[:5])))
+        if weight.climax:
+            out("       вершина: %d год — %s"
+                % (int(weight.climax.get("год", 0)),
+                   weight.climax.get("что", "")))
+        if weight.destiny:
+            out("       судьба: %s — %s"
+                % (weight.destiny,
+                   renown_cat.destiny_about(weight.destiny, figure.sex)))
+        out("       слава при жизни %d из ста, помнят теперь %d%s"
+            % (weight.fame, weight.memory,
+               " — великого забыли" if weight.forgotten else ""))
+        alive = [item for item in weight.footprint if item.get("жив")]
+        dead = [item for item in weight.footprint if not item.get("жив")]
+        if alive:
+            out("       стоит до сих пор: %s"
+                % "; ".join("%s — %s" % (item.get("вид", ""), item.get("что", ""))
+                            for item in alive[:4]))
+        if dead:
+            out("       этого больше нет: %s"
+                % "; ".join("%s — %s" % (item.get("вид", ""), item.get("что", ""))
+                            for item in dead[:3]))
+        for voice in (renown_cat.AS_WAS, renown_cat.AS_JUDGED):
+            line = (weight.voices or {}).get(voice)
+            if line:
+                out("       %-14s %s" % (voice + ":", line))
+        out("")
+
+
+def peoples_gone(world, out) -> None:
+    """Народы, которых в мире больше нет: кто, когда и как ушёл.
+
+    Уход народа — не строка в сводке, а событие с виновником: одних
+    добила беда, других не добил никто, они просто угасли. Отдельно
+    считаются народы внутри расы: те не вымирают, а растворяются в
+    чужой речи и чужом обычае.
+    """
+    out("=" * 78)
+    out("НАРОДЫ, УШЕДШИЕ ИЗ МИРА")
+    out("=" * 78)
+    gone = world.notes.get("народов больше нет") or {}
+    peaks = world.notes.get("народ в лучший век") or {}
+    told = {}
+    for event in world.events:
+        if event.kind == "race_gone" and event.race_id:
+            told[event.race_id] = event
+    if not gone:
+        out("  Ни один народ не ушёл из мира: все, кто проснулся, дожили "
+            "до конца истории.")
+    for race_id, year in sorted(gone.items(), key=lambda pair: pair[1]):
+        race = RACES_BY_ID.get(race_id)
+        if race is None:
+            continue
+        dawn = world.race_awakening.get(race_id, 0)
+        peak = int(peaks.get(race_id, 0))
+        lived = int(year) - dawn
+        out("  • %s — проснулись в %d году, ушли в %d (прожили %d %s)"
+            % (race.name, dawn, int(year), lived,
+               _plural(lived, "год", "года", "лет")))
+        out("       в лучшую пору их было %s" % _souls(peak))
+        event = told.get(race_id)
+        if event is None:
+            out("       ушли тихо: народом они стать так и не успели, и "
+                "отдельного события летопись им не пишет")
+        else:
+            out("       летопись: %s" % event.title)
+            for line in event.text.split(". "):
+                if line.strip():
+                    out("         %s" % line.strip().rstrip(".") + ".")
+        where = [folk.name for folk in world.folks.values()
+                 if folk.race_id == race_id][:4]
+        if where:
+            out("       их народы: %s" % ", ".join(where))
+        out("")
+
+    dissolved = [folk for folk in world.folks.values()
+                 if folk.status != ACTIVE]
+    if dissolved:
+        dissolved.sort(key=lambda folk: -folk.population)
+        out("  А внутри рас народы не вымирают, а растворяются: таких %d."
+            % len(dissolved))
+        for folk in dissolved[:5]:
+            race = RACES_BY_ID.get(folk.race_id)
+            end = folk.ended.year if folk.ended else world.total_years
+            out("     • %s (%s) — %d—%d, прожили %d %s"
+                % (folk.name, race.name if race else "?", folk.born.year,
+                   end, end - folk.born.year,
+                   _plural(end - folk.born.year, "год", "года", "лет")))
+        out("")
+
+
+def oldest_town(world, out) -> None:
+    """Город, простоявший дольше всех: вся его жизнь от причины до нрава."""
+    out("=" * 78)
+    out("САМЫЙ СТАРЫЙ ГОРОД")
+    out("=" * 78)
+    if not world.settlements:
+        out("  Городов в этом мире не построили.")
+        out("")
+        return
+
+    def span(settlement):
+        end = (settlement.ended.year if settlement.ended is not None
+               else world.total_years)
+        return end - settlement.founded.year
+
+    settlements = sorted(world.settlements.values(),
+                         key=lambda item: (-span(item), item.founded.ordinal))
+    settlement = settlements[0]
+    first = min(world.settlements.values(),
+                key=lambda item: item.founded.ordinal)
+    town = world.town_of(settlement.id)
+
+    region = world.regions.get(settlement.region_id)
+    out("  %s — основан в %d году, %s"
+        % (settlement.full_name, settlement.founded.year,
+           "стоит до сих пор (%d лет)" % span(settlement)
+           if settlement.status == ACTIVE
+           else "стоял %d лет и кончился в %d (%s)"
+           % (span(settlement), settlement.ended.year,
+              settlement.end_reason or "неизвестно от чего")))
+    out("       земля: %s; раса: %s; жителей сейчас: %d"
+        % (region.name if region else "?", race_name(settlement.race_id),
+           settlement.population if settlement.status == ACTIVE else 0))
+    if first.id != settlement.id:
+        out("       (а самый первый город мира — %s, поставлен в %d году)"
+            % (first.full_name, first.founded.year))
+    polity = world.polities.get(settlement.polity_id)
+    if polity is not None:
+        out("       держава: %s%s" % (polity.full_name,
+                                      " (столица)" if settlement.is_capital
+                                      else ""))
+    if settlement.landmarks:
+        out("       приметы: %s" % ", ".join(settlement.landmarks))
+    out("")
+
+    if town is None:
+        out("  Биографии у города нет: он слишком мал, чтобы летопись "
+            "взялась за его жизнь.")
+        out("")
+        return
+
+    origin = township_cat.ORIGINS_BY_KEY.get(town.origin)
+    if origin is not None:
+        out("       встал тут потому, что %s" % origin.about)
+    if town.trades:
+        chain = []
+        for item in town.trades:
+            chain.append("%s (%d—%s)" % (item.get("чем", "?"),
+                                         int(item.get("с", 0)),
+                                         int(item["по"]) if item.get("по")
+                                         else "…"))
+        out("       чем кормился: %s" % " → ".join(chain[:6]))
+    if town.weak:
+        out("       держится на том, что не вечно: %s" % town.weak)
+    if town.districts:
+        out("       концы города: %s"
+            % ", ".join("%s (%d)" % (item.get("конец", "?"),
+                                     int(item.get("год", 0)))
+                        for item in town.districts[:6]))
+    if town.layers:
+        out("       под ногами: %s"
+            % "; ".join("%s (%d)" % (item.get("слой", "?"),
+                                     int(item.get("год", 0)))
+                        for item in town.layers[:4]))
+    if town.troubles:
+        out("       тяготы: %s"
+            % "; ".join("%s (%d—%s)" % (item.get("тягота", "?"),
+                                        int(item.get("с", 0)),
+                                        int(item["по"]) if item.get("по")
+                                        else "до сих пор")
+                        for item in town.troubles[-4:]))
+    for secret in town.secrets:
+        # Тайна живёт на пяти уровнях разом: что знают все, что говорят
+        # и что было на самом деле. Последнее в городе знают редко.
+        out("       тайна «%s»: все знают — %s; говорят — %s"
+            % (secret.get("тайна", "?"), secret.get(township_cat.PUBLIC, "?"),
+               secret.get(township_cat.RUMOUR, "?")))
+        out("           а было: %s%s"
+            % (secret.get(township_cat.TRUTH, "?"),
+               " (вышло наружу в %d году)" % secret["раскрыта"]
+               if secret.get("раскрыта") else " — и этого в городе не знают"))
+    for line in township_texts.temper_lines(town.temper):
+        out("       нрав: %s" % line)
+    out("       людей: %s в лучшую пору (%d год), теперь город %s"
+        % (_souls(town.peak), town.peak_year, town.life))
+    marks = sorted(town.marks, key=lambda item: int(item.get("год", 0)))
+    if marks:
+        out("")
+        out("       ВЕХИ ГОРОДА")
+        for item in marks[:12]:
+            out("         [%5d] %s" % (int(item.get("год", 0)),
+                                       item.get("строка", item.get("вид", ""))))
+    out("")
+
+
+def portraits(world, out) -> None:
+    """Три портрета мира: величайшие имена, ушедшие народы, старый город."""
+    great_names(world, out)
+    peoples_gone(world, out)
+    oldest_town(world, out)
 
 
 # ---------------------------------------------------------------------------
@@ -1508,6 +1762,8 @@ def main(argv) -> int:
         world = generate(settings)
     finally:
         lives.tick = original
+
+    portraits(world, out)
 
     out("#" * 78)
     out("ИТОГ")

@@ -1128,7 +1128,7 @@ def _renown_block(world, weight, figure, cat, texts) -> list:
                                     cat.LEVEL_NAMES.get(weight.level, ""))
     rows = ["  %s" % head, "  " + "-" * (len(head) + 2)]
     rows.append("      %s, %s" % (figure.lifespan_text(),
-                                  cat.LEVEL_ABOUT.get(weight.level, "")))
+                                  cat.level_about(weight.level, figure.sex)))
     if weight.peak_level != weight.level:
         rows.append("      выше всего стоял на %d ступени (%d год)"
                     % (weight.peak_level, weight.peak_year))
@@ -1149,9 +1149,9 @@ def _renown_block(world, weight, figure, cat, texts) -> list:
     if weight.destiny:
         rows.append("      судьба: %s — %s"
                     % (weight.destiny,
-                       cat.DESTINIES_BY_KEY.get(weight.destiny, "")))
+                       cat.destiny_about(weight.destiny, figure.sex)))
     if weight.aura:
-        rows.append("      %s" % texts.aura_line(weight.aura))
+        rows.append("      %s" % texts.aura_line(weight.aura, figure.sex))
     if weight.climax:
         rows.append("      вершина: %d год — %s"
                     % (int(weight.climax.get("год", 0)),

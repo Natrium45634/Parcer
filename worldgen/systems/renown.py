@@ -28,6 +28,7 @@ from .. import tales as tales_cat
 from .. import narrative_renown as texts
 from .. import renown as cat
 from ..models import ACTIVE, RUINED
+from ..timeline import plural
 
 SWEEP_PERIOD = 100         # раз в сто лет мир подводит итог именам
 MIN_SCORE = 9.0            # ниже этого имя не взвешивают вовсе
@@ -248,7 +249,9 @@ def _weigh(ctx, rng, index, figure, year: int):
                if child in world.figures])
     if kin:
         value = min(10.0, kin * 1.6)
-        add(cat.FOOT_KIN, value, "%d потомков в мире" % kin, "")
+        add(cat.FOOT_KIN, value,
+            "%d %s в мире" % (kin, plural(kin, "потомок", "потомка",
+                                          "потомков")), "")
 
     # --- жизненный путь: чего хотел и что вышло --------------------------
     path = world.path_of(figure.id)
@@ -287,7 +290,7 @@ def _weigh(ctx, rng, index, figure, year: int):
     # поздний расцвет или взлёт с падением.
     weight.climax = _climax(ctx, rng, figure, weight)
     weight.destiny = _destiny(ctx, figure, weight, path, year)
-    weight.aura = rng.choice([key for key, _ in cat.AURAS])
+    weight.aura = rng.choice([key for key, _, _ in cat.AURAS])
     weight.voices = _voices(ctx, rng, figure, weight, path)
     return weight
 
@@ -481,10 +484,10 @@ def _voices(ctx, rng, figure, weight, path) -> dict:
     переделывает, потомки пересматривают.
     """
     was = path.did if path is not None and path.did \
-        else rng.choice(texts.DEEDS_AS_WAS)
+        else cat.in_sex(texts.DEEDS_AS_WAS, rng, figure.sex)
     out = {cat.AS_WAS: was}
     for voice in cat.VOICES[1:]:
-        out[voice] = texts.voice_line(rng, voice, was)
+        out[voice] = texts.voice_line(rng, voice, was, figure.sex)
     return out
 
 
@@ -507,9 +510,9 @@ def _review(ctx, rng, index, weight, year: int) -> None:
 
     shift, why = 0, ""
     if alive >= 2 and rng.chance(RAISE_RATE):
-        shift, why = 1, rng.choice(cat.RAISED)
+        shift, why = 1, cat.in_sex(cat.RAISED, rng, figure.sex)
     elif alive == 0 and rng.chance(LOWER_RATE):
-        shift, why = -1, rng.choice(cat.LOWERED)
+        shift, why = -1, cat.in_sex(cat.LOWERED, rng, figure.sex)
 
     floor = max(0, weight.peak_level - FLOOR_GAP)
     # Потолок: пересмотр поднимает имя, но не делает из старосты
@@ -623,9 +626,10 @@ def _tell(ctx, weight, figure, year: int, before: int, why: str) -> None:
     event = world.add_event(
         date=date, era_index=world.era_index_at(year), kind="name_weighed",
         title="Имя из прошлого: %s" % figure.plain_name,
-        text="%s Теперь его ставят на %d ступень, прежде стояло %d."
-             % (texts.cap(texts.review_line(rng, before, weight.level, why)),
-                weight.level, before),
+        text="%s Теперь %s ставят на %d ступень, прежде стояло %d."
+             % (texts.cap(texts.review_line(rng, before, weight.level, why,
+                                            figure.sex)),
+                "её" if figure.sex == "f" else "его", weight.level, before),
         importance=3, subjects=[figure.id], race_id=figure.race_id)
     weight.event_ids.append(event.id)
 
