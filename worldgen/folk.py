@@ -28,7 +28,7 @@ from . import races as races_mod
 # Подбираются по окончанию имени, чтобы «Кораос» не стал «кораосцыцы».
 # (окончание, сколько букв отбросить, что дописать).
 ETHNIC_SUFFIXES = (
-    ("ия", 2, "йцы"), ("ея", 2, "йцы"), ("ая", 2, "йцы"),
+    ("ия", 1, "йцы"), ("ея", 1, "йцы"), ("ая", 1, "йцы"),
     ("а", 1, "цы"), ("я", 1, "цы"), ("о", 1, "вцы"), ("е", 1, "вцы"),
     ("у", 1, "вцы"), ("ы", 1, "цы"), ("и", 1, "йцы"),
     ("ь", 1, "ьцы"), ("й", 1, "йцы"),
@@ -37,6 +37,29 @@ ETHNIC_SUFFIXES = (
     ("ц", 0, "евцы"), ("ч", 0, "евцы"), ("ш", 0, "евцы"), ("ж", 0, "евцы"),
 )
 ALT_SUFFIXES = ("ичи", "ане", "иты")
+
+VOWELS = "аеёиоуыэюя"
+
+
+def _glue(stem: str, suffix: str) -> str:
+    """Склейка основы с суффиксом без стыков, невозможных в русском.
+
+    «Ковыли» давали «ковылйцы»: после согласной «й» не стоит, а «ь»
+    стоит — выходят «ковыльцы». «Зарница» давала «зарниццы» — два «ц»
+    подряд; там народ зовётся на «-ане». «Поля» давали «полцы» вместо
+    «польцы». Это не украшение: имя народа читает человек.
+    """
+    if not stem:
+        return suffix
+    last = stem[-1]
+    if suffix.startswith("й") and last not in VOWELS:
+        suffix = "ь" + suffix[1:]
+    if suffix.startswith("ц"):
+        if last in "цчшжщ":
+            suffix = "ане"
+        elif last == "л":
+            suffix = "ь" + suffix
+    return stem + suffix
 
 # --- 2. Приметы: слова, а не слоги -------------------------------------
 MARK_HEADS = ("Люди", "Дети", "Народ", "Сыны", "Племена")
@@ -117,8 +140,8 @@ def ethnonym(name: str) -> str:
     for ending, cut, suffix in ETHNIC_SUFFIXES:
         if base.endswith(ending):
             stem = base[:len(base) - cut] if cut else base
-            return stem + suffix
-    return base + "цы"
+            return _glue(stem, suffix)
+    return _glue(base, "цы")
 
 
 def folk_name(rng, race, region, used) -> tuple:

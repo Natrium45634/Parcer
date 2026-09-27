@@ -48,6 +48,17 @@ CATEGORY_SPLIT_WEIGHT = {
 FIRST_TRIBE_MIN = 520
 FIRST_TRIBE_MAX = 2400
 
+# Вождь смертен, а племя стоит тысячи лет: гоблин живёт сорок лет, и его
+# «Выводок» переживёт шестьдесят вождей. Прежде вождь ставился раз при
+# основании и числился живым до конца истории — отсюда в летописи брались
+# главари гоблинов по две с половиной тысячи лет от рождения. Теперь
+# племя каждый десяток лет смотрит, жив ли вождь, и выбирает нового.
+#
+# Имя вождя заводится не всякому племени: горстка в полсотни душ водится
+# без того, чтобы летопись знала её старшего. У малого племени вождь
+# просто перестаёт числиться — и никто мёртвым уже не распоряжается.
+CHIEF_MIN = 250                # с какого числа душ у племени есть вождь
+
 
 # ---------------------------------------------------------------------------
 # Расписание пробуждений
@@ -368,3 +379,33 @@ def upkeep(ctx, year: int, period: int) -> None:
                 subjects=[tribe.id], region_id=tribe.region_id,
                 race_id=tribe.race_id,
             )
+            continue
+
+        _chief_turn(ctx, tribe, race, year, rng)
+
+
+def _chief_turn(ctx, tribe, race, year: int, rng) -> None:
+    """Жив ли вождь, и кто встал на его место.
+
+    Смена вождя в племени — не событие летописи: племён за историю
+    тысячи, и каждая смерть старшего забила бы собой всё остальное.
+    Но числиться живым мёртвый не должен: на вождя смотрят и бедствия,
+    и вера, и тот час, когда племя оседает и строит первый город.
+    """
+    world = ctx.world
+    chief = world.figures.get(tribe.chief_id)
+    if chief is not None and chief.alive_at(year):
+        return
+    if tribe.population < CHIEF_MIN:
+        tribe.chief_id = ""
+        return
+
+    sex = "f" if rng.chance(0.42) else "m"
+    folk = world.folks.get(tribe.folk_id)
+    leader = ctx.make_figure(rng, race, year, role="вождь",
+                             region_id=tribe.region_id,
+                             title=ctx.title_for(race, "chief", sex), sex=sex,
+                             folk=folk)
+    leader.folk_id = tribe.folk_id
+    leader.home_id = tribe.id
+    tribe.chief_id = leader.id

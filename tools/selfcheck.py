@@ -695,6 +695,39 @@ def check_souls(world, seed: str) -> list:
     return problems
 
 
+def check_tribes(world, seed: str) -> list:
+    """Племя: живое ведёт живой вождь, и никто не старше своей расы.
+
+    Племя стоит тысячи лет, а вождь смертен. Прежде вождь ставился раз
+    при основании и числился живым до конца истории — в летописи выходили
+    главари гоблинов по две тысячи лет от рождения.
+    """
+    problems = []
+    for tribe_id in world.active_tribes:
+        tribe = world.tribes[tribe_id]
+        chief = world.figures.get(tribe.chief_id)
+        if chief is None:
+            continue
+        if not chief.alive_at(world.total_years):
+            problems.append("сид «%s»: племя %s ведёт мёртвый вождь %s"
+                            % (seed, tribe.full_name, chief.name))
+            break
+    for figure in world.figures.values():
+        race = get_race(figure.race_id)
+        if race is None or figure.birth is None:
+            continue
+        end = (figure.death.year if figure.death is not None
+               else world.total_years)
+        if end - figure.birth.year > race.lifespan[1] * 2:
+            problems.append("сид «%s»: %s (%s) прожил%s %d лет при пределе "
+                            "расы %d"
+                            % (seed, figure.name, race.name,
+                               "а" if figure.sex == "f" else "",
+                               end - figure.birth.year, race.lifespan[1]))
+            break
+    return problems
+
+
 def check_capitals(world, seed: str) -> list:
     """Престол державы: он должен быть живым городом этой самой державы."""
     problems = []
@@ -2009,6 +2042,7 @@ def main() -> int:
         failures.extend(check_strifes(first, seed))
         failures.extend(check_lore(first, seed))
         failures.extend(check_upheavals(first, seed))
+        failures.extend(check_tribes(first, seed))
         failures.extend(check_capitals(first, seed))
         failures.extend(check_souls(first, seed))
         failures.extend(check_tales(first, seed))
@@ -2065,6 +2099,7 @@ def main() -> int:
             failures.extend(check_strifes(first, "карта/" + seed))
             failures.extend(check_lore(first, "карта/" + seed))
             failures.extend(check_upheavals(first, "карта/" + seed))
+            failures.extend(check_tribes(first, "карта/" + seed))
             failures.extend(check_capitals(first, "карта/" + seed))
             failures.extend(check_souls(first, "карта/" + seed))
             failures.extend(check_tales(first, "карта/" + seed))
@@ -2111,7 +2146,8 @@ def main() -> int:
                       check_tongues, check_embassies, check_things,
                       check_causes, check_people_memory, check_migrations,
                       check_strifes, check_lore, check_upheavals,
-                      check_capitals, check_souls, check_tales,
+                      check_tribes, check_capitals, check_souls,
+                      check_tales,
                       check_lives, check_stories, check_towns,
                       check_gods, check_renown):
             failures.extend(check(first, "своя/" + seed))

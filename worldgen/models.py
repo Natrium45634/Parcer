@@ -1195,6 +1195,10 @@ class League:
     kind: str
     founded: Date
     member_ids: list = field(default_factory=list)
+    # Кто клялся при основании. Из союза выходят поодиночке, и к концу в
+    # «Круге Четырёх Домов» остаётся двое — но летопись должна помнить,
+    # сколько их было, когда клятву давали.
+    sworn_ids: list = field(default_factory=list)
     leader_id: str = ""
     pact_ids: list = field(default_factory=list)
     war_ids: list = field(default_factory=list)

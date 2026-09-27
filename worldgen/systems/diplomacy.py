@@ -195,9 +195,12 @@ def make_pact(ctx, kind: str, first, second, reasons, year: int, rng):
 
     # Договор тоже на чём-то стоит: на родстве домов, на старом добре,
     # на долге, который помнят обе стороны.
+    # Род договора — это «kind» выше, и затирать его здесь нельзя: раньше
+    # этот цикл оставлял в «kind» последний род следа, и ниже выходило,
+    # что союзная грамота — договор без важности и без союза держав.
     marks, roots = [], []
-    for kind in (history.KINSHIP, history.FAVOUR, history.DEBT):
-        for fact in world.facts_of(first.id, year, kind, second.id)[:1]:
+    for trace_kind in (history.KINSHIP, history.FAVOUR, history.DEBT):
+        for fact in world.facts_of(first.id, year, trace_kind, second.id)[:1]:
             marks.append(fact.id)
             if fact.event_id:
                 roots.append(fact.event_id)
@@ -211,7 +214,12 @@ def make_pact(ctx, kind: str, first, second, reasons, year: int, rng):
         region_id=first.region_ids[0] if first.region_ids else "",
         race_id=first.race_id, causes=roots, facts=marks)
     if kind == dip.ALLIANCE:
+        # Смотрят оба: союз собирается вокруг того, у кого союзников уже
+        # двое, а кто из двоих первым послал послов — дело случая. Прежде
+        # спрашивали только зачинщика, и державы всю историю ходили с
+        # тремя союзными грамотами, ни разу не сложившись в союз.
         _maybe_league(ctx, first, year, rng)
+        _maybe_league(ctx, second, year, rng)
     return pact
 
 
@@ -317,9 +325,14 @@ def _maybe_league(ctx, polity, year: int, rng) -> None:
     region = world.regions.get(leader.region_ids[0]) if leader.region_ids else None
     if region is not None:
         place = region.landmass or region.sea or region.name
+    # Имя союза — имя собственное: двух «Священных союзов земель по имени
+    # Туманный Берег» в одной летописи быть не должно.
+    name = ctx.forge.unique(
+        "league", lambda: texts.league_name(rng, kind, circle, place), rng)
     league = world.add_league(
-        name=texts.league_name(rng, kind, circle, place), kind=kind,
+        name=name, kind=kind,
         founded=date, member_ids=[item.id for item in circle],
+        sworn_ids=[item.id for item in circle],
         leader_id=leader.id, pact_ids=[item.id for item in pacts])
     for pact in pacts:
         pact.league_id = league.id

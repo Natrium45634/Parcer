@@ -283,8 +283,8 @@ def league_open(rng, league, members):
 
 def league_close(rng, league, reason: str, years: int):
     return ("Распад союза: %s" % league.name,
-            "%s %s Союз простоял %s."
-            % (cap(rng.choice(LEAGUE_CLOSE)), cap(reason),
+            "%s %s. Союз простоял %s."
+            % (cap(rng.choice(LEAGUE_CLOSE)), cap(reason.rstrip(".")),
                years_text(max(1, years))))
 
 

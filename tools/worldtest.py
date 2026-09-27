@@ -43,6 +43,7 @@ from worldgen import nations as pol                              # noqa: E402
 from worldgen import rulers                                      # noqa: E402
 from worldgen import narrative_tongues                           # noqa: E402
 from worldgen import narrative_war                               # noqa: E402
+from worldgen import names as names_mod
 from worldgen.morph import genitive_noun                         # noqa: E402
 from worldgen.systems import war as war_system                   # noqa: E402
 from worldgen import warfare                                     # noqa: E402
@@ -526,6 +527,58 @@ def audit(world) -> list:
         bad("мужской признак у женских имён: %d (%s)"
             % (len(wrong_sex), wrong_sex[0].name))
 
+    # 1б. Цифра в имени. Летопись пишет словами: «Джаун Четвёртый», а
+    # «Джаун 2» — это писарская отметка, выданная за имя.
+    digits = [f.name for f in world.figures.values()
+              if any(ch.isdigit() for ch in f.name)]
+    digits += [s.name for s in world.settlements.values()
+               if any(ch.isdigit() for ch in s.name)]
+    digits += [t.name for t in world.tribes.values()
+               if any(ch.isdigit() for ch in t.name)]
+    if digits:
+        bad("цифра в имени: %d (%s)" % (len(digits), digits[0]))
+
+    # 1в. Однокоренная пара в названии: «Лунная Луна», «Дымные Дети Дыма».
+    tautology = []
+    # Земли на карте названы картогенератором, и его слова здесь не судят:
+    # порт сверяется с оригиналом гекс в гекс и правке не подлежит.
+    for name in ([s.name for s in world.settlements.values()]
+                 + [t.name for t in world.tribes.values()]):
+        words = [w for w in name.split() if len(w) >= 4]
+        for first, second in zip(words, words[1:]):
+            if names_mod._same_root(first, second):
+                tautology.append(name)
+                break
+    if tautology:
+        bad("признак повторяет корень в названии: %d (%s)"
+            % (len(tautology), tautology[0]))
+
+    # 1г. Мёртвый вождь у живого племени: племя стоит тысячи лет, вождь —
+    # нет, и числиться живым он не должен.
+    dead_chiefs = []
+    for tribe_id in world.active_tribes:
+        tribe = world.tribes[tribe_id]
+        chief = world.figures.get(tribe.chief_id)
+        if chief is not None and not chief.alive_at(world.total_years):
+            dead_chiefs.append("%s -> %s" % (tribe.full_name, chief.name))
+    if dead_chiefs:
+        bad("у живого племени мёртвый вождь: %d (%s)"
+            % (len(dead_chiefs), dead_chiefs[0]))
+
+    # 1д. Нрав, спорящий с самим собой: «милосердный, жестокий к пленным».
+    clashes = []
+    holders = [(f.name, f.traits) for f in world.figures.values()]
+    holders += [(r.id, r.traits) for r in world.reigns.values()]
+    for who, traits in holders:
+        traits = set(traits or ())
+        for trait in traits:
+            if traits & rulers.TRAIT_AGAINST.get(trait, set()):
+                clashes.append("%s: %s" % (who, ", ".join(sorted(traits))))
+                break
+    if clashes:
+        bad("черты нрава спорят друг с другом: %d (%s)"
+            % (len(clashes), clashes[0]))
+
     # 2. Титул против формы страны.
     mismatch = []
     for polity in world.polities.values():
@@ -548,7 +601,8 @@ def audit(world) -> list:
             ("вер", [f.name for f in world.faiths.values()]),
             ("стран", [p.name for p in world.polities.values()]),
             ("городов", [s.name for s in world.settlements.values()]),
-            ("походов", [x.name for x in world.expeditions.values()])):
+            ("походов", [x.name for x in world.expeditions.values()]),
+            ("союзов держав", [g.name for g in world.leagues.values()])):
         repeats = [name for name, count in Counter(values).items() if count > 1]
         if repeats:
             bad("повторяются имена %s: %d (%s)"
@@ -722,6 +776,12 @@ def audit(world) -> list:
                      % len(kinds))
             if not world.leagues:
                 note("союзов держав не сложилось ни разу")
+            else:
+                small = [g for g in world.leagues.values()
+                         if g.status == ACTIVE and len(g.member_ids) < 3]
+                if small:
+                    bad("живой союз держав из %d державы: %s"
+                        % (len(small[0].member_ids), small[0].name))
         forts = list(world.fortresses.values())
         if forts:
             moved = [item for item in forts if item.times_taken]

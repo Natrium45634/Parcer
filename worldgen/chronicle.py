@@ -2114,16 +2114,21 @@ def render_politics(world) -> str:
             leader = world.polities.get(league.leader_id)
             span = "%d—%s" % (league.founded.year,
                               league.ended.year if league.ended else "…")
+            # У живого союза спрашивают, кто в нём сейчас; у распавшегося
+            # — кто давал клятву: остаток в одну державу союзом не был.
+            sworn = league.sworn_ids or league.member_ids
+            circle = league.member_ids if league.status == ACTIVE else sworn
             rows.append("    %-38s %-16s %-12s держав %d, войн %d"
                         % (league.name[:38], league.kind, span,
-                           len(league.member_ids), len(league.war_ids)))
+                           len(circle), len(league.war_ids)))
             names = []
-            for polity_id in league.member_ids:
+            for polity_id in circle:
                 polity = world.polities.get(polity_id)
                 names.append(polity.full_name if polity else "?")
-            rows.append("        во главе: %s; в союзе: %s"
-                        % (leader.full_name if leader else "—",
-                           ", ".join(names)))
+            rows.append("        %s: %s; во главе: %s"
+                        % ("в союзе" if league.status == ACTIVE
+                           else "клялись", ", ".join(names),
+                           leader.full_name if leader else "—"))
             if league.end_reason:
                 rows.append("        распался: %s" % league.end_reason)
         rows.append("")

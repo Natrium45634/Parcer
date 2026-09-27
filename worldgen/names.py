@@ -20,7 +20,7 @@ from . import tongues as tongues_mod
 
 from dataclasses import dataclass
 
-from .morph import adjective_for, phrase
+from .morph import adjective_for, ordinal_word, phrase
 from . import races as races_mod
 
 
@@ -753,6 +753,42 @@ def _assemble(rng, starts, middles, ends, middle_chance, apostrophe) -> str:
 # Кузница имён
 # ---------------------------------------------------------------------------
 
+ADJ_ENDINGS = ("ая", "яя", "ое", "ее", "ые", "ие", "ый", "ий", "ой")
+
+
+def _stem(word: str) -> str:
+    """Основа на глаз: слово без окончания прилагательного."""
+    out = word.lower().replace("ё", "е")
+    for ending in ADJ_ENDINGS:
+        if len(out) > 4 and out.endswith(ending):
+            return out[:-2]
+    return out
+
+
+def _same_root(first: str, second: str) -> bool:
+    """Повторяет ли признак корень существительного.
+
+    «Лунная Луна», «Дымные Дети Дыма» — летопись так не пишет. Точного
+    разбора корней тут не нужно: у коротких основ хватает трёх первых
+    букв. Длинные основы не сверяются: у них общее начало — это чаще
+    приставка, и «Присягнувшие Прибоя» никакой не повтор.
+    """
+    one, two = _stem(first), _stem(second)
+    if len(one) > 8 or len(two) > 8:
+        return False
+    return len(one) >= 3 and len(two) >= 3 and one[:3] == two[:3]
+
+
+def _fitting_adj(rng, pool, noun: str) -> str:
+    """Признак к существительному — любой, кроме однокоренного."""
+    adj = rng.choice(pool)
+    for _ in range(4):
+        if not _same_root(adj, noun):
+            break
+        adj = rng.choice(pool)
+    return adj
+
+
 class NameForge:
     """Выдаёт уникальные имена и названия."""
 
@@ -790,12 +826,18 @@ class NameForge:
                 if candidate not in taken:
                     taken.add(candidate)
                     return candidate
+        # Отличающих слов не хватило — значит тёзок много, и счёт идёт
+        # числом. Числом, а не цифрой: «Джаун Четвёртый», но никогда
+        # «Джаун 2» — цифра в имени сразу выдаёт машину.
         index = 2
-        while "%s %d" % (name, index) in taken:
+        while True:
+            word = ordinal_word(index, sex if person else "m")
+            candidate = ("%s %s" % (name, word) if person
+                         else "%s %s" % (word, name))
+            if candidate not in taken:
+                taken.add(candidate)
+                return candidate
             index += 1
-        candidate = "%s %d" % (name, index)
-        taken.add(candidate)
-        return candidate
 
     def unique(self, bucket: str, maker, rng, attempts: int = 12,
                sex: str = "") -> str:
@@ -855,8 +897,8 @@ class NameForge:
         return base
 
     def _descriptive_place(self, rng, st: NameStyle) -> str:
-        adj = rng.choice(st.adjectives or GEO_ADJECTIVES)
         noun, gender = rng.choice(st.nouns or (("Оплот", "m"),))
+        adj = _fitting_adj(rng, st.adjectives or GEO_ADJECTIVES, noun)
         return phrase(adj, noun, gender)
 
     def settlement(self, rng, race, tongue=None) -> str:
@@ -892,7 +934,8 @@ class NameForge:
             if roll < 0.60:
                 return "%s %s" % (shape.word, rng.choice(art.NAME_TAILS))
             if roll < 0.82:
-                return adj_phrase(rng.choice(art.NAME_ADJECTIVES),
+                return adj_phrase(_fitting_adj(rng, art.NAME_ADJECTIVES,
+                                               shape.word),
                                   shape.word, shape.gender)
             return rng.choice(art.WORD_NAMES)
 
@@ -965,13 +1008,13 @@ class NameForge:
         # него на четыре головы и десяток тотемов имён выходило слишком
         # мало, и «Дом Хора» встречался в девяти мирах из десяти.
         if gender and rng.chance(0.38):
-            adj = rng.choice(st.adjectives or GEO_ADJECTIVES)
+            adj = _fitting_adj(rng, st.adjectives or GEO_ADJECTIVES, totem)
             return "%s %s" % (phrase(adj, head, gender), totem)
         return "%s %s" % (head, totem)
 
     def _plural_name(self, rng, st: NameStyle) -> str:
-        adj = rng.choice(st.adjectives or GEO_ADJECTIVES)
         noun, gender = rng.choice(st.plural_nouns or (("Копья", "p"),))
+        adj = _fitting_adj(rng, st.adjectives or GEO_ADJECTIVES, noun)
         return phrase(adj, noun, gender)
 
     def tribe(self, rng, race) -> str:
@@ -1009,8 +1052,8 @@ class NameForge:
 
         def make():
             if rng.chance(0.62):
-                adj = rng.choice(GEO_ADJECTIVES)
                 noun, gender = rng.choice(nouns)
+                adj = _fitting_adj(rng, GEO_ADJECTIVES, noun)
                 return phrase(adj, noun, gender)
             word = _assemble(rng, PRIMORDIAL_STARTS, ("а", "и", "о", "ар", "ан"),
                              PRIMORDIAL_ENDS, 0.35, 0.0)
