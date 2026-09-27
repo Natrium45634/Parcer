@@ -248,6 +248,10 @@ def upkeep(ctx, year: int, period: int) -> None:
     # Дамбы не чинят, амбары стоят пустыми, устав никто не читал двести
     # лет: земля забывает, чему её учила прежняя беда.
     disaster_sys.forget(ctx, year, period)
+    # Шрамы живут дольше тех, кто их помнит, а забытое умение однажды
+    # находят заново — сперва обрывками, потом целым.
+    disaster_sys.age_scars(ctx, year, period)
+    disaster_sys.find_lore(ctx, year, period)
 
 
 # ---------------------------------------------------------------------------
@@ -1035,6 +1039,11 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
     disaster_sys.name_actors(ctx, calamity, spec, rng, year)
 
     _political_outcome(ctx, calamity, spec, plan, rng, year, date)
+
+    # Шрам на земле и забытое умение — раньше счёта ущерба: ущерб по видам
+    # считается и по ним тоже.
+    disaster_sys.leave_scars(ctx, calamity, spec, rng, year, date)
+    disaster_sys.lose_lore(ctx, calamity, spec, rng, year, date)
 
     # Счёт ущерба по видам, четыре исхода вместо одного и то, что из этой
     # беды вырастет дальше.

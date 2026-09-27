@@ -102,6 +102,13 @@ MARK_LINES = {
 DEFAULT_MARK = ("В этот год с городом случилось то, что запомнили.",)
 
 
+MARK_LINES[cat.HABIT] = (
+    "С тех лет и до самого конца: %(what)s.",
+    "Беда научила, и уклад переменился: %(what)s.",
+    "С этих лет так и повелось: %(what)s.",
+)
+
+
 def mark_line(rng, kind: str, what: str = "") -> str:
     """Строка вехи. Без «что» берётся оборот, который без него обходится."""
     rows = [line for line in MARK_LINES.get(kind, DEFAULT_MARK)

@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+from .. import disaster as dis_cat
 from .. import history
 from .. import localstory as cat
 from .. import lore as lore_cat
@@ -151,6 +152,37 @@ def _nodes(ctx, year: int) -> list:
             cat.TRACE, "после беды осталось: %s" % relic.name,
             relic.created.year, ref=relic.id, region_id=relic.region_id,
             weight=0.5))
+
+    # --- шрамы на земле: беду забыли, а место осталось -----------------
+    # Самый честный узел из всех: объяснения нет ни у кого, потому что
+    # оно было и потерялось. Забытый шрам говорит охотнее обходимого:
+    # про место, куда не ходят, всё уже сказано, а про обжитое — нечего.
+    for scar in world.scars.values():
+        if scar.created is None:
+            continue
+        age = year - scar.created.year
+        if age < ECHO_MIN_AGE:
+            continue
+        weight = {dis_cat.SCAR_FORGOTTEN: 1.4, dis_cat.SCAR_SETTLED: 0.9,
+                  dis_cat.SCAR_HOLY: 1.0, dis_cat.SCAR_SHUNNED: 0.8,
+                  dis_cat.SCAR_FRESH: 0.4}.get(scar.state, 0.6)
+        out.append(Node(
+            cat.SCAR, "место по имени %s помнит беду, а люди — нет"
+            % scar.name, scar.created.year, ref=scar.id,
+            region_id=scar.region_id,
+            weight=weight * (0.7 + min(1.3, age / 700.0))))
+
+    # --- обрывки умения, которого больше нет ---------------------------
+    for lore in world.lost_lore.values():
+        if lore.lost is None or lore.state != dis_cat.LORE_FRAGMENTS:
+            continue
+        age = year - lore.lost.year
+        if age < ECHO_MIN_AGE:
+            continue
+        out.append(Node(
+            cat.LOST_SKILL, "от умения остались обрывки: %s" % lore.about,
+            lore.lost.year, ref=lore.id, region_id=lore.region_id,
+            weight=0.9 + 0.2 * max(0, 3 - lore.hardness)))
 
     # --- войны и бедствия, которые отгремели ---------------------------
     for war in world.wars.values():
@@ -814,6 +846,13 @@ def _town_back(ctx, story, node, year: int) -> None:
         if good:
             _name_back(ctx, story, node, year)
         return
+    if node.kind == cat.SCAR:
+        _scar_back(ctx, story, node, year, good)
+        return
+    if node.kind == cat.LOST_SKILL:
+        if good:
+            _skill_back(ctx, story, node, year)
+        return
     town = world.town_of(node.settlement_id) if node.settlement_id else None
     if town is None:
         return
@@ -843,6 +882,61 @@ def _town_back(ctx, story, node, year: int) -> None:
         note = "под городом побывали: %s" % node.what
         if note not in town.notes:
             town.notes.append(note)
+
+
+def _scar_back(ctx, story, node, year: int, good: bool) -> None:
+    """Быль договорила то, чего о месте не знали.
+
+    Докопались — и у места снова есть объяснение: забытый шрам вспоминают,
+    и вспоминают его вместе с бедой. Не докопались — объяснений становится
+    больше, чем было, и ни одно не проверить.
+    """
+    scar = ctx.world.scars.get(node.ref)
+    if scar is None:
+        return
+    title = story.title or "быль"
+    if good:
+        if scar.state == dis_cat.SCAR_FORGOTTEN:
+            # Место снова обходят: вспомнили, отчего его обходили деды.
+            scar.state = dis_cat.SCAR_SHUNNED if scar.danger >= 2 \
+                else dis_cat.SCAR_SETTLED
+            scar.notes.append("%d: вспомнили по были «%s»" % (year, title))
+        else:
+            scar.notes.append("%d: объяснено былью «%s»" % (year, title))
+        return
+    note = "%d: быль «%s» объяснения не нашла" % (year, title)
+    if note not in scar.notes:
+        scar.notes.append(note)
+
+
+def _skill_back(ctx, story, node, year: int) -> None:
+    """По обрывкам собрали целое — и собрала это быль, а не держава.
+
+    Самый честный способ вернуть умение: не указ и не школа, а история
+    про человека, который взялся разобрать, что это за жёлобы под улицей.
+    """
+    world = ctx.world
+    lore = world.lost_lore.get(node.ref)
+    if lore is None or lore.state == dis_cat.LORE_FOUND:
+        return
+    finder = ""
+    for item in story.cast:
+        figure = world.figures.get(item["кто"])
+        if figure is not None:
+            finder = figure.plain_name
+            break
+    lore.state = dis_cat.LORE_FOUND
+    lore.found = story.ended or story.began
+    lore.found_by = finder or ("быль по имени «%s»" % (story.title or "быль"))
+    lore.notes.append("%d: вернулось через быль «%s»"
+                      % (year, story.title or "быль"))
+    kind = dis_cat.LORE_BY_KEY.get(lore.kind)
+    if kind is not None and kind.hurts:
+        region = world.regions.get(lore.region_id)
+        if region is not None:
+            was = region.vulnerability.get(kind.hurts, dis_cat.VULN_START)
+            region.vulnerability[kind.hurts] = max(
+                0.0, was - dis_cat.VULN_LEARN)
 
 
 def _name_back(ctx, story, node, year: int) -> None:
@@ -987,6 +1081,7 @@ SONG_ABOUT = {
     cat.BEAST: "чудовище",
     cat.TRACE: "беда",
     cat.CALAMITY: "беда",
+    cat.SCAR: "место",
     cat.WAR_END: "война",
     cat.HOUSE_FALL: "престол",
 }

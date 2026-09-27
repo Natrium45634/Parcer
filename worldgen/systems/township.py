@@ -265,6 +265,9 @@ def _live(ctx, rng, town, settlement, year: int, period: int,
             _mark(ctx, town, year, cat.REBUILT,
                   texts.mark_line(rng, cat.REBUILT))
             _leave_layer(ctx, rng, town, year, "перестройка")
+        # Беда переменяет не только стены, но и уклад. Дело, которое после
+        # неё поставили, город держит веками, а зачем — забывает.
+        _learn_habit(ctx, rng, town, settlement, year, period)
 
     # --- город растёт вширь -------------------------------------------
     # Концы появляются не только на подъёме. Город, простоявший три века
@@ -784,6 +787,36 @@ def _calamity_regions(world) -> dict:
         for region_id in calamity.region_ids:
             out.setdefault(region_id, calamity.id)
     return out
+
+
+def _learn_habit(ctx, rng, town, settlement, year: int, period: int) -> None:
+    """Чему беда научила город — и что он будет делать, забыв причину.
+
+    Привычка берётся не из воздуха: или из дела, которое держава поставила
+    в этой земле в ответ на беду (`systems/disaster.build_works`), или из
+    шрама, который тут остался. Одну и ту же привычку дважды не заводят.
+    """
+    world = ctx.world
+    region = world.regions.get(settlement.region_id)
+    if region is None:
+        return
+    fresh = max(30, period * 3)
+    choices = []
+    for item in region.works:
+        lines = cat.HABITS.get(item.get("что", ""))
+        if lines and year - int(item.get("год", 0)) <= fresh:
+            choices.extend(lines)
+    for scar in world.scars_in(region.id):
+        if scar.danger >= 2 and year - scar.created.year <= fresh:
+            choices.extend(cat.SHUN_HABITS)
+            break
+    choices = [line for line in choices if line not in town.notes]
+    if not choices:
+        return
+    line = rng.choice(sorted(set(choices)))
+    town.notes.append(line)
+    _mark(ctx, town, year, cat.HABIT, texts.mark_line(rng, cat.HABIT, line))
+    _tilt(town, {"устойчивость": 0.08, "закрытость": 0.04}, 0.6)
 
 
 def _mark(ctx, town, year: int, kind: str, line: str) -> None:

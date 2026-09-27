@@ -979,9 +979,317 @@ def force_now(world, calamity, spec, plan, year: int) -> float:
     return (base / mean) * calamity.force * vuln_factor(world, calamity, spec)
 
 
+# ---------------------------------------------------------------------------
+# Шрамы мира: география, которая помнит
+# ---------------------------------------------------------------------------
+# Великое бедствие меняет карту само (`systems/upheaval`). Обычное
+# оставляет вот это: новое русло, пепельную пустошь, пустой город. Шрам
+# не запись в справочнике: его сперва обходят, потом обживают, потом
+# объявляют святым местом, а потом забывают, зачем он свят.
+
+SCAR_CHANCE = 0.5           # у средней беды остаётся видимый след
+SCAR_MAX = 2
+SCAR_RIPEN = 80             # до этого срока шрам ещё свежий
+SCAR_TURN = 0.2             # и потом раз в десятилетие может перемениться
+SCAR_HOLY_WINDOW = (80, 420)  # освящают рано или никогда
+SCAR_SETTLED_AGE = 220      # обжитое место забывают через поколения
+SCAR_FORGET_AGE = 400       # а нестрашное — только совсем старым
+
+
+def leave_scars(ctx, calamity, spec, rng, year: int, date) -> None:
+    """Что беда оставила на земле — на века или навсегда."""
+    kinds = dis.scars_for(spec)
+    if not kinds or not calamity.region_ids:
+        return
+    world = ctx.world
+
+    # Малая беда следа не оставляет: её заравнивают за одно поколение.
+    want = 0
+    if calamity.severity >= 4:
+        want = 2 if rng.chance(0.5) else 1
+    elif calamity.severity >= 2 and rng.chance(SCAR_CHANCE):
+        want = 1
+    elif calamity.settlements_lost and rng.chance(0.4):
+        want = 1
+    if want <= 0:
+        return
+    want = min(SCAR_MAX, want)
+
+    # Свой вид беды весит больше общего: выгоревший бор остаётся от пожара,
+    # а братская могила — от всякой войны.
+    pairs = [(item, 2.0 if spec.key in item.keys else 0.6) for item in kinds]
+    taken = {scar.name for scar in world.scars.values()}
+    made = 0
+    for _ in range(want * 3):
+        if made >= want:
+            break
+        kind = rng.weighted(pairs)
+        region_id = rng.choice(calamity.region_ids)
+        region = world.regions.get(region_id)
+        if region is None or region.drowned:
+            continue
+        if any(scar.kind == kind.key for scar in world.scars_in(region_id)):
+            continue
+        name = _scar_name(world, kind, region, year)
+        if not name or name in taken:
+            continue
+        taken.add(name)
+        scar = world.add_scar(kind=kind.key, name=name, region_id=region_id,
+                              calamity_id=calamity.id, created=date,
+                              danger=kind.danger, boon=kind.boon)
+        calamity.scar_ids.append(scar.id)
+        made += 1
+        title, text = texts.scar_left(rng, scar, kind, calamity, region)
+        world.add_event(
+            date=date, era_index=world.era_index_at(year), kind="scar",
+            title=title, text=text,
+            importance=3 if kind.danger >= 2 else 2,
+            subjects=[scar.id, calamity.id], region_id=region_id)
+
+
+def _scar_name(world, kind, region, year: int) -> str:
+    """«Пепельная пустошь Оркхад»: имя шрама — вид да земля.
+
+    Имена собственные остаются в именительном падеже, как и везде; вид
+    шрама идёт перед именем, а не согласуется с ним.
+    """
+    tail = region.name
+    if kind.key == "пустой город":
+        # Пустой город зовётся именем того города, который опустел.
+        dead = [item for item in world.settlements.values()
+                if item.region_id == region.id and item.ended is not None
+                and 0 <= year - item.ended.year <= 40]
+        if not dead:
+            return ""
+        tail = sorted(dead, key=lambda item: item.id)[-1].name
+    return "%s %s" % (kind.noun[0], tail)
+
+
+def age_scars(ctx, year: int, period: int) -> None:
+    """Шрам живёт своей жизнью, и живёт он дольше тех, кто его помнит."""
+    world = ctx.world
+    for scar in list(world.scars.values()):
+        if scar.state == dis.SCAR_FORGOTTEN:
+            continue
+        age = year - scar.created.year
+        if age < SCAR_RIPEN:
+            continue
+        rng = ctx.rng("disaster", "scar", scar.id, year)
+        if not rng.chance(SCAR_TURN):
+            continue
+        state = _next_scar_state(world, scar, rng, age)
+        if not state or state == scar.state:
+            continue
+        kind = dis.SCARS_BY_KEY.get(scar.kind)
+        was, scar.state = scar.state, state
+        if state == dis.SCAR_HOLY:
+            scar.holy = True
+        if state == dis.SCAR_SETTLED:
+            # Обжитый шрам перестаёт быть опасным — по крайней мере на вид.
+            scar.danger = min(scar.danger, 1)
+        scar.notes.append("%d: %s" % (year, state))
+        region = world.regions.get(scar.region_id)
+        title, text = texts.scar_turn(rng, scar, kind, was, state, region, age)
+        world.add_event(
+            date=ctx.date_in(rng, year), era_index=world.era_index_at(year),
+            kind="scar_turn", title=title, text=text,
+            importance=2 if state != dis.SCAR_FORGOTTEN else 1,
+            subjects=[scar.id], region_id=scar.region_id)
+
+
+def _next_scar_state(world, scar, rng, age: int) -> str:
+    """Что стало со шрамом: это решают люди рядом, а не сам шрам.
+
+    Пустая строка значит «пока ничего»: шрам остаётся при своём, и это
+    самый частый ответ. Место, которого боятся, помнят дольше прочих —
+    страх лучшая память, чем благодарность.
+    """
+    people = any(world.settlements[sid].region_id == scar.region_id
+                 for sid in world.active_settlements)
+    if not people:
+        # Некому обходить и некому обживать: шрам зарастает безымянным.
+        return dis.SCAR_FORGOTTEN if age > 300 else ""
+    faith = any(temple.region_id == scar.region_id
+                for temple in world.temples.values()) or bool(world.faiths)
+    # Освящают рано или никогда: через полтысячи лет это просто место,
+    # куда не ходят, и объяснять его уже нечем.
+    holy_time = faith and SCAR_HOLY_WINDOW[0] <= age <= SCAR_HOLY_WINDOW[1]
+
+    if scar.state == dis.SCAR_FRESH:
+        # Место своё занимает один раз. Что с ним станет, решается в первые
+        # поколения, пока помнят беду: дальше только забывают.
+        if scar.danger >= 2:
+            pairs = [("", 0.2), (dis.SCAR_SHUNNED, 0.8)]
+            if holy_time:
+                pairs.append((dis.SCAR_HOLY, 0.25))
+            return rng.weighted(pairs)
+        pairs = [("", 0.3), (dis.SCAR_SETTLED, 0.55), (dis.SCAR_SHUNNED, 0.25)]
+        if holy_time:
+            pairs.append((dis.SCAR_HOLY, 0.2))
+        return rng.weighted(pairs)
+
+    if scar.state == dis.SCAR_SHUNNED:
+        # Опасное место так и остаётся местом, куда не ходят: его не
+        # обживают и не забывают, пока рядом живут люди. Освятить его уже
+        # не освятят — для этого нужно было объяснение, а объяснения нет.
+        if scar.danger >= 2 or age <= SCAR_FORGET_AGE:
+            return ""
+        return rng.weighted([("", 1.0), (dis.SCAR_SETTLED, 0.45),
+                             (dis.SCAR_FORGOTTEN, 0.35)])
+
+    if scar.state == dis.SCAR_SETTLED:
+        # Здесь пашут и не знают, отчего земля такая.
+        if age <= SCAR_SETTLED_AGE:
+            return ""
+        return rng.weighted([("", 1.0), (dis.SCAR_FORGOTTEN, 0.6)])
+
+    # Святое место остаётся святым. Забывают не его, а причину, по которой
+    # он свят, — и об этом сказано в самой вехе.
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# Потерянное знание
+# ---------------------------------------------------------------------------
+# Самое сильное последствие большой беды — не убитые, а забытое. Умение
+# исчезает не потому, что его нельзя повторить, а потому, что умерли все,
+# кто умел. Через века остаются обрывки — и по ним однажды находят целое.
+
+LORE_CHANCE = 0.3           # у большой беды знание гибнет вместе с людьми
+LORE_MAX = 2
+LORE_FRAGMENT_AFTER = 100   # раньше этого обрывки ещё не ищут
+LORE_FRAGMENT_CHANCE = 0.14
+# Насколько легко вернуть знание по трудности 1…3 — за десятилетие.
+# Дорожные карты чертят заново за век-полтора; письмо народа, которого
+# не стало, не возвращается почти никогда, и это главное в утрате.
+LORE_FIND_CHANCE = (0.04, 0.008, 0.0015)
+LORE_FINDERS = ("летописец", "мастер", "изобретатель", "искатель",
+                "верховный жрец", "ересиарх")
+
+
+def lose_lore(ctx, calamity, spec, rng, year: int, date) -> None:
+    """Что ушло вместе с теми, кто умел."""
+    pairs = dis.lore_for(spec)
+    if not pairs or not calamity.region_ids:
+        return
+    world = ctx.world
+
+    # Знание гибнет там, где гибнут города и книжники: от одного недорода
+    # никто не забывает, как плавят железо.
+    want = 0
+    if calamity.severity >= 4 and rng.chance(0.65):
+        want = 2 if rng.chance(0.35) else 1
+    elif calamity.settlements_lost and rng.chance(LORE_CHANCE):
+        want = 1
+    elif calamity.severity >= 3 and calamity.depth >= 3 and rng.chance(0.25):
+        want = 1
+    if want <= 0:
+        return
+    want = min(LORE_MAX, want)
+
+    had = {item.kind for item in world.lost_lore.values()
+           if item.state != dis.LORE_FOUND}
+    made = 0
+    for _ in range(want * 3):
+        if made >= want:
+            break
+        kind = rng.weighted(list(pairs))
+        if kind.key in had:
+            continue          # дважды одно и то же не забывают
+        had.add(kind.key)
+        region_id = rng.choice(calamity.region_ids)
+        lore = world.add_lost_lore(
+            kind=kind.key, about=kind.about, calamity_id=calamity.id,
+            region_id=region_id, lost=date, hardness=kind.hardness,
+            fragment=kind.fragment, state=dis.LORE_LOST)
+        calamity.lore_ids.append(lore.id)
+        made += 1
+        # Забытое умение — это не только грусть: земля без него слабее.
+        if kind.hurts:
+            region = world.regions.get(region_id)
+            if region is not None:
+                was = vuln_of(world, region_id, kind.hurts)
+                region.vulnerability[kind.hurts] = min(
+                    1.0, was + dis.VULN_LEARN)
+        title, text = texts.lore_lost(rng, lore, kind, calamity, world)
+        world.add_event(
+            date=date, era_index=world.era_index_at(year), kind="lore_lost",
+            title=title, text=text, importance=3,
+            subjects=[lore.id, calamity.id], region_id=region_id)
+
+
+def find_lore(ctx, year: int, period: int) -> None:
+    """Обрывки находят, а по обрывкам однажды находят и целое."""
+    world = ctx.world
+    for lore in list(world.lost_lore.values()):
+        if lore.state == dis.LORE_FOUND or lore.lost is None:
+            continue
+        age = year - lore.lost.year
+        if age < LORE_FRAGMENT_AFTER:
+            continue
+        rng = ctx.rng("disaster", "lore", lore.id, year)
+        if lore.state == dis.LORE_LOST:
+            if not rng.chance(LORE_FRAGMENT_CHANCE):
+                continue
+            lore.state = dis.LORE_FRAGMENTS
+            lore.notes.append("%d: %s" % (year, dis.LORE_FRAGMENTS))
+            title, text = texts.lore_fragments(rng, lore, world)
+            world.add_event(
+                date=ctx.date_in(rng, year), era_index=world.era_index_at(year),
+                kind="lore_fragments", title=title, text=text, importance=2,
+                subjects=[lore.id], region_id=lore.region_id)
+            continue
+        hard = max(1, min(3, lore.hardness))
+        if not rng.chance(LORE_FIND_CHANCE[hard - 1]):
+            continue
+        finder, actor_id, sex = _lore_finder(world, lore, rng, year)
+        if not finder:
+            continue
+        lore.state = dis.LORE_FOUND
+        lore.found = ctx.date_in(rng, year)
+        lore.found_by = finder
+        lore.notes.append("%d: %s" % (year, dis.LORE_FOUND))
+        kind = dis.LORE_BY_KEY.get(lore.kind)
+        if kind is not None and kind.hurts:
+            region = world.regions.get(lore.region_id)
+            if region is not None:
+                was = vuln_of(world, lore.region_id, kind.hurts)
+                region.vulnerability[kind.hurts] = max(
+                    0.0, was - dis.VULN_LEARN)
+        title, text = texts.lore_found(rng, lore, finder, age, world, sex)
+        world.add_event(
+            date=lore.found, era_index=world.era_index_at(year),
+            kind="lore_found", title=title, text=text, importance=3,
+            actors=[actor_id] if actor_id else None,
+            subjects=[lore.id], region_id=lore.region_id)
+
+
+def _lore_finder(world, lore, rng, year: int) -> tuple:
+    """Кто вернул знание: живой книжник, а если некому — сам город."""
+    here = {sid for sid in world.active_settlements
+            if world.settlements[sid].region_id == lore.region_id}
+    people = []
+    for figure in world.figures.values():
+        if not figure.alive_at(year) or figure.home_id not in here:
+            continue
+        if any(role in LORE_FINDERS for role in figure.roles):
+            people.append(figure)
+    if people:
+        figure = rng.choice(sorted(people, key=lambda item: item.id))
+        return figure.plain_name, figure.id, figure.sex
+    cities = [world.settlements[sid] for sid in here]
+    if not cities:
+        return "", "", ""
+    # Знание вернул не человек, а город: так бывает, когда возвращали его
+    # многие и ни одного не запомнили.
+    city = max(cities, key=lambda item: (item.population, item.id))
+    return "город по имени %s" % city.name, "", "m"
+
+
 __all__ = ["prepare", "vuln_of", "vuln_kind", "vuln_factor", "hurt_lands",
            "build_works", "forget", "choose_cause", "want_omens", "schedule",
            "tick_pending", "phase_at", "note_phase", "maybe_turn",
            "force_now", "respond", "count_gains", "name_actors",
            "plan_chain", "tick_chains", "count_damage", "four_outcomes",
-           "dark_pressure_of", "PROFILE_KEYS"]
+           "dark_pressure_of", "leave_scars", "age_scars",
+           "lose_lore", "find_lore", "PROFILE_KEYS"]

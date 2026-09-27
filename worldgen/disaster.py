@@ -673,6 +673,104 @@ for _link in CHAINS:
 
 
 # ---------------------------------------------------------------------------
+# Фронт: нашествие идёт по землям, а не ложится на них сразу
+# ---------------------------------------------------------------------------
+# «Вторжение в пяти землях» — это не событие, а сводка. Событие — это то,
+# что первой пала земля у пролома, что перевал держали одиннадцать лет,
+# что столица досталась им последней, и что две земли так и остались за
+# ними, когда всё кончилось.
+
+LAND_CLEAR = "нетронута"
+LAND_THREAT = "под угрозой"
+LAND_HELD = "занята"
+LAND_RUINED = "разорена"
+LAND_FREED = "освобождена"
+LAND_LOST = "осталась за врагом"
+LAND_STATES = (LAND_CLEAR, LAND_THREAT, LAND_HELD, LAND_RUINED,
+               LAND_FREED, LAND_LOST)
+
+# Роль города в нашествии. Не всякий город «взят» или «не взят»: через
+# один вошли, за другим уже никого не было, в третий сошлись все, кто ушёл.
+ROLE_GATE = "ворота"
+ROLE_FIRST = "взят первым"
+ROLE_KEEP = "последний оплот"
+ROLE_SHELTER = "убежище"
+ROLE_STOOD = "выстоял"
+ROLE_BOUGHT = "откупился"
+CITY_ROLES = (ROLE_GATE, ROLE_FIRST, ROLE_KEEP, ROLE_SHELTER, ROLE_STOOD,
+              ROLE_BOUGHT)
+
+# Чем держат ход. Не всё решается битвой, и почти ничто — одной.
+@dataclass(frozen=True)
+class Hold:
+    key: str
+    about: str
+    years: tuple = (3, 12)   # на сколько задерживает
+    needs: str = ""          # «крепость», «горы», «река», «зима», «войско»
+
+
+HOLDS = (
+    Hold("твердыня на пути",
+         "твердыню обошли не сразу: пока она стояла, дальше не шли",
+         years=(5, 25), needs="крепость"),
+    Hold("перевал",
+         "через хребет иначе не пройти, и перевал держали, пока могли",
+         years=(4, 16), needs="горы"),
+    Hold("река в разлив",
+         "реку перешли только зимой, и год ушёл на ожидание",
+         years=(2, 8), needs="река"),
+    Hold("выжженная земля",
+         "перед ними оставили пустое: ни хлеба, ни колодцев",
+         years=(3, 10)),
+    Hold("мор в чужом войске",
+         "их выкосила та же зараза, что и нас",
+         years=(4, 14)),
+    Hold("зима",
+         "зимовать здесь они не умели и ушли назад до весны",
+         years=(2, 7), needs="зима"),
+    Hold("поднялась округа",
+         "мужики взяли, что нашлось, и дороги стали небезопасны",
+         years=(3, 12)),
+    Hold("выкуп",
+         "им заплатили, и они прошли мимо — на этот раз",
+         years=(5, 20)),
+    Hold("спор у них самих",
+         "они встали, потому что не сошлись, кому идти первым",
+         years=(3, 11)),
+    Hold("подошла помощь",
+         "соседи прислали то, что могли, и этого хватило на время",
+         years=(4, 15)),
+)
+
+HOLDS_BY_KEY = {item.key: item for item in HOLDS}
+
+# Горы и снег держат не сами по себе: держит то, что земля такая.
+HOLD_TERRAINS = {
+    "горы": ("горы", "высокогорье", "хребет", "скалы"),
+    "река": ("речная долина", "поймы", "болота", "низина"),
+    "зима": ("тундра", "тайга", "ледник", "снежные поля"),
+}
+
+
+def holds_for(region, has_fort: bool) -> tuple:
+    """Чем эта земля может задержать ход — и с каким весом."""
+    out = []
+    terrain = getattr(region, "terrain", "") if region is not None else ""
+    for item in HOLDS:
+        if item.needs == "крепость":
+            if has_fort:
+                out.append((item, 2.5))
+            continue
+        if item.needs:
+            words = HOLD_TERRAINS.get(item.needs, ())
+            if terrain in words:
+                out.append((item, 2.0))
+            continue
+        out.append((item, 1.0))
+    return tuple(out)
+
+
+# ---------------------------------------------------------------------------
 # Шрамы мира: география, которая помнит
 # ---------------------------------------------------------------------------
 
@@ -764,6 +862,28 @@ SCARS = (
              "дома целы, а людей нет, и вещи лежат где их бросили",
              danger=2, families=ALL_FAMILIES,
              boon="в домах осталось всё, что не унесли"),
+    ScarKind("срытые стены", ("Срытые стены", "p"),
+             "стены срыли по уговору и строить заново запретили",
+             danger=0, families=(INVASION, POLITICAL),
+             boon="камень со стен разошёлся по всей округе"),
+    ScarKind("поле, где не пашут", ("Непаханое поле", "n"),
+             "поле не пашут: под ним лежат те, кого тут положили",
+             danger=1, families=(INVASION, POLITICAL, RELIGIOUS)),
+    ScarKind("разорённое капище", ("Разорённое капище", "n"),
+             "святилище разбили, а нового на этом месте не поставили",
+             danger=1, families=(RELIGIOUS, INVASION, MAGIC),
+             boon="приходят тайком и просят у того, кого больше не славят"),
+    ScarKind("выселенный край", ("Выселенный край", "m"),
+             "людей свели отсюда силой, и возвращаться им не дали",
+             danger=0, families=(POLITICAL, INVASION)),
+    ScarKind("солёный колодец", ("Солёный колодец", "m"),
+             "колодцы отравили, и вода в них не выправилась",
+             danger=1, keys=("great_curse", "undead_tide"),
+             families=(INVASION, POLITICAL, MAGIC)),
+    ScarKind("гарь на кладке", ("Гарь", "f"),
+             "кладка обгорела так, что видно и через триста лет",
+             danger=0, keys=("wildfire", "dragon_flight", "demon_invasion"),
+             families=(INVASION,)),
 )
 
 SCARS_BY_KEY = {item.key: item for item in SCARS}
@@ -799,37 +919,61 @@ class LoreKind:
     about: str
     hardness: int = 2        # насколько трудно вернуть: 1…3
     fragment: str = ""       # что от него осталось
+    families: tuple = ()     # от каких бед гибнет чаще
+    keys: tuple = ()         # и от каких именно бед — в первую голову
+    hurts: str = ""          # без него земля слабее вот к этому
 
 
 LOST_LORE = (
     LoreKind("письмо", "письмо этого народа читать стало некому",
-             hardness=3, fragment="надписи на камнях, которых не разобрать"),
+             hardness=3, fragment="надписи на камнях, которых не разобрать",
+             families=(INVASION, POLITICAL, MAGIC)),
     LoreKind("счёт лет", "счёт лет сбился, и прежние даты сошлись в одну",
-             hardness=2, fragment="сводные таблицы с пропусками"),
+             hardness=2, fragment="сводные таблицы с пропусками",
+             families=ALL_FAMILIES),
     LoreKind("водовод", "как вели воду в город, забыли начисто",
-             hardness=2, fragment="сухие каменные жёлобы под улицами"),
+             hardness=2, fragment="сухие каменные жёлобы под улицами",
+             families=(NATURAL, CLIMATE, INVASION),
+             keys=("earthquake", "drought", "sundering"), hurts=V_FAMINE),
     LoreKind("снадобье", "лекарство от этой самой болезни было — и не стало",
-             hardness=3, fragment="список трав без порядка и мер"),
+             hardness=3, fragment="список трав без порядка и мер",
+             families=(NATURAL,), keys=("plague", "beast_plague"),
+             hurts=V_PLAGUE),
     LoreKind("выплавка", "как плавили этот металл, не помнит никто",
-             hardness=2, fragment="клинки, которых теперь не сделать"),
+             hardness=2, fragment="клинки, которых теперь не сделать",
+             families=(INVASION, POLITICAL, MAGIC)),
     LoreKind("карты дорог", "дорожные карты сгорели вместе с книгохранилищем",
-             hardness=1, fragment="обрывки с названиями исчезнувших мест"),
+             hardness=1, fragment="обрывки с названиями исчезнувших мест",
+             families=(INVASION, POLITICAL),
+             keys=("wildfire", "empire_collapse")),
     LoreKind("обряд", "обряд служить перестали, а потом и не сумели",
-             hardness=2, fragment="слова, которые поют, не понимая"),
+             hardness=2, fragment="слова, которые поют, не понимая",
+             families=(RELIGIOUS, MAGIC), hurts=V_MAGIC),
     LoreKind("чародейная школа", "школа чар пресеклась на одном человеке",
-             hardness=3, fragment="ученические записи без главного"),
+             hardness=3, fragment="ученические записи без главного",
+             families=(MAGIC, RELIGIOUS),
+             keys=("mage_war", "mana_storm", "wild_magic"), hurts=V_MAGIC),
     LoreKind("наречие", "наречие ушло вместе с последними говорившими",
-             hardness=3, fragment="песни, которые поют по звуку"),
+             hardness=3, fragment="песни, которые поют по звуку",
+             families=(NATURAL, INVASION, CLIMATE)),
     LoreKind("свод законов", "свод законов сгинул, и суд пошёл по памяти",
-             hardness=1, fragment="разрозненные приговоры прежних лет"),
+             hardness=1, fragment="разрозненные приговоры прежних лет",
+             families=(POLITICAL, INVASION), hurts=V_ORDER),
     LoreKind("строй стен", "как ставили такие стены, больше не знают",
-             hardness=2, fragment="стены, которые стоят, а новые падают"),
+             hardness=2, fragment="стены, которые стоят, а новые падают",
+             families=(INVASION, POLITICAL), hurts=V_INVASION),
     LoreKind("сорт хлеба", "тот хлеб, что родил в сушь, пропал из семян",
-             hardness=1, fragment="зерно в старых амбарах"),
+             hardness=1, fragment="зерно в старых амбарах",
+             families=(CLIMATE, NATURAL), keys=("famine", "drought",
+                                                "glaciation"),
+             hurts=V_FAMINE),
     LoreKind("морской путь", "путь за море забыли, и корабли туда не ходят",
-             hardness=2, fragment="лоция, которой не верят"),
+             hardness=2, fragment="лоция, которой не верят",
+             families=(NATURAL, CLIMATE, INVASION),
+             keys=("storm_years", "sea_rise", "drowning")),
     LoreKind("счёт звёзд", "звёздный счёт, по которому ходили в море, утрачен",
-             hardness=2, fragment="приборы, которых не понимают"),
+             hardness=2, fragment="приборы, которых не понимают",
+             families=(CLIMATE, MAGIC), keys=("volcanic_winter", "long_dark")),
 )
 
 LORE_BY_KEY = {item.key: item for item in LOST_LORE}
@@ -838,6 +982,24 @@ LORE_LOST = "утрачено"
 LORE_FRAGMENTS = "остались обрывки"
 LORE_FOUND = "найдено заново"
 LORE_STATES = (LORE_LOST, LORE_FRAGMENTS, LORE_FOUND)
+
+
+def lore_for(spec) -> tuple:
+    """Что может забыться после такой беды и насколько это к ней идёт.
+
+    Своё весит больше общего: мор уносит снадобье от этой самой болезни,
+    война чародеев — школу чар, а счёт лет сбивается после любой беды,
+    в которой некому стало вести летопись.
+    """
+    out = []
+    for item in LOST_LORE:
+        if spec.key in item.keys:
+            out.append((item, 3.0))
+        elif spec.kind in item.families:
+            out.append((item, 1.0))
+        elif not item.families and not item.keys:
+            out.append((item, 0.4))
+    return tuple(out)
 
 
 # ---------------------------------------------------------------------------
@@ -1103,11 +1265,16 @@ __all__ = [
     "Response", "RESPONSES", "RESPONSES_BY_KEY", "responses_for", "WORKS",
     "DONE_HELPED", "DONE_LATE", "DONE_FAILED", "DONE_WORSE",
     "Chain", "CHAINS", "CHAINS_BY_PARENT",
+    "LAND_STATES", "LAND_CLEAR", "LAND_THREAT", "LAND_HELD",
+    "LAND_RUINED", "LAND_FREED", "LAND_LOST",
+    "CITY_ROLES", "ROLE_GATE", "ROLE_FIRST", "ROLE_KEEP",
+    "ROLE_SHELTER", "ROLE_STOOD", "ROLE_BOUGHT",
+    "Hold", "HOLDS", "HOLDS_BY_KEY", "holds_for",
     "ScarKind", "SCARS", "SCARS_BY_KEY", "scars_for", "SCAR_STATES",
     "SCAR_FRESH", "SCAR_SHUNNED", "SCAR_SETTLED", "SCAR_HOLY",
     "SCAR_FORGOTTEN",
     "LoreKind", "LOST_LORE", "LORE_BY_KEY", "LORE_STATES",
-    "LORE_LOST", "LORE_FRAGMENTS", "LORE_FOUND",
+    "LORE_LOST", "LORE_FRAGMENTS", "LORE_FOUND", "lore_for",
     "GAINS", "ACTORS", "ACTORS_BY_KEY",
     "PHYS_OUTCOMES", "POL_OUTCOMES", "MAN_OUTCOMES", "HIST_OUTCOMES",
     "PHYS_GONE", "PHYS_SEALED", "PHYS_LEFT", "PHYS_STAYS",
