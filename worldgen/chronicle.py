@@ -39,6 +39,7 @@ KIND_LABELS = {
     "settlement_ruined": "Запустение",
     "town_turn": "Перелом в жизни города",
     "divine_deed": "Дело богов",
+    "name_weighed": "Имя из прошлого",
     "mythic_age": "Прежде мира",
     "polity_found": "Рождение страны",
     "polity_fall": "Падение страны",
@@ -1046,6 +1047,147 @@ def _wrap_tale(line: str, width: int = 74) -> str:
     if current:
         out.append(current)
     return ("\n      ").join(out)
+
+
+def render_renown(world) -> str:
+    """Вес в истории: сколько человек значит для мира, а не для двора.
+
+    Летопись знала, кем человек был и что сделал. Здесь — насколько это
+    весит. Уровень собран из настоящих следов: держав, городов, вер,
+    законов, вещей, сказаний и потомков, — а не выдан за титул. Поэтому
+    государь без дел стоит ниже пахаря, который однажды успел
+    предупредить город.
+
+    И вес не застывает: раз в двести пятьдесят лет потомки пересматривают
+    имя. Слава при жизни и нынешняя память — два разных числа.
+    """
+    from . import renown as cat
+    from . import narrative_renown as texts
+
+    rows = ["ВЕС В ИСТОРИИ", ""]
+    if not world.renowns:
+        rows.append("  Мир не успел никого взвесить.")
+        return "\n".join(rows)
+
+    weights = []
+    for weight in world.renowns.values():
+        figure = world.figures.get(weight.figure_id)
+        if figure is not None:
+            weights.append((weight, figure))
+    weights.sort(key=lambda pair: (-pair[0].level, -pair[0].score,
+                                   pair[0].id))
+
+    ladder, tiers = {}, {}
+    risen = fallen = forgotten = 0
+    for weight, _ in weights:
+        ladder[weight.level] = ladder.get(weight.level, 0) + 1
+        tiers[weight.tier] = tiers.get(weight.tier, 0) + 1
+        ups = sum(1 for item in weight.reviews
+                  if item.get("стало", 0) > item.get("было", 0))
+        downs = sum(1 for item in weight.reviews
+                    if item.get("стало", 0) < item.get("было", 0))
+        risen += 1 if ups else 0
+        fallen += 1 if downs else 0
+        if weight.forgotten:
+            forgotten += 1
+
+    rows.append("  Имён взвешено: %d." % len(weights))
+    rows.append("  По ступеням: %s."
+                % ", ".join("%d — %d" % (level, ladder[level])
+                            for level in sorted(ladder)))
+    rows.append("  Из них: %s."
+                % ", ".join("%s — %d" % (name, tiers[name])
+                            for name in cat.TIERS if name in tiers))
+    rows.append("  Поднялись в цене после смерти: %d; осели: %d."
+                % (risen, fallen))
+    if forgotten:
+        rows.append("  Великих, которых перестали помнить: %d." % forgotten)
+    rows.append("")
+
+    big = [pair for pair in weights if pair[0].level >= 4][:30]
+    shown = {weight.id for weight, _ in big}
+    for weight, figure in big:
+        rows.extend(_renown_block(world, weight, figure, cat, texts))
+
+    rest = [pair for pair in weights if pair[0].id not in shown]
+    if rest:
+        rows.append("  ОСТАЛЬНЫЕ ИМЕНА")
+        rows.append("")
+        for weight, figure in rest[:150]:
+            rows.append("    %-30s %-11s ступень %-2d  %-16s %s"
+                        % (figure.plain_name[:30], figure.lifespan_text(),
+                           weight.level, weight.tier,
+                           weight.destiny or ""))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def _renown_block(world, weight, figure, cat, texts) -> list:
+    """Один человек: чего он стоит, чем повлиял и что о нём говорят."""
+    head = "%s — ступень %d, %s" % (figure.name, weight.level,
+                                    cat.LEVEL_NAMES.get(weight.level, ""))
+    rows = ["  %s" % head, "  " + "-" * (len(head) + 2)]
+    rows.append("      %s, %s" % (figure.lifespan_text(),
+                                  cat.LEVEL_ABOUT.get(weight.level, "")))
+    if weight.peak_level != weight.level:
+        rows.append("      выше всего стоял на %d ступени (%d год)"
+                    % (weight.peak_level, weight.peak_year))
+    rows.append("      слава при жизни %d из ста, помнят теперь %d"
+                % (weight.fame, weight.memory))
+    rows.append("      незаменимость: %.2f — %s"
+                % (weight.unique,
+                   "заменить его было бы некем" if weight.unique >= 0.55
+                   else "на его месте мог оказаться другой"))
+    if weight.influence:
+        rows.append("      чем повлиял: %s"
+                    % ", ".join("%s %d" % (name, value)
+                                for name, value in sorted(
+                                    weight.influence.items(),
+                                    key=lambda p: (-p[1], p[0]))[:6]))
+    if weight.roles:
+        rows.append("      для истории он: %s" % ", ".join(weight.roles))
+    if weight.destiny:
+        rows.append("      судьба: %s — %s"
+                    % (weight.destiny,
+                       cat.DESTINIES_BY_KEY.get(weight.destiny, "")))
+    if weight.aura:
+        rows.append("      %s" % texts.aura_line(weight.aura))
+    if weight.climax:
+        rows.append("      вершина: %d год — %s"
+                    % (int(weight.climax.get("год", 0)),
+                       weight.climax.get("что", "")))
+    rows.append("")
+
+    if weight.footprint:
+        rows.append("      ЧТО ПОСЛЕ НЕГО ОСТАЛОСЬ")
+        for item in weight.footprint:
+            rows.append("        %-14s %-34s %s"
+                        % (item.get("вид", ""), str(item.get("что", ""))[:34],
+                           "стоит до сих пор" if item.get("жив")
+                           else "этого больше нет"))
+        rows.append("")
+
+    if weight.voices:
+        rows.append("      ШЕСТЬ ГОЛОСОВ О НЁМ")
+        for voice in cat.VOICES:
+            line = weight.voices.get(voice)
+            if line:
+                rows.append("        %-24s %s" % (voice + ":", line))
+        rows.append("")
+
+    real = [item for item in weight.reviews
+            if item.get("стало") != item.get("было")]
+    if real:
+        rows.append("      КАК ЕГО ПЕРЕСМАТРИВАЛИ")
+        for item in real:
+            rows.append("        %5d  %d → %-2d  %s"
+                        % (int(item.get("год", 0)), int(item.get("было", 0)),
+                           int(item.get("стало", 0)), item.get("почему", "")))
+        rows.append("")
+    for note in weight.notes[:4]:
+        rows.append("      %s" % texts.cap(note))
+    rows.append("")
+    return rows
 
 
 def render_gods(world) -> str:
@@ -3333,6 +3475,7 @@ def full_text(world) -> str:
         render_stories(world),
         render_towns(world),
         render_gods(world),
+        render_renown(world),
         render_guilds(world),
         render_expeditions(world),
         render_politics(world),

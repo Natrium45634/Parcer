@@ -36,6 +36,7 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       peoples,
                       religion,
                       sites, soldiery, spies, strife, succession,
+                      renown,
                       tales, tongues, township,
                       trade,
                       unions, upheaval, war)
@@ -198,6 +199,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             # Боги живут своей жизнью прежде городов и былей: их дела
             # и запреты — такая же причина событий, как война и недород.
             divinity.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Вес имён подводится после всего: к этому часу уже
+            # известно, что человек успел, а мир — удержал.
+            renown.upkeep(ctx, year, UPKEEP_PERIOD)
             # Жизнь городов идёт до былей: быль может вырасти из тяготы
             # или тайны города, и к этому часу они уже должны быть.
             township.upkeep(ctx, year, UPKEEP_PERIOD)

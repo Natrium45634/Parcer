@@ -22,7 +22,7 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Polity,
                      LifePath,
                      Region, Reign, Relic, Seed, Settlement, Site, Story,
-                     Strife, Township, Godhead,
+                     Strife, Township, Godhead, Renown,
                      Tale,
                      Temple,
                      Tongue,
@@ -173,6 +173,8 @@ def world_to_dict(world: World) -> dict:
                       for item in world.townships.values()],
         "godheads": [_compact(Godhead, item.to_dict())
                      for item in world.godheads.values()],
+        "renowns": [_compact(Renown, item.to_dict())
+                    for item in world.renowns.values()],
         "myths": list(world.myths),
         "story_marks": world.story_marks,
         "cabals": [_compact(Cabal, item.to_dict())
@@ -379,6 +381,10 @@ def dict_to_world(data: dict) -> World:
         world.godheads[head.id] = head
         world._godhead_of[head.deity_id] = head.id
     world.myths = list(data.get("myths") or ())
+    for item in data.get("renowns", ()):
+        weight = Renown(**_clean(Renown, item))
+        world.renowns[weight.id] = weight
+        world._renown_of[weight.figure_id] = weight.id
     for item in data.get("lifepaths", ()):
         path = LifePath(**_clean(LifePath, item))
         world.lifepaths[path.id] = path

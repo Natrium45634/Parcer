@@ -1508,6 +1508,58 @@ class Cabal:
 
 
 @dataclass
+class Renown:
+    """Вес человека в истории: чего он стоит для мира, а не для двора.
+
+    Главное правило: уровень не назначается по титулу, а собирается из
+    настоящих следов — событий, правлений, основанных держав и городов,
+    законов, вер, родов, вещей, сказаний и потомков. Король без дел
+    весит меньше пахаря, который однажды спас город.
+
+    Второе правило: вес виден не сразу. `fame` — слава при жизни,
+    `memory` — то, сколько его помнят сейчас, и это разные числа.
+    Уровень меняется после смерти: нашли записи — поднялся; держава
+    рассыпалась, род пресёкся, песню петь перестали — осел.
+    """
+
+    id: str
+    figure_id: str
+    born_year: int
+    died_year: int = 0
+    level: int = 0             # ступень 0…10 прямо сейчас
+    peak_level: int = 0        # и самая высокая за всё время
+    peak_year: int = 0
+    score: float = 0.0         # счёт дел, из которого вышла ступень
+    fame: int = 0              # как громко о нём знали при жизни, 0…100
+    memory: int = 0            # и сколько помнят теперь, 0…100
+    unique: float = 0.0        # насколько трудно заменить его другим
+    influence: dict = field(default_factory=dict)   # двенадцать видов
+    roles: list = field(default_factory=list)       # исторические роли
+    destiny: str = ""          # какой формы вышла жизнь
+    aura: str = ""             # как он действовал на других
+    climax: dict = field(default_factory=dict)      # {год, что}
+    footprint: list = field(default_factory=list)   # [{вид, что, id, жив}]
+    voices: dict = field(default_factory=dict)      # шесть голосов о нём
+    reviews: list = field(default_factory=list)     # [{год, было, стало, почему}]
+    legacy_alive: bool = False  # продолжает ли наследие порождать события
+    notes: list = field(default_factory=list)
+    event_ids: list = field(default_factory=list)
+
+    @property
+    def tier(self) -> str:
+        from . import renown as _cat
+        return _cat.tier_of(self.level)
+
+    @property
+    def forgotten(self) -> bool:
+        """Великий, которого перестали помнить, — это отдельная судьба."""
+        return self.peak_level >= 5 and self.memory <= 20
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class Godhead:
     """Биография бога: что он за существо и что он делал тысячи лет.
 

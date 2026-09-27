@@ -434,6 +434,9 @@ class ChronicleApp(tk.Tk):
         self.gods_text = self._add_text_tab(
             "Боги и их дела", lambda: self._set_text(
                 self.gods_text, chronicle.render_gods(self.world)))
+        self.renown_text = self._add_text_tab(
+            "Вес в истории", lambda: self._set_text(
+                self.renown_text, chronicle.render_renown(self.world)))
         self.crafts_text = self._add_text_tab(
             "Ремёсла", lambda: self._set_text(
                 self.crafts_text, chronicle.render_crafts(self.world)))
@@ -1295,6 +1298,42 @@ class ChronicleApp(tk.Tk):
                         (other.plain_name if other else "?")[:32], path,
                         bond.since,
                         ", оборвалась в %d" % bond.ended if bond.ended else ""))
+            # Сколько этот человек весит в истории — и помнят ли его
+            # теперь. Слава при жизни и память потомков тут врозь.
+            weight = world.renown_of(entity.id)
+            if weight is not None:
+                from worldgen import renown as weigh_cat
+                lines.extend(["", "ВЕС В ИСТОРИИ", "-" * 60])
+                lines.append("  ступень %d из десяти — %s"
+                             % (weight.level,
+                                weigh_cat.LEVEL_NAMES.get(weight.level, "")))
+                if weight.peak_level != weight.level:
+                    lines.append("  выше всего стоял на %d (%d год)"
+                                 % (weight.peak_level, weight.peak_year))
+                lines.append("  слава при жизни %d, помнят теперь %d"
+                             % (weight.fame, weight.memory))
+                if weight.influence:
+                    lines.append("  чем повлиял: %s" % ", ".join(
+                        "%s %d" % (name, value)
+                        for name, value in sorted(weight.influence.items(),
+                                                  key=lambda p: -p[1])[:6]))
+                if weight.roles:
+                    lines.append("  для истории: %s" % ", ".join(weight.roles))
+                if weight.destiny:
+                    lines.append("  судьба: %s" % weight.destiny)
+                for item in weight.footprint[:8]:
+                    lines.append("  осталось: %-12s %-30s %s"
+                                 % (item.get("вид", ""),
+                                    str(item.get("что", ""))[:30],
+                                    "" if item.get("жив") else "(этого нет)"))
+                for item in weight.reviews:
+                    if item.get("стало") != item.get("было"):
+                        lines.append("  %5d  %d → %d  %s"
+                                     % (int(item.get("год", 0)),
+                                        int(item.get("было", 0)),
+                                        int(item.get("стало", 0)),
+                                        item.get("почему", "")))
+
             stories = [story for story in world.stories.values()
                        if any(item.get("кто") == entity.id
                               for item in story.cast)]

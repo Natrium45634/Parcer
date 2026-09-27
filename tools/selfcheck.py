@@ -320,6 +320,112 @@ def check_stories(world, seed: str) -> list:
     return problems
 
 
+def check_renown(world, seed: str) -> list:
+    """Вес имён: собран из настоящих следов и не спорит с жизнью.
+
+    Проверяется главное: вес не назначен по титулу, а собран из того,
+    что человек оставил; ступень лежит в своих пределах и не спорит с
+    пиком; пересмотры идут после смерти, а не до; слава и память —
+    разные числа; и мир не взвешивает всех подряд.
+    """
+    from worldgen import renown as cat
+
+    problems = []
+    for weight in world.renowns.values():
+        figure = world.figures.get(weight.figure_id)
+        if figure is None:
+            problems.append("сид «%s»: вес без человека (%s)"
+                            % (seed, weight.id))
+            continue
+        where = "человек по имени %s" % figure.plain_name
+        if not 0 <= weight.level <= 10:
+            problems.append("сид «%s»: у %s ступень вне десяти"
+                            % (seed, where))
+        if weight.peak_level < weight.level:
+            problems.append("сид «%s»: у %s пик ниже нынешнего"
+                            % (seed, where))
+        if not 0 <= weight.fame <= 100 or not 0 <= weight.memory <= 100:
+            problems.append("сид «%s»: у %s слава или память вне ста"
+                            % (seed, where))
+        if not 0.0 <= weight.unique <= 1.0:
+            problems.append("сид «%s»: у %s незаменимость вне меры"
+                            % (seed, where))
+        if weight.died_year and figure.death is not None \
+                and weight.died_year != figure.death.year:
+            problems.append("сид «%s»: у %s год смерти не сходится с жизнью"
+                            % (seed, where))
+        if figure.birth is not None and weight.born_year \
+                and weight.born_year != figure.birth.year:
+            problems.append("сид «%s»: у %s год рождения не сходится"
+                            % (seed, where))
+        for name in (weight.influence or {}):
+            if name not in cat.INFLUENCES:
+                problems.append("сид «%s»: у %s влияние, которого нет"
+                                % (seed, where))
+                break
+        for name, value in (weight.influence or {}).items():
+            if not 0 <= int(value) <= 100:
+                problems.append("сид «%s»: у %s влияние вне ста"
+                                % (seed, where))
+                break
+        for role in weight.roles:
+            if role not in cat.ROLES:
+                problems.append("сид «%s»: у %s роль не из списка"
+                                % (seed, where))
+                break
+        if weight.destiny and weight.destiny not in cat.DESTINIES_BY_KEY:
+            problems.append("сид «%s»: у %s судьба не из списка"
+                            % (seed, where))
+        if weight.aura and weight.aura not in cat.AURAS_BY_KEY:
+            problems.append("сид «%s»: у %s аура не из списка" % (seed, where))
+        for item in weight.footprint:
+            if item.get("вид") not in cat.FOOTPRINTS:
+                problems.append("сид «%s»: у %s след не из списка"
+                                % (seed, where))
+                break
+        for voice in (weight.voices or {}):
+            if voice not in cat.VOICES:
+                problems.append("сид «%s»: у %s голос не из списка"
+                                % (seed, where))
+                break
+        last = 0
+        for item in weight.reviews:
+            year = int(item.get("год", 0))
+            if weight.died_year and year < weight.died_year:
+                problems.append("сид «%s»: %s пересмотрен раньше смерти"
+                                % (seed, where))
+                break
+            if year > world.total_years:
+                problems.append("сид «%s»: %s пересмотрен после конца мира"
+                                % (seed, where))
+                break
+            if year < last:
+                problems.append("сид «%s»: у %s пересмотры идут вспять"
+                                % (seed, where))
+                break
+            last = year
+
+    rows = list(world.renowns.values())
+    if len(rows) >= 40:
+        # Вес должен браться из дел: если у всех одна ступень, значит,
+        # его всё-таки назначили, а не сосчитали.
+        levels = {item.level for item in rows}
+        if len(levels) < 3:
+            problems.append("сид «%s»: у всех имён одна цена (%d ступени)"
+                            % (seed, len(levels)))
+        top = [item for item in rows if item.level >= 8]
+        if len(top) > max(6, len(rows) // 12):
+            problems.append("сид «%s»: слишком много имён мирового веса: %d"
+                            % (seed, len(top)))
+        moved = sum(1 for item in rows
+                    for row in item.reviews
+                    if row.get("стало") != row.get("было"))
+        if not moved:
+            problems.append("сид «%s»: ни одно имя не переменилось в цене"
+                            % seed)
+    return problems
+
+
 def check_gods(world, seed: str) -> list:
     """Боги: биография не спорит ни с миром, ни сама с собой.
 
@@ -1910,6 +2016,7 @@ def main() -> int:
         failures.extend(check_stories(first, seed))
         failures.extend(check_towns(first, seed))
         failures.extend(check_gods(first, seed))
+        failures.extend(check_renown(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
               "бедствия %3d | боги %3d | веры %3d | население %8d (%.1f c)"
@@ -1965,6 +2072,7 @@ def main() -> int:
             failures.extend(check_stories(first, "карта/" + seed))
             failures.extend(check_towns(first, "карта/" + seed))
             failures.extend(check_gods(first, "карта/" + seed))
+            failures.extend(check_renown(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
             print("  карта, сид «%-8s» земель %3d | города %4d | страны %3d | "
@@ -2005,7 +2113,7 @@ def main() -> int:
                       check_strifes, check_lore, check_upheavals,
                       check_capitals, check_souls, check_tales,
                       check_lives, check_stories, check_towns,
-                      check_gods):
+                      check_gods, check_renown):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
         failures.extend(check_map_world(

@@ -301,6 +301,35 @@ def _nodes(ctx, year: int) -> list:
                 int(item.get("год", 1)), ref=deity.id, region_id=region_id,
                 weight=0.9))
 
+    # --- то, что помнят о людях (и чего не помнят) ---------------------
+    # Историческая память дырявая: великого забывают, начатое им лежит
+    # неоконченным, а славят и вовсе не того. Всё это — готовые узлы.
+    for weight in world.renowns.values():
+        figure = world.figures.get(weight.figure_id)
+        if figure is None or not weight.died_year:
+            continue
+        if year - weight.died_year < 120:
+            continue
+        if weight.forgotten:
+            out.append(Node(
+                cat.LOST_NAME,
+                "человека по имени %s знали все" % figure.plain_name,
+                weight.died_year, ref=figure.id,
+                region_id=figure.origin_region, weight=0.9))
+        if weight.destiny == "ложный герой":
+            out.append(Node(
+                cat.FALSE_HERO,
+                "славу за это отдали человеку по имени %s"
+                % figure.plain_name, weight.died_year, ref=figure.id,
+                region_id=figure.origin_region, weight=0.8))
+        for item in weight.footprint:
+            if item.get("вид") == "неоконченное дело" and item.get("жив"):
+                out.append(Node(
+                    cat.UNDONE, item.get("что", "начатое им дело"),
+                    weight.died_year, ref=figure.id,
+                    region_id=figure.origin_region, weight=1.0))
+                break
+
     # --- следы первородных ---------------------------------------------
     for myth in world.myths:
         for trace in myth.get("следы", ()):
@@ -781,6 +810,10 @@ def _town_back(ctx, story, node, year: int) -> None:
     if node.kind == cat.DIVINE_BAN:
         _ban_answer(ctx, story, node, year)
         return
+    if node.kind in (cat.LOST_NAME, cat.UNDONE, cat.FALSE_HERO):
+        if good:
+            _name_back(ctx, story, node, year)
+        return
     town = world.town_of(node.settlement_id) if node.settlement_id else None
     if town is None:
         return
@@ -810,6 +843,45 @@ def _town_back(ctx, story, node, year: int) -> None:
         note = "под городом побывали: %s" % node.what
         if note not in town.notes:
             town.notes.append(note)
+
+
+def _name_back(ctx, story, node, year: int) -> None:
+    """Быль вернула имя из небытия — и вес человека вырос.
+
+    Это то самое, ради чего исторический вес считается не раз и
+    навсегда: через триста лет в каком-нибудь селе находят его записи
+    или доканчивают его дело — и оказывается, что с него всё началось.
+    """
+    world = ctx.world
+    weight = world.renown_of(node.ref) if node.ref else None
+    figure = world.figures.get(node.ref) if node.ref else None
+    if weight is None or figure is None:
+        return
+    before = weight.level
+    if node.kind == cat.UNDONE:
+        why = "дело, которого он не кончил, довели до конца"
+        for item in weight.footprint:
+            if item.get("вид") == "неоконченное дело":
+                item["жив"] = False
+                item["что"] = "%s — доведено до конца" % item.get("что", "")
+                break
+    elif node.kind == cat.FALSE_HERO:
+        why = "выяснилось, что сделал это не он"
+        weight.level = max(0, weight.level - 1)
+    else:
+        why = "нашли его записи, и оказалось, что он понял это первым"
+    if node.kind != cat.FALSE_HERO:
+        weight.level = min(10, weight.level + 1)
+        weight.memory = int(min(100, weight.memory + 25))
+        if weight.level > weight.peak_level:
+            weight.peak_level, weight.peak_year = weight.level, year
+    weight.reviews.append({"год": int(year), "было": before,
+                           "стало": weight.level,
+                           "почему": "%s (быль по имени «%s»)"
+                                     % (why, story.title or "быль")})
+    weight.notes.append("имя вернула быль по имени «%s»"
+                        % (story.title or "быль"))
+    story.notes.append("этим в мир вернулось старое имя")
 
 
 def _read_prophecy(ctx, story, node, year: int) -> None:

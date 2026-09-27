@@ -27,7 +27,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Polity,
                      Region,
                      Reign,
-                     Godhead,
+                     Godhead, Renown,
                      Relic, Seed, Settlement, Site, Story, Strife, Tale,
                      Township,
                      Temple,
@@ -99,6 +99,8 @@ class World:
         self.tales = {}                # сказания: местные героические истории
         self.lifepaths = {}            # жизненные пути значимых людей
         self.stories = {}              # были: малые истории мест и людей
+        self.renowns = {}              # вес людей в истории
+        self._renown_of = {}           # личность -> id веса
         self.godheads = {}             # биографии богов
         # Мифы мира: то, что было прежде истории. У каждого четыре слоя
         # правды, и в мире известен только первый.
@@ -521,6 +523,13 @@ class World:
         if monster.id not in self.living_monsters:
             return
         monster.status = status
+        # Убить чудовище можно в тот же год, когда оно завелось, — но не
+        # раньше того дня. Даты сравниваются по числам, и поход,
+        # кончившийся весной, оказывался раньше твари, объявившейся
+        # осенью того же года.
+        if date is not None and monster.born is not None \
+                and date.ordinal < monster.born.ordinal:
+            date = monster.born
         monster.ended = date
         monster.slayer_id = slayer.id if slayer is not None else ""
         self.living_monsters.remove(monster.id)
@@ -954,6 +963,25 @@ class World:
     # Память людей и связи между ними (блок 16)
     # ------------------------------------------------------------------
 
+    def add_renown(self, **kwargs) -> Renown:
+        weight = Renown(id=self.next_id("RN"), **kwargs)
+        self.renowns[weight.id] = weight
+        self._renown_of[weight.figure_id] = weight.id
+        return weight
+
+    def renown_of(self, figure_id: str):
+        """Исторический вес этого человека, если он вообще записан.
+
+        Спрашивают об этом на каждого человека мира, а вес записан у
+        считаных: указатель обязан отвечать сразу, а не перебирать
+        реестр заново на каждом промахе.
+        """
+        if len(self._renown_of) != len(self.renowns):
+            self._renown_of = {item.figure_id: item.id
+                               for item in self.renowns.values()}
+        weight_id = self._renown_of.get(figure_id)
+        return self.renowns.get(weight_id) if weight_id else None
+
     def add_godhead(self, **kwargs) -> Godhead:
         head = Godhead(id=self.next_id("GH"), **kwargs)
         self.godheads[head.id] = head
@@ -962,11 +990,10 @@ class World:
 
     def godhead_of(self, deity_id: str):
         """Биография этого бога, если она у него есть."""
-        head_id = self._godhead_of.get(deity_id)
-        if head_id is None:
+        if len(self._godhead_of) != len(self.godheads):
             self._godhead_of = {item.deity_id: item.id
                                 for item in self.godheads.values()}
-            head_id = self._godhead_of.get(deity_id)
+        head_id = self._godhead_of.get(deity_id)
         return self.godheads.get(head_id) if head_id else None
 
     def add_township(self, **kwargs) -> Township:
@@ -976,13 +1003,16 @@ class World:
         return town
 
     def town_of(self, settlement_id: str):
-        """Биография этого города, если она у него есть."""
-        town_id = self._town_of.get(settlement_id)
-        if town_id is None:
-            # Мир, поднятый из файла: указатель строится по первому спросу.
+        """Биография этого города, если она у него есть.
+
+        Указатель перестраивается только тогда, когда он отстал от
+        реестра, — например, у мира, поднятого из файла. Иначе спрос о
+        городе без биографии перебирал бы все биографии заново.
+        """
+        if len(self._town_of) != len(self.townships):
             self._town_of = {item.settlement_id: item.id
                              for item in self.townships.values()}
-            town_id = self._town_of.get(settlement_id)
+        town_id = self._town_of.get(settlement_id)
         return self.townships.get(town_id) if town_id else None
 
     def add_story(self, **kwargs) -> Story:
@@ -1540,6 +1570,7 @@ class World:
             "Былей": len(self.stories),
             "Городских биографий": len(self.townships),
             "Божественных биографий": len(self.godheads),
+            "Взвешенных имён": len(self.renowns),
             "Открытых земель": sum(1 for r in self.regions.values()
                                    if r.discovered_year),
             "Тёмных веков": len(self.dark_ages),
