@@ -132,4 +132,70 @@ def phase_turn(rng, calamity, phase, world) -> tuple:
             "%s Земли: %s." % (cap(text), where))
 
 
-__all__ = ["omen", "prevented", "turn_point", "phase_turn"]
+# ---------------------------------------------------------------------------
+# Решения власти
+# ---------------------------------------------------------------------------
+
+ANSWER_FRAMES = (
+    "%(who)s: %(about)s.",
+    "В %(state)s решили так: %(about)s.",
+    "%(who)s — и держава сделала это: %(about)s.",
+)
+
+OUT_HELPED = (
+    "Это помогло: тех, кого не досчитались, было меньше, чем боялись.",
+    "Помогло — и об этом помнили дольше, чем о самой беде.",
+    "Сработало, хотя никто не мог сказать, насколько.",
+)
+
+OUT_LATE = (
+    "Сделано было поздно: помогло тем, кто ещё был жив.",
+    "Решение пришло, когда половина уже случилась.",
+    "Поздно — но не бесполезно.",
+)
+
+OUT_FAILED = (
+    "Не вышло: сделали, и ничего не переменилось.",
+    "Из этого не получилось ничего, кроме потраченного времени.",
+    "Не помогло, и объяснить это никто не смог.",
+)
+
+OUT_WORSE = (
+    "И вот это сделало хуже всего остального.",
+    "Именно после этого беда перестала быть просто бедой.",
+    "Стало хуже — и хуже стало от своих же, а не от беды.",
+)
+
+MISTAKE_TAIL = (
+    "Позже своды сойдутся на том, что державу кончило не бедствие.",
+    "Через век это назовут не бедой, а ошибкой столицы.",
+    "О самой беде забудут раньше, чем об этом решении.",
+)
+
+
+def response(rng, calamity, polity, ruler, item, outcome: str) -> tuple:
+    """Решение власти перед лицом беды и чем оно кончилось."""
+    who = "Государь" if ruler is None else cap(_ruler_word(ruler))
+    data = {"who": who, "state": polity.full_name, "about": item.about}
+    lines = [cap(rng.choice(ANSWER_FRAMES) % data)]
+    if outcome == dis.DONE_HELPED:
+        lines.append(rng.choice(OUT_HELPED))
+    elif outcome == dis.DONE_LATE:
+        lines.append(rng.choice(OUT_LATE))
+    elif outcome == dis.DONE_FAILED:
+        lines.append(rng.choice(OUT_FAILED))
+    else:
+        lines.append(rng.choice(OUT_WORSE))
+        if item.mistake:
+            lines.append(rng.choice(MISTAKE_TAIL))
+    title = "%s: %s" % (polity.name, item.key)
+    return title, " ".join(lines)
+
+
+def _ruler_word(figure) -> str:
+    """«Государыня Х» или «государь Х» — кто это решил."""
+    word = "государыня" if figure.sex == "f" else "государь"
+    return "%s %s" % (word, figure.plain_name)
+
+
+__all__ = ["omen", "prevented", "turn_point", "phase_turn", "response"]

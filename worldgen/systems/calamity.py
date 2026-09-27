@@ -770,6 +770,8 @@ def _advance(ctx, year: int) -> None:
                     subjects=[calamity.id],
                     region_id=calamity.region_ids[0])
             disaster_sys.maybe_turn(ctx, calamity, spec, plan, rng, year)
+            # И тогда же в столицах решают, что с этим делать.
+            disaster_sys.respond(ctx, calamity, spec, plan, rng, year)
 
         _damage(ctx, calamity, spec, plan, rng, year)
 
@@ -1015,6 +1017,11 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
              "сражена при разгроме вторжения"), leader.sex))
     elif leader is not None and resolution == "sealed":
         leader.notes.append("запечатан(а), но не убит(а)")
+
+    # Кто на этой беде поднялся и кто в ней был кем: без этого беда
+    # только отнимает, а так не бывает.
+    disaster_sys.count_gains(ctx, calamity, rng)
+    disaster_sys.name_actors(ctx, calamity, spec, rng, year)
 
     _political_outcome(ctx, calamity, spec, plan, rng, year, date)
 

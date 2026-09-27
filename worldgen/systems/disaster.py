@@ -425,6 +425,258 @@ def tick_pending(ctx, year: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Ответ державы
+# ---------------------------------------------------------------------------
+# Беда сама по себе редко кончает державу. Её кончают решения: хлеб
+# забрали в столицу, подать подняли в голодный год, виноватых нашли и
+# казнили. И наоборот: открытые зернохранилища и выведенные из-под удара
+# люди — это разница между «тяжёлым годом» и «годом, после которого
+# держава не встала».
+
+RESPONSE_MAX = 3            # сколько решений успевает принять одна держава
+RESPONSE_CHANCE = 0.75      # и как часто власть вообще что-то делает
+
+
+def _can(world, polity, need: str) -> bool:
+    """Есть ли у державы то, без чего решение неисполнимо."""
+    if not need:
+        return True
+    if need == "казна":
+        return len(polity.settlement_ids) >= 2
+    if need == "хлеб":
+        return polity.hunger < 0.55 and bool(polity.surpluses)
+    if need == "войско":
+        return len(polity.settlement_ids) >= 1 and polity.weariness < 0.85
+    if need == "жрецы":
+        return bool(polity.faith_id)
+    if need == "чародеи":
+        return bool(polity.known)
+    if need == "сосед":
+        return any(value > 0.1 for value in (polity.relations or {}).values())
+    return True
+
+
+def _weigh_response(world, polity, ruler, item, spec) -> float:
+    """Насколько это решение похоже на то, что примет этот государь."""
+    weight = item.weight
+    traits = set()
+    reign = world.current_reign(polity)
+    if reign is not None:
+        traits |= set(reign.traits or ())
+    if ruler is not None:
+        traits |= set(ruler.traits or ())
+    hits = len(traits & set(item.wants))
+    weight *= 1.0 + 1.6 * hits
+    skills = (reign.skills if reign is not None else None) or {}
+    if item.works or item.key in ("насыпать амбары", "объявить карантин"):
+        weight *= 0.6 + 0.12 * float(skills.get("правление", 5))
+    if item.key == "послать войско":
+        weight *= 0.6 + 0.12 * float(skills.get("война", 5))
+    if item.needs == "жрецы":
+        weight *= 0.6 + 0.12 * float(skills.get("вера", 5))
+    if item.mistake:
+        # Дурное решение принимают не потому, что оно дурное, а потому что
+        # оно проще. Но умный государь так делает реже.
+        weight *= 1.4 - 0.08 * float(skills.get("правление", 5))
+    if polity.hunger > 0.4 and item.key in ("открыть зернохранилища",
+                                            "изъять хлеб силой",
+                                            "просить помощи"):
+        weight *= 1.8
+    return max(0.05, weight)
+
+
+def _outcome(rng, world, polity, ruler, item) -> str:
+    """Чем кончилось решение: помогло, поздно, не вышло, сделало хуже."""
+    reign = world.current_reign(polity)
+    skills = (reign.skills if reign is not None else None) or {}
+    skill = float(skills.get("правление", 5))
+    # Решение помогает не потому, что оно доброе, а потому, что его сумели
+    # исполнить: у государя с умением правления пятёркой выходит едва
+    # половина того, что он велел.
+    good = 0.2 + 0.042 * skill
+    if item.toll < 1.0:
+        good += 0.07
+    roll = rng.random()
+    if roll < good:
+        return dis.DONE_HELPED
+    if roll < good + 0.26:
+        return dis.DONE_LATE
+    if roll < good + 0.52:
+        return dis.DONE_FAILED
+    return dis.DONE_WORSE
+
+
+def _unrest(world, polity, item, outcome: str) -> None:
+    """Недовольство от решения: голод в державе и злоба знати."""
+    unrest = item.unrest
+    if outcome == dis.DONE_WORSE:
+        unrest += 0.15
+    elif outcome == dis.DONE_HELPED:
+        unrest -= 0.05
+    if not unrest:
+        return
+    if item.key in ("изъять хлеб силой", "поднять подать"):
+        polity.hunger = max(0.0, min(1.0, polity.hunger + unrest * 0.45))
+    houses = [item_ for item_ in world.houses_of_polity(polity)
+              if item_.status == ACTIVE and item_.id != polity.house_id]
+    for house in houses[:2]:
+        house.discontent = max(0.0, min(1.0, house.discontent + unrest * 0.5))
+
+
+def respond(ctx, calamity, spec, plan, rng, year: int) -> None:
+    """Что решили в столицах тех держав, по которым идёт беда."""
+    world = ctx.world
+    if len(calamity.responses) >= RESPONSE_MAX:
+        return
+    options = dis.responses_for(spec.kind)
+    if not options:
+        return
+
+    for polity_id in calamity.polity_ids[:3]:
+        polity = world.polities.get(polity_id)
+        if polity is None or polity.status != ACTIVE:
+            continue
+        if len(calamity.responses) >= RESPONSE_MAX:
+            return
+        if not rng.chance(RESPONSE_CHANCE):
+            continue
+        taken = {row["решение"] for row in calamity.responses
+                 if row.get("держава") == polity.id}
+        ruler = world.figures.get(polity.ruler_id)
+        pairs = [(item, _weigh_response(world, polity, ruler, item, spec))
+                 for item in options
+                 if item.key not in taken and _can(world, polity, item.needs)]
+        if not pairs:
+            continue
+        item = rng.weighted(pairs)
+        outcome = _outcome(rng, world, polity, ruler, item)
+
+        # Решение двигает живую силу беды: спасает, не помогает или губит.
+        shift = item.toll
+        if outcome == dis.DONE_LATE:
+            shift = 1.0 + (item.toll - 1.0) * 0.4
+        elif outcome == dis.DONE_FAILED:
+            shift = 1.0
+        elif outcome == dis.DONE_WORSE:
+            shift = max(1.0, 2.0 - item.toll) * 1.1
+        saved = 0.0
+        if shift < 1.0:
+            saved = 1.0 - shift
+        calamity.force = max(0.5, min(1.6, calamity.force * shift))
+        _unrest(world, polity, item, outcome)
+
+        if item.works and outcome in (dis.DONE_HELPED, dis.DONE_LATE):
+            for region_id in calamity.region_ids:
+                region = world.regions.get(region_id)
+                if region is None or region_id not in polity.region_ids:
+                    continue
+                build_works(ctx, region, item.works, year, calamity)
+
+        row = {"год": int(year), "держава": polity.id, "решение": item.key,
+               "итог": outcome, "кто": ruler.id if ruler is not None else ""}
+        calamity.responses.append(row)
+        if outcome == dis.DONE_WORSE and item.mistake:
+            calamity.mistakes.append({"год": int(year), "держава": polity.id,
+                                      "что": item.key})
+        if saved:
+            calamity.would_take = int(calamity.would_take + saved * 100)
+
+        # Не всякое решение — событие летописи: их и так много. Но
+        # ошибка управления и спасение людей — события.
+        loud = (outcome == dis.DONE_WORSE and item.mistake) or \
+            (outcome == dis.DONE_HELPED and item.toll <= 0.78)
+        if loud or calamity.severity >= 4:
+            title, text = texts.response(rng, calamity, polity, ruler, item,
+                                         outcome)
+            world.add_event(
+                date=ctx.date_in(rng, year),
+                era_index=world.era_index_at(year), kind="calamity_answer",
+                title=title, text=text,
+                importance=3 if loud else 2,
+                actors=[ruler.id] if ruler is not None else [],
+                subjects=[calamity.id, polity.id],
+                region_id=calamity.region_ids[0] if calamity.region_ids else "")
+
+
+# ---------------------------------------------------------------------------
+# Кто нажился и кто в этом был кем
+# ---------------------------------------------------------------------------
+
+def count_gains(ctx, calamity, rng) -> None:
+    """У всякой беды есть те, кому она оказалась выгодна.
+
+    Это не злодеи: довезти хлеб в голодный край — это риск, и цена у
+    риска своя. Но история должна помнить и их, иначе выходит, что беда
+    только отнимает.
+    """
+    if calamity.severity < 2:
+        return
+    count = 1 if calamity.severity < 4 else rng.randint(1, 3)
+    seen = set()
+    for _ in range(count):
+        gain = rng.choice(dis.GAINS)
+        if gain in seen:
+            continue
+        seen.add(gain)
+        calamity.gains.append(gain)
+
+
+def name_actors(ctx, calamity, spec, rng, year: int) -> None:
+    """Люди беды: не только герои.
+
+    У беды есть лекарь, который лечил, пока было чем; книжник, который
+    первым понял и которому не поверили; предатель, открывший то, что
+    надо было держать закрытым; и случайный спаситель, сделавший
+    очевидное. Часть этих людей уже есть в мире, часть появляется здесь —
+    и дальше живёт своей жизнью.
+    """
+    world = ctx.world
+    if calamity.severity < 2:
+        return
+    count = min(4, 1 + calamity.severity // 2)
+    roles = [key for key, _ in dis.ACTORS]
+    used = set()
+    races = []
+    for polity_id in calamity.polity_ids:
+        polity = world.polities.get(polity_id)
+        if polity is not None:
+            races.append(polity.race_id)
+    if not races:
+        for settlement_id in world.active_settlements:
+            settlement = world.settlements[settlement_id]
+            if settlement.region_id in calamity.region_ids:
+                races.append(settlement.race_id)
+                break
+    if not races:
+        return
+
+    from .. import races as races_mod
+    for _ in range(count):
+        role = rng.choice(roles)
+        if role in used:
+            continue
+        used.add(role)
+        figure = None
+        if role == "государь" and calamity.polity_ids:
+            polity = world.polities.get(calamity.polity_ids[0])
+            figure = world.figures.get(polity.ruler_id) if polity else None
+        elif role == "воевода" and calamity.commander_ids:
+            figure = world.figures.get(calamity.commander_ids[0])
+        if figure is None:
+            race = races_mod.get_race(rng.choice(sorted(set(races))))
+            sex = "f" if rng.chance(0.42) else "m"
+            figure = ctx.make_figure(
+                rng, race, year, role=role,
+                region_id=rng.choice(calamity.region_ids)
+                if calamity.region_ids else "",
+                title=role, sex=sex, epithet_chance=0.35)
+        if role not in figure.roles:
+            figure.roles.append(role)
+        calamity.actors.append({"роль": role, "кто": figure.id,
+                                "что": dis.ACTORS_BY_KEY.get(role, "")})
+
+
+# ---------------------------------------------------------------------------
 # Фазы и живая сила
 # ---------------------------------------------------------------------------
 
@@ -504,4 +756,5 @@ def force_now(world, calamity, spec, plan, year: int) -> float:
 __all__ = ["prepare", "vuln_of", "vuln_kind", "vuln_factor", "hurt_lands",
            "build_works", "forget", "choose_cause", "want_omens", "schedule",
            "tick_pending", "phase_at", "note_phase", "maybe_turn",
-           "force_now", "PROFILE_KEYS"]
+           "force_now", "respond", "count_gains", "name_actors",
+           "PROFILE_KEYS"]
