@@ -1646,10 +1646,18 @@ def era_watch(ctx, calamity, year: int, date) -> None:
                       reason="длина" if long_enough else "разрыв")
             era = None
     if era is None or era.end is not None:
-        era = world.add_crisis_era(name="", start=date)
+        # Время бед начинается, когда началась первая его беда, а не когда
+        # она кончилась: иначе всякая беда, шедшая годы, оказывается старше
+        # того времени, в которое её же и записали.
+        era = world.add_crisis_era(name="", start=calamity.start)
         world.era_open = era.id
         era.notes.append("открыта бедой «%s»" % calamity.name)
     era.calamity_ids.append(calamity.id)
+    # Беды идут внахлёст: вошедшая позже могла начаться раньше — тогда и
+    # само время начинается раньше.
+    if calamity.start is not None \
+            and calamity.start.ordinal < era.start.ordinal:
+        era.start = calamity.start
     era.deaths += calamity.deaths
     era.depth = max(era.depth, calamity.depth)
     for region_id in calamity.region_ids:
