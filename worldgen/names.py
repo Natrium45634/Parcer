@@ -1008,7 +1008,12 @@ class NameForge:
         # него на четыре головы и десяток тотемов имён выходило слишком
         # мало, и «Дом Хора» встречался в девяти мирах из десяти.
         if gender and rng.chance(0.38):
-            adj = _fitting_adj(rng, st.adjectives or GEO_ADJECTIVES, totem)
+            # Тотем бывает из двух слов («Первого Слова»), и сверять с ним
+            # целиком нельзя: основа выходит длинной, проверка на
+            # однокоренное молчит — и получается «Первый Род Первого
+            # Слова». Сверяем с первым словом тотема.
+            adj = _fitting_adj(rng, st.adjectives or GEO_ADJECTIVES,
+                               totem.split()[0])
             return "%s %s" % (phrase(adj, head, gender), totem)
         return "%s %s" % (head, totem)
 
