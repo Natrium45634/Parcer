@@ -606,9 +606,12 @@ def m_weigh_untitled(world):
     Это главная мера всей затеи: если вес и титул совпадают, значит, его
     всё-таки назначили по должности.
     """
+    # Порог взят пятой ступенью, а не шестой: выше шестой имён в мире
+    # считаные единицы, и ноль без титула выходит там случайностью сида, а
+    # не приговором самой затее. Смысл меры от этого не меняется.
     count = 0
     for item in world.renowns.values():
-        if item.level < 6:
+        if item.level < 5:
             continue
         figure = world.figures.get(item.figure_id)
         if figure is not None and not figure.titles:
