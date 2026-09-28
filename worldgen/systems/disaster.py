@@ -1846,7 +1846,14 @@ REFUGEE_MIN = 300           # ниже этого числа исход не с�
 
 
 def refugees(ctx, calamity, rng, year: int, date) -> None:
-    """Куда ушли те, кто ушёл, и что стало с городом, который их принял."""
+    """Куда ушли те, кто ушёл, и что стало с городом, который их принял.
+
+    Уходят по родству, а не в первый попавшийся город: раса города — это
+    и есть те, кто в нём живёт, и если увести людей одного народа в город
+    другого, они не станут беженцами — они станут другим народом. Поэтому
+    считаем исход отдельно для каждого народа земли, и если своим идти
+    некуда, исхода не случается: люди остаются там, где были.
+    """
     world = ctx.world
     ruined = [row["земля"] for row in calamity.front
               if row.get("состояние") in (dis.LAND_RUINED, dis.LAND_LOST)]
@@ -1857,11 +1864,9 @@ def refugees(ctx, calamity, rng, year: int, date) -> None:
         return
 
     for region_id in dict.fromkeys(ruined):
-        # Сперва считаем, сколько уйдёт, и только потом уводим: если
-        # уходящих мало, из земли не уходит никто, и население остаётся
-        # ровно таким, каким было.
-        going = []
-        leaving = 0
+        # Сперва считаем, сколько уйдёт и какого народа, и только потом
+        # уводим: если уходящих мало или идти некуда, не уходит никто.
+        groups = {}
         for settlement_id in list(world.active_settlements):
             settlement = world.settlements[settlement_id]
             if settlement.region_id != region_id or settlement.population <= 0:
@@ -1870,34 +1875,37 @@ def refugees(ctx, calamity, rng, year: int, date) -> None:
             gone = int(settlement.population * share)
             if gone <= 0:
                 continue
-            going.append((settlement, gone))
-            leaving += gone
-        if leaving < REFUGEE_MIN:
-            continue          # это не исход, а обычная убыль
+            groups.setdefault(settlement.race_id, []).append((settlement, gone))
 
-        host = _refuge_city(world, region_id, calamity, rng)
-        if host is None:
-            continue
-        for settlement, gone in going:
-            settlement.population -= gone
-        host.population += leaving
-        calamity.notes.append(
-            "исход из земли: ушло %d, приняли в городе по имени %s"
-            % (leaving, host.name))
-        town = world.town_of(host.id) if hasattr(world, "town_of") else None
-        if town is not None:
-            town.notes.append("принял беженцев беды «%s»" % calamity.name)
-        region = world.regions.get(region_id)
-        title, text = texts.refuge(rng, calamity, region, host, leaving, world)
-        world.add_event(
-            date=date, era_index=world.era_index_at(year), kind="refuge",
-            title=title, text=text, importance=3,
-            subjects=[calamity.id, host.id], region_id=host.region_id,
-            race_id=host.race_id)
+        for race_id in sorted(groups):
+            rows = groups[race_id]
+            leaving = sum(gone for _, gone in rows)
+            if leaving < REFUGEE_MIN:
+                continue          # это не исход, а обычная убыль
+            host = _refuge_city(world, region_id, calamity, rng, race_id)
+            if host is None:
+                continue          # своим идти некуда, и никто не уходит
+            for settlement, gone in rows:
+                settlement.population -= gone
+            host.population += leaving
+            calamity.notes.append(
+                "исход из земли: ушло %d, приняли в городе по имени %s"
+                % (leaving, host.name))
+            town = world.town_of(host.id)
+            if town is not None:
+                town.notes.append("принял беженцев беды «%s»" % calamity.name)
+            region = world.regions.get(region_id)
+            title, text = texts.refuge(rng, calamity, region, host, leaving,
+                                       world)
+            world.add_event(
+                date=date, era_index=world.era_index_at(year), kind="refuge",
+                title=title, text=text, importance=3,
+                subjects=[calamity.id, host.id], region_id=host.region_id,
+                race_id=host.race_id)
 
 
-def _refuge_city(world, region_id: str, calamity, rng):
-    """Куда бегут: в ближний город из целой земли, а не куда попало."""
+def _refuge_city(world, region_id: str, calamity, rng, race_id: str):
+    """Куда бегут: к своим, в ближний город из целой земли."""
     region = world.regions.get(region_id)
     near = set(region.neighbors) if region is not None else set()
     hurt = set(calamity.region_ids)
@@ -1905,6 +1913,9 @@ def _refuge_city(world, region_id: str, calamity, rng):
     for settlement_id in world.active_settlements:
         settlement = world.settlements[settlement_id]
         if settlement.region_id == region_id or settlement.population < 400:
+            continue
+        # К своим: город чужого народа принял бы их не беженцами, а собой.
+        if settlement.race_id != race_id:
             continue
         # Из-под беды не бегут в беду: земли, по которым она шла, не в счёт.
         if settlement.region_id in hurt:
