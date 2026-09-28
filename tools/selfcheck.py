@@ -2680,6 +2680,34 @@ def check_catalogues() -> list:
     if len({item.key for item in rem.TRACES}) != len(rem.TRACES):
         problems.append("каталог следов: два следа с одним ключом")
 
+    # Досягаемость: вид следа, который не выпадет ни одной беде, — мёртвая
+    # запись. То же и у субъектов: род без происхождения, цели или конца
+    # никогда не соберётся целиком.
+    reachable, kinds_seen = set(), set()
+    for spec in cat.CATALOG:
+        for item, _ in rem.traces_for(spec.key, spec.kind,
+                                      ("город", "держава", "войско",
+                                       "вождь", "вера")):
+            reachable.add(item.key)
+            kinds_seen.add(item.kind)
+    dead = sorted({item.key for item in rem.TRACES} - reachable)
+    if dead:
+        problems.append("каталог следов: ни одной беде не достанется — %s"
+                        % ", ".join(dead[:4]))
+    if set(rem.KINDS) - kinds_seen:
+        problems.append("каталог следов: род следа недосягаем — %s"
+                        % ", ".join(sorted(set(rem.KINDS) - kinds_seen)))
+
+    for kind in sub.KINDS:
+        if not sub.ORIGIN_BY_KIND.get(kind):
+            problems.append("каталог субъектов: у рода «%s» нет появления"
+                            % kind)
+        if not sub.END_BY_KIND.get(kind):
+            problems.append("каталог субъектов: у рода «%s» нет конца" % kind)
+        if kind != sub.PEOPLE and not [one for one, kinds in sub.WISHES
+                                       if kind in kinds]:
+            problems.append("каталог субъектов: у рода «%s» нет цели" % kind)
+
     # Имена нашествий привязаны к роду пришедших: ссылка на несуществующий
     # род сделала бы имя общим, и рой снова звался бы «Разбитой Короной».
     from worldgen import invasion as inv

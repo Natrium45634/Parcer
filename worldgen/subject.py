@@ -324,7 +324,7 @@ GOAL_STATES = (GOAL_NOT_STARTED, GOAL_STARTED, GOAL_GOING, GOAL_PAUSED,
 # Цели, которые бывают у нелюдей. Людские берутся из `lifepaths.py`.
 WISHES = (
     ("поставить своё царство", (DEMON, DRAGON, ANCIENT, UNDEAD, DEMIGOD)),
-    ("вернуть своё", (DRAGON, ANCIENT, SPIRIT, VAMPIRE)),
+    ("вернуть своё", (DRAGON, ANCIENT, SPIRIT, VAMPIRE, BEAST)),
     ("извести один род до последнего", (DEMON, UNDEAD, SPIRIT, VAMPIRE)),
     ("обрести телесное бессмертие", (UNDEAD, MAGICAL, DEMIGOD, PEOPLE)),
     ("распространить свою веру", (GOD, DEMIGOD, DEMON, ANCIENT)),
@@ -335,8 +335,12 @@ WISHES = (
     ("уйти домой", (DEMON, SPIRIT, MAGICAL, OTHER_KIND)),
     ("быть названным своим именем", (SPIRIT, MADE, OTHER_KIND, UNDEAD)),
     ("отомстить одному человеку и его крови",
-     (DEMON, SPIRIT, VAMPIRE, DRAGON, UNDEAD)),
-    ("собрать сокровище больше прежнего", (DRAGON, VAMPIRE, ANCIENT)),
+     (DEMON, SPIRIT, VAMPIRE, DRAGON, UNDEAD, BEAST)),
+    ("собрать сокровище больше прежнего", (DRAGON, VAMPIRE, ANCIENT, BEAST)),
+    # У именного зверя цели звериные, и это не делает его проще: кормиться
+    # и не быть найденным — тоже цель, за которой стоит вся его история.
+    ("кормиться там, где его не достанут", (BEAST, UNDEAD, MAGICAL)),
+    ("отбить себе землю под логово", (BEAST, DRAGON, DEMON)),
     ("понять, зачем его сделали", (MADE, MAGICAL, DEMIGOD)),
     ("дожить до того, как его перестанут искать", (VAMPIRE, DEMON, UNDEAD)),
     ("увидеть, чем всё кончится", (GOD, ANCIENT, SPIRIT, OTHER_KIND)),
