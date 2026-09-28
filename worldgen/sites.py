@@ -87,6 +87,21 @@ COLLAPSED = "обрушено"
 CLEARED = "очищено"
 
 
+def open_at(site, date):
+    """День вскрытия, который не раньше дня появления места.
+
+    Логово заводят в тот же год, в какой его хозяина могут и убить, а
+    день внутри года каждая система бросает свой. Для летописи разницы
+    нет, а для проверки дат «вскрыли раньше, чем появилось» — ошибка.
+    Поэтому вскрытие не уходит вглубь дальше самого места.
+    """
+    created = getattr(site, "created", None)
+    if created is not None and date is not None \
+            and date.ordinal < created.ordinal:
+        return created
+    return date
+
+
 def depth_for(kind: str, riches: int, guarded: bool) -> int:
     """Насколько трудным окажется это место для того, кто в него войдёт."""
     value = BASE_DEPTH.get(kind, 2)

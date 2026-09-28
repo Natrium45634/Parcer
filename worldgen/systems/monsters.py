@@ -251,7 +251,7 @@ def _slain(ctx, monster, hero, race, polity, year: int, date, rng) -> None:
     site = world.sites.get(monster.site_id)
     if site is not None:
         site.status = sites_mod.CLEARED
-        site.opened = date
+        site.opened = sites_mod.open_at(site, date)
         site.opened_by = hero.id
         site.riches = int(riches * rng.uniform(0.05, 0.25))
         site.guards = "кости прежних охотников"

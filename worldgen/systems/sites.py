@@ -273,7 +273,7 @@ def _delve(ctx, site, year: int, rng) -> None:
     riches = int(site.riches * rng.uniform(0.35, 0.85))
     site.riches = max(0, site.riches - riches)
     site.status = sites_mod.ROBBED
-    site.opened = date
+    site.opened = sites_mod.open_at(site, date)
     site.opened_by = seeker.id
 
     haul = ""

@@ -797,7 +797,7 @@ def _write_back(ctx, rng, story, shape, node, home, year: int) -> None:
                                               "сладилось наполовину"):
         if site.status == sites_mod.UNTOUCHED:
             site.status = sites_mod.ROBBED
-            site.opened = story.ended
+            site.opened = sites_mod.open_at(site, story.ended)
             site.notes.append("вскрыто былью по имени «%s»" % story.title)
 
     # Люди: участие в деле запоминается.

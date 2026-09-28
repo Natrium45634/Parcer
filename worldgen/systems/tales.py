@@ -649,7 +649,7 @@ def _touch_foe(ctx, rng, tale, threat, outcome: str, year: int) -> None:
             site = world.sites.get(monster.site_id)
             if site is not None:
                 site.status = sites_mod.CLEARED
-                site.opened = date
+                site.opened = sites_mod.open_at(site, date)
                 site.opened_by = survivor.id if survivor else ""
                 site.story = "здесь кончилось сказание по имени %s" % tale.name
                 tale.site_id = site.id
@@ -690,7 +690,7 @@ def _touch_foe(ctx, rng, tale, threat, outcome: str, year: int) -> None:
         tale.site_id = site.id
         if ends or outcome == cat.BARGAIN:
             site.status = sites_mod.ROBBED
-            site.opened = date
+            site.opened = sites_mod.open_at(site, date)
             site.opened_by = survivor.id if survivor else ""
             site.notes.append("вскрыто сказанием по имени %s" % tale.name)
             _empty_out(world, site, survivor, year, tale)

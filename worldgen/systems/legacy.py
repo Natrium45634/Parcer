@@ -203,7 +203,7 @@ def _open_door(ctx, way, spark, year: int, rng) -> None:
                                % (site.name if site else "без имени"))
     if site is not None and way.key in ("ruler", "delver", "guild", "war"):
         site.status = sites_mod.ROBBED
-        site.opened = date
+        site.opened = sites_mod.open_at(site, date)
         if ruler is not None:
             site.opened_by = ruler.id
 
