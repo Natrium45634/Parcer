@@ -1777,15 +1777,21 @@ def old_enemy(ctx, calamity, spec, rng, year: int) -> None:
     if victim is None or victim.ended is not None:
         return
 
-    # Тот, кто на этой беде поднялся, — сосед, занявший опустевшие земли,
-    # или тот, кто не пришёл, когда звали. Обида ложится на него.
+    # Обида ложится на того, кто мог прийти и не пришёл. Тот, кого эта же
+    # беда положила рядом, прийти и не мог: винить его — это уже не обида,
+    # а поиск виноватого, и такое мы оставляем на ошибки столиц.
     others = [world.polities[pid] for pid in world.active_polities
               if pid != victim.id]
     if not others:
         return
-    near = [item for item in others
+    untouched = [item for item in others
+                 if not calamity.deaths_by_polity.get(item.id)]
+    pool = untouched or others
+    near = [item for item in pool
             if set(item.region_ids) & set(calamity.region_ids)]
-    pool = near or others
+    # Сосед, у которого беда стояла на пороге и которого она не тронула,
+    # виноват в глазах пострадавших больше всех прочих.
+    pool = near or pool
     blamed = rng.choice(sorted(pool, key=lambda item: item.id))
     history.leave(world, history.GRUDGE, year, victim.id, blamed.id,
                   weight=0.3 + 0.1 * calamity.severity,

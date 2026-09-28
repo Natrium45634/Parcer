@@ -1568,7 +1568,9 @@ def check_disasters(world, seed: str) -> list:
 
     for region in world.regions.values():
         for kind, value in (region.vulnerability or {}).items():
-            if kind not in dis.VULNERABLE_BY_KEY or not 0.0 <= value <= 1.0:
+            # У земли уязвимость хранится по роду беды («голод», «мор»), а
+            # не по ключу бедствия: `VULNERABLE_BY_KEY` — это другое.
+            if kind not in dis.VULNERABILITIES or not 0.0 <= value <= 1.0:
                 problems.append("сид «%s»: у земли %s уязвимость «%s» вне меры"
                                 % (seed, region.name, kind))
                 break
@@ -2156,8 +2158,62 @@ def check_faiths(world, seed: str) -> list:
     return problems
 
 
+def check_catalogues() -> list:
+    """Сходятся ли каталоги живой беды между собой.
+
+    Мир тут не нужен: это проверка договора. Ответ, которого правитель
+    «хочет», должен ссылаться на настоящую черту нрава; задержка фронта —
+    на настоящее название земли; дело людей и забытое умение — на
+    настоящий род уязвимости. Ссылка в пустоту не ломает генератор — она
+    тише: такая запись просто не срабатывает ни разу, и целый кусок
+    каталога лежит мёртвым.
+    """
+    from worldgen import disaster as dis
+    from worldgen import catastrophe as cat
+    from worldgen import races as races_mod
+    from worldgen import rulers as rulers_mod
+
+    problems = []
+    keys = {spec.key for spec in cat.CATALOG}
+    traits = {pair[0] for pair in (list(rulers_mod.TRAITS_GOOD)
+                                   + list(rulers_mod.TRAITS_BAD)
+                                   + list(rulers_mod.TRAITS_NEUTRAL))}
+    lands = set(races_mod.TERRAINS)
+    vulns = set(dis.VULNERABILITIES)
+
+    def miss(what, rows, known):
+        bad = sorted(set(rows) - set(known))
+        if bad:
+            problems.append("каталог беды: %s — нет такого: %s"
+                            % (what, ", ".join(bad)))
+
+    miss("ключи бед у шрамов",
+         [key for item in dis.SCARS for key in item.keys], keys)
+    miss("ключи бед у утрат",
+         [key for item in dis.LOST_LORE for key in item.keys], keys)
+    miss("ключи бед у знаков",
+         [key for item in dis.OMENS for key in item.keys], keys)
+    miss("ключи бед в цепях",
+         [item.parent for item in dis.CHAINS]
+         + [item.child for item in dis.CHAINS], keys)
+    miss("черты нрава в ответах власти",
+         [want for item in dis.RESPONSES for want in item.wants], traits)
+    miss("земли в задержках фронта",
+         [land for row in dis.HOLD_TERRAINS.values() for land in row], lands)
+    miss("род уязвимости у дел людей", list(dis.WORKS.values()), vulns)
+    miss("род уязвимости у утрат",
+         [item.hurts for item in dis.LOST_LORE if item.hurts], vulns)
+    miss("семьи бед у фаз", list(dis.PHASES), set(cat.KIND_NAMES))
+    miss("что держит фронт",
+         [item.needs for item in dis.HOLDS if item.needs],
+         set(dis.HOLD_TERRAINS) | {"крепость"})
+    return problems
+
+
 def main() -> int:
     failures = []
+
+    failures.extend(check_catalogues())
 
     for seed in SEEDS:
         started = time.time()
