@@ -3681,6 +3681,95 @@ def render_disasters(world) -> str:
     return "\n".join(rows)
 
 
+def render_invasions(world) -> str:
+    """Нашествия: кто пришёл, отчего, чего хотел и чем это кончилось.
+
+    Справочник бедствий считает мёртвых и земли. Здесь другое: история
+    прихода. У одного события несколько имён, и ни одно из них не главное
+    — державное, народное, жреческое и вражье стоят рядом.
+    """
+    from . import invasion as inv
+    from .narrative_calamity import number
+
+    rows = ["НАШЕСТВИЯ", ""]
+    items = sorted(world.invasions.values(),
+                   key=lambda item: item.started.ordinal)
+    if not items:
+        rows.append("  В этот мир никто не приходил извне.")
+        return "\n".join(rows)
+
+    for item in items:
+        calamity = world.calamities.get(item.calamity_id)
+        rows.append("  %s — %d–%s" % (
+            item.title or item.id, item.started.year,
+            item.ended.year if item.ended else "не кончилось"))
+        nature = inv.INVADERS_BY_KEY.get(item.kind)
+        rows.append("      кто: %s — %s" % (
+            item.kind, nature.about if nature else ""))
+        rows.append("      сколько их: %s" % item.host)
+        if item.ranks:
+            rows.append("      как устроены: %s" % ", ".join(item.ranks))
+        rows.append("      о них говорили: %s"
+                    % inv.mind_line(item.mind, item.order))
+        cause = inv.CAUSES_BY_KEY.get(item.cause)
+        if cause is not None:
+            rows.append("      отчего пришли: %s" % cause.about)
+            rows.append("      а сами говорили: %s" % cause.theirs)
+        if item.culprit:
+            rows.append("      это устроил человек: %s%s" % (
+                item.culprit,
+                "" if item.culprit_meant else " — и не понимал, что делает"))
+        goal = inv.GOALS_BY_KEY.get(item.goal_first)
+        if goal is not None:
+            rows.append("      чего хотели сперва: %s" % goal.about)
+        for turn in item.goal_turns:
+            now = inv.GOALS_BY_KEY.get(turn.get("стало", ""))
+            rows.append("      %d: %s — и стали хотеть: %s" % (
+                int(turn.get("год", 0)), turn.get("отчего", ""),
+                now.about if now else turn.get("стало", "")))
+        rows.append("      как вошли: %s" % item.entry)
+        if item.first_sign:
+            rows.append("      первый знак: %s" % item.first_sign)
+        if item.first_meeting:
+            rows.append("      первая встреча: %s%s" % (
+                item.first_meeting,
+                " (и не битва)" if item.peaceful_start else ""))
+        rows.append("      повадка: %s; расходились: %s"
+                    % (item.behavior, item.spread))
+        leader = world.figures.get(item.leader_id)
+        if leader is not None:
+            rows.append("      вождь: %s%s" % (
+                leader.name,
+                (" — открылся только в %d году" % item.leader_shown)
+                if item.leader_shown else ""))
+        for row in item.answers:
+            polity = world.polities.get(row.get("держава", ""))
+            answer = inv.ANSWERS_BY_KEY.get(row.get("ответ", ""))
+            if polity is None or answer is None:
+                continue
+            rows.append("      %s: %s" % (polity.name, answer.about))
+        if item.outcome:
+            rows.append("      чем кончилось: %s" % item.outcome)
+        if item.way:
+            about = inv.WAYS_BY_KEY.get(item.way, ("", ()))[0]
+            rows.append("      как: %s" % (about or item.way))
+        if item.decisive:
+            rows.append("      а %s" % item.decisive)
+        if item.surrender:
+            rows.append("      людям это стоило: %s" % item.surrender)
+        if calamity is not None and calamity.deaths:
+            rows.append("      не досчитались: %s" % number(calamity.deaths))
+        for row in item.remnants:
+            region = world.regions.get(row.get("земля", ""))
+            rows.append("      осталось (%s): %s%s" % (
+                row.get("вид", ""), row.get("о чём", ""),
+                (", земля %s" % region.name) if region else ""))
+        for voice, name in item.names.items():
+            rows.append("      %s: «%s»" % (voice, name))
+        rows.append("")
+    return "\n".join(rows)
+
+
 def full_text(world) -> str:
     """Полный экспорт: летопись + справочники."""
     return "\n\n".join((
@@ -3712,6 +3801,7 @@ def full_text(world) -> str:
         render_faiths(world),
         render_calamities(world),
         render_disasters(world),
+        render_invasions(world),
         render_sagas(world),
         render_causes(world),
         render_memory(world),

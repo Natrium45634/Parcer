@@ -1605,6 +1605,106 @@ def check_disasters(world, seed: str) -> list:
     return problems
 
 
+def check_invasions(world, seed: str) -> list:
+    """Нашествия: сходится ли история прихода сама с собой.
+
+    Смысловые правила: у нашествия есть своя беда; род, причина, цель и
+    исход — из каталога; цель, с которой пришли, стоит в начале цепочки
+    перемен; вождь не может открыться раньше, чем всё началось; город
+    «выстоял» не спорит с землёй (это проверяет `check_disasters`), а
+    здесь — что имя события не повторяет чужое и что остатки лежат в
+    настоящих землях.
+    """
+    from worldgen import invasion as inv
+
+    problems = []
+    names = []
+    for item in world.invasions.values():
+        calamity = world.calamities.get(item.calamity_id)
+        if calamity is None:
+            problems.append("сид «%s»: у нашествия «%s» нет своей беды"
+                            % (seed, item.title or item.id))
+            break
+        if item.kind not in inv.INVADERS_BY_KEY:
+            problems.append("сид «%s»: у нашествия «%s» неведомый род «%s»"
+                            % (seed, item.title or item.id, item.kind))
+            break
+        if item.cause and item.cause not in inv.CAUSES_BY_KEY:
+            problems.append("сид «%s»: у нашествия «%s» неведомая причина «%s»"
+                            % (seed, item.title or item.id, item.cause))
+            break
+        if item.goal and item.goal not in inv.GOALS_BY_KEY:
+            problems.append("сид «%s»: у нашествия «%s» неведомая цель «%s»"
+                            % (seed, item.title or item.id, item.goal))
+            break
+        if item.host and item.host not in inv.HOSTS_BY_KEY:
+            problems.append("сид «%s»: у нашествия «%s» неведомый размер «%s»"
+                            % (seed, item.title or item.id, item.host))
+            break
+        if item.outcome and item.outcome not in inv.OUTCOMES:
+            problems.append("сид «%s»: у нашествия «%s» неведомый исход «%s»"
+                            % (seed, item.title or item.id, item.outcome))
+            break
+        if item.way and item.way not in inv.WAYS_BY_KEY:
+            problems.append("сид «%s»: у нашествия «%s» неведомый способ «%s»"
+                            % (seed, item.title or item.id, item.way))
+            break
+        if item.surrender and item.surrender not in {
+                key for key, _ in inv.SURRENDERS}:
+            problems.append("сид «%s»: у нашествия «%s» неведомая сдача «%s»"
+                            % (seed, item.title or item.id, item.surrender))
+            break
+        if item.ended is not None and item.ended.ordinal < item.started.ordinal:
+            problems.append("сид «%s»: нашествие «%s» кончилось раньше начала"
+                            % (seed, item.title or item.id))
+            break
+        if item.leader_shown and item.leader_shown < item.started.year:
+            problems.append("сид «%s»: у нашествия «%s» вождь открылся раньше "
+                            "начала" % (seed, item.title or item.id))
+            break
+        if item.leader_shown and item.leader_hidden:
+            problems.append("сид «%s»: у нашествия «%s» вождь открылся и всё "
+                            "ещё скрыт" % (seed, item.title or item.id))
+            break
+        for turn in item.goal_turns:
+            if int(turn.get("год", 0)) < item.started.year:
+                problems.append("сид «%s»: у нашествия «%s» цель сменилась "
+                                "раньше начала" % (seed, item.title or item.id))
+                break
+        if item.goal_turns and item.goal_turns[0].get("было") != item.goal_first:
+            problems.append("сид «%s»: у нашествия «%s» первая перемена цели "
+                            "начинается не с той цели, с какой пришли"
+                            % (seed, item.title or item.id))
+            break
+        if item.goal_turns and item.goal != item.goal_turns[-1].get("стало"):
+            problems.append("сид «%s»: у нашествия «%s» нынешняя цель не "
+                            "та, к которой пришли по переменам"
+                            % (seed, item.title or item.id))
+            break
+        for row in item.remnants:
+            region_id = row.get("земля", "")
+            if region_id and region_id not in world.regions:
+                problems.append("сид «%s»: остаток нашествия «%s» лежит в "
+                                "пустой земле" % (seed, item.title or item.id))
+                break
+        for voice in item.names:
+            if voice not in inv.VOICES:
+                problems.append("сид «%s»: у нашествия «%s» имя неведомым "
+                                "голосом «%s»"
+                                % (seed, item.title or item.id, voice))
+                break
+        if item.title:
+            names.append(item.title)
+        if item.title and calamity.name != item.title:
+            problems.append("сид «%s»: нашествие «%s» и его беда зовутся "
+                            "по-разному" % (seed, item.title))
+            break
+
+    if len(names) != len(set(names)):
+        problems.append("сид «%s»: у двух нашествий одно имя" % seed)
+    return problems
+
+
 def check_causes(world, seed: str) -> list:
     """Причинность: следы, зёрна и цепи событий.
 
@@ -2262,6 +2362,7 @@ def main() -> int:
         failures.extend(check_politics(first, seed))
         failures.extend(check_calamities(first, seed))
         failures.extend(check_disasters(first, seed))
+        failures.extend(check_invasions(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
         failures.extend(check_tongues(first, seed))
@@ -2320,6 +2421,7 @@ def main() -> int:
             failures.extend(check_politics(first, "карта/" + seed))
             failures.extend(check_calamities(first, "карта/" + seed))
             failures.extend(check_disasters(first, "карта/" + seed))
+            failures.extend(check_invasions(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_tongues(first, "карта/" + seed))
@@ -2375,6 +2477,7 @@ def main() -> int:
                             "сохранения" % seed)
         for check in (check_nobility, check_wars, check_politics,
                       check_calamities, check_disasters,
+                      check_invasions,
                       check_faiths, check_nations,
                       check_tongues, check_embassies, check_things,
                       check_causes, check_people_memory, check_migrations,

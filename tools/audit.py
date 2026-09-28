@@ -410,6 +410,96 @@ def m_habits(world):
     return _share(with_habit, len(rows))
 
 
+# --- нашествия --------------------------------------------------------------
+
+def _invasions(world):
+    return list(world.invasions.values())
+
+
+def m_inv_kinds(world):
+    """Пришедших разных родов, а не одни драконы на весь мир."""
+    return len({item.kind for item in _invasions(world)})
+
+
+def m_inv_causes(world):
+    """И приходят они по разным причинам, а не все воевать."""
+    return len({item.cause for item in _invasions(world) if item.cause})
+
+
+def m_inv_goals(world):
+    """Цели тоже разные: не всякий пришедший хочет взять землю."""
+    return len({item.goal_first for item in _invasions(world)
+                if item.goal_first})
+
+
+def m_inv_war_share(world):
+    """Доля тех, кто пришёл именно воевать. Больше половины — однообразие."""
+    rows = _invasions(world)
+    war = sum(1 for item in rows
+              if item.goal_first in ("взять землю", "извести державу",
+                                     "отомстить", "очистить землю"))
+    return _share(war, len(rows))
+
+
+def m_inv_peaceful_start(world):
+    """Началось не с битвы: переговоры, торг, спор о меже."""
+    rows = _invasions(world)
+    return _share(sum(1 for item in rows if item.peaceful_start), len(rows))
+
+
+def m_inv_outcomes(world):
+    """Исходов в ходу: «истреблены» — только один из шестнадцати."""
+    return len({item.outcome for item in _invasions(world) if item.outcome})
+
+
+def m_inv_win_share(world):
+    """Доля нашествий, кончившихся не победой людей."""
+    from worldgen import invasion as inv
+    rows = [item for item in _invasions(world) if item.outcome]
+    theirs = sum(1 for item in rows
+                 if item.outcome in (inv.OUT_VASSAL, inv.OUT_SETTLED,
+                                     inv.OUT_JOINED, inv.OUT_BECAME,
+                                     inv.OUT_HELD, inv.OUT_DEAL,
+                                     inv.OUT_GOING, inv.OUT_HALF))
+    return _share(theirs, len(rows))
+
+
+def m_inv_ways(world):
+    """Способов победы в ходу: убить вождя — не единственный."""
+    return len({item.way for item in _invasions(world) if item.way})
+
+
+def m_inv_goal_turns(world):
+    """Доля нашествий, у которых цель переменилась по ходу."""
+    rows = _invasions(world)
+    return _share(sum(1 for item in rows if item.goal_turns), len(rows))
+
+
+def m_inv_names(world):
+    """Сколько имён в среднем у одного нашествия сверх своего."""
+    rows = _invasions(world)
+    if not rows:
+        return None
+    return round(sum(len(item.names) for item in rows) / float(len(rows)), 1)
+
+
+def m_inv_remnants(world):
+    """Доля нашествий, после которых что-то осталось."""
+    rows = _invasions(world)
+    return _share(sum(1 for item in rows if item.remnants), len(rows))
+
+
+def m_inv_answers(world):
+    """Доля нашествий, на которые державы отвечали по-разному."""
+    rows = _invasions(world)
+    mixed = 0
+    for item in rows:
+        kinds = {row.get("ответ") for row in item.answers}
+        if len(kinds) >= 2:
+            mixed += 1
+    return _share(mixed, len(rows))
+
+
 def m_rules_changed(world):
     """Правил мира, переменившихся от самой глубокой беды."""
     return len(world.notes.get("правила мира") or [])
@@ -645,6 +735,31 @@ MEASURES = (
             "земля учится: дамбы, амбары, стены, карантин"),
     Measure("наука", "городов с привычкой", m_habits, 0.1, None, "доля",
             "уклад держат веками, забыв причину"),
+    Measure("нашествия", "родов пришедших", m_inv_kinds, 3, None, "из 12",
+            "приходят разные, а не одни драконы", min_years=3000),
+    Measure("нашествия", "причин прихода", m_inv_causes, 4, None, "из 16",
+            "нашествие — не всегда война", min_years=3000),
+    Measure("нашествия", "целей, с какими пришли", m_inv_goals, 4, None,
+            "из 20", "не всякий пришедший хочет взять землю",
+            min_years=3000),
+    Measure("нашествия", "пришли воевать", m_inv_war_share, None, 0.6, "доля",
+            "миграция, охота и бегство — тоже нашествия"),
+    Measure("нашествия", "началось не с битвы", m_inv_peaceful_start, 0.25,
+            None, "доля", "первая встреча часто переговоры, а не бой"),
+    Measure("нашествия", "исходов в ходу", m_inv_outcomes, 4, None, "из 16",
+            "«истреблены» — только один из шестнадцати", min_years=3000),
+    Measure("нашествия", "кончилось не победой людей", m_inv_win_share, 0.15,
+            None, "доля", "захватчики не обязаны проигрывать"),
+    Measure("нашествия", "способов победы", m_inv_ways, 5, None, "из 23",
+            "убить вождя — не единственный способ", min_years=3000),
+    Measure("нашествия", "цель переменилась", m_inv_goal_turns, 0.08, None,
+            "доля", "нашествие развивается, а не идёт по плану"),
+    Measure("нашествия", "имён сверх своего", m_inv_names, 2.0, None, "штук",
+            "одно событие зовут по-разному разные голоса"),
+    Measure("нашествия", "что-то осталось после", m_inv_remnants, 0.35, None,
+            "доля", "из остатков через века растут новые беды"),
+    Measure("нашествия", "отвечали врозь", m_inv_answers, 0.2, None, "доля",
+            "кто воевал, не простит тому, кто заплатил"),
     Measure("мир", "правил переменилось", m_rules_changed, None, 5, "из 7",
             "мир меняется от самых глубоких бед, но не каждый век"),
     Measure("мир", "исходов из земель", m_exodus, 1, None, "штук",
