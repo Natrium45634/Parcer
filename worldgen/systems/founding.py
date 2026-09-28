@@ -70,6 +70,11 @@ def _kind_for(rng, race):
     return rng.weighted(pairs)
 
 
+# Ключ роли — для титулов, слово — для летописи.
+ROLE_WORDS = {"chief": "вождь племени", "founder": "основатель",
+              "ruler": "правитель"}
+
+
 def _leader_of(ctx, rng, race, year, settlement=None, tribe=None, kind="founder"):
     """Берёт живого вождя/основателя или создаёт нового."""
     world = ctx.world
@@ -86,8 +91,11 @@ def _leader_of(ctx, rng, race, year, settlement=None, tribe=None, kind="founder"
     title = ctx.title_for(race, kind, sex)
     region_id = (tribe.region_id if tribe is not None
                  else settlement.region_id if settlement is not None else "")
-    figure = ctx.make_figure(rng, race, year, role=kind, region_id=region_id,
-                             title=title, sex=sex)
+    # Ключ роли («ruler») годится для выбора титула, но в летопись он
+    # уходит как есть — и в карточке человека читается «чем был занят:
+    # ruler». Поэтому роль записывается словом.
+    figure = ctx.make_figure(rng, race, year, role=ROLE_WORDS.get(kind, kind),
+                             region_id=region_id, title=title, sex=sex)
     return figure, True
 
 

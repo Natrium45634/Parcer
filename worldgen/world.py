@@ -554,9 +554,12 @@ class World:
         polity.grudges.setdefault(other_id, {})[key] = int(year)
         # Та же обида ложится и в общий счёт держав: оттуда её читают
         # отношения, выбор жертвы и отложенные последствия.
+        # У обиды должно быть человеческое имя: ключ повода («tolls»)
+        # всплывал прямо в тексте были — «Обида старая: tolls».
+        from . import warfare as warfare_mod
+        note = GRUDGE_NOTE.get(key) or warfare_mod.CAUSE_LABELS.get(key, key)
         history.leave(self, history.GRUDGE, year, polity.id, other_id,
-                      weight=GRUDGE_WEIGHT.get(key, 0.5),
-                      note=GRUDGE_NOTE.get(key, key))
+                      weight=GRUDGE_WEIGHT.get(key, 0.5), note=note)
 
     # --- вещи и места ----------------------------------------------------
 

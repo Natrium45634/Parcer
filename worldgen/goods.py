@@ -257,7 +257,7 @@ def shortages(balance: dict, threshold: float = 0.75) -> list:
             continue
         ratio = have / float(need)
         if ratio < threshold:
-            out.append((good, round(1.0 - ratio, 3)))
+            out.append([good, round(1.0 - ratio, 3)])
     out.sort(key=lambda pair: (-pair[1], pair[0]))
     return out
 
@@ -269,11 +269,11 @@ def surpluses(balance: dict, threshold: float = 1.35) -> list:
         if have <= 0:
             continue
         if need <= 0:
-            out.append((good, 1.0))
+            out.append([good, 1.0])
             continue
         ratio = have / float(need)
         if ratio > threshold:
-            out.append((good, round(min(3.0, ratio - 1.0), 3)))
+            out.append([good, round(min(3.0, ratio - 1.0), 3)])
     out.sort(key=lambda pair: (-pair[1], pair[0]))
     return out
 
