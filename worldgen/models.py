@@ -80,7 +80,10 @@ class Figure:
         parts = [self.given_name]
         if self.regnal_number >= 2:
             parts.append(roman(self.regnal_number))
-        if self.surname:
+        # Родовое имя и личное берутся из одного запаса слов народа и раз
+        # в тысячу имён совпадают. «Ксартис Ксартис Терновая» — это не
+        # имя, а сбой: второе слово молча опускается.
+        if self.surname and self.surname != self.given_name:
             parts.append(self.surname)
         if self.epithet:
             parts.append(self.epithet)
@@ -92,7 +95,7 @@ class Figure:
         parts = [self.given_name]
         if self.regnal_number >= 2:
             parts.append(roman(self.regnal_number))
-        if self.surname:
+        if self.surname and self.surname != self.given_name:
             parts.append(self.surname)
         return " ".join(part for part in parts if part)
 

@@ -53,6 +53,29 @@ GRUDGE_NOTE = {"poison": "яд, поднесённый при дворе",
 from .timeline import Date
 
 
+# Какие реестры отвечают на какую приставку номера. Приставки делятся:
+# счётчик у них общий, так что номер всё равно один в мире, но искать
+# приходится в нескольких реестрах. Список составлен по `next_id`.
+_ENTITY_TABLES = {
+    "A": ("artifacts",), "B": ("battles", "monsters"),
+    "C": ("settlements", "companies"), "D": ("calamities",),
+    "E": ("embassies",), "F": ("figures", "feuds"),
+    "G": ("reigns", "guilds"), "H": ("houses",), "J": ("legends",),
+    "K": ("camps", "fortresses"), "L": ("relics", "codices"),
+    "M": ("temples",), "N": ("folks", "unions"), "O": ("discoveries",),
+    "P": ("polities", "pacts"), "Q": ("plots",), "R": ("regions",),
+    "T": ("tribes", "routes"), "U": ("leagues",),
+    "W": ("faiths", "wars"), "X": ("expeditions", "laws"),
+    "Y": ("deities", "tongues"), "Z": ("sites",),
+    "BN": ("bonds",), "BY": ("stories",), "CB": ("cabals",),
+    "FA": ("facts",), "GH": ("godheads",), "KE": ("crisis_eras",),
+    "LF": ("lifepaths",), "LK": ("lost_lore",), "ME": ("memories",),
+    "MG": ("migrations",), "NV": ("invasions",), "RN": ("renowns",),
+    "SB": ("subjects",), "SC": ("scars",), "SF": ("strifes",),
+    "SG": ("tales",), "TR": ("traces",), "TW": ("townships",),
+}
+
+
 class World:
     """Состояние мира и вся накопленная летопись."""
 
@@ -1454,24 +1477,33 @@ class World:
         return self.regions.get(region_id)
 
     def entity(self, entity_id: str):
-        """Универсальный доступ по идентификатору."""
+        """Универсальный доступ по номеру.
+
+        Приставка у номера не одна на реестр: битва и чудовище обе зовутся
+        с «B», вера и война — с «W», свод и реликвия — с «L». Счётчик у
+        них общий, поэтому номера не повторяются, но по одной букве тип не
+        определить. Раньше искали в одном реестре из пары — и половина
+        существ отвечала «не нашёлся», а в летописи выходило «сага о месте
+        по имени ?». Теперь перебираются все реестры этой приставки:
+        двухбуквенная сперва, однобуквенная следом.
+        """
         if not entity_id:
             return None
-        prefix = entity_id[0]
-        table = {
-            "R": self.regions, "F": self.figures, "T": self.tribes,
-            "C": self.settlements, "P": self.polities, "K": self.camps,
-            "H": self.houses, "G": self.reigns, "D": self.calamities,
-            "L": self.relics, "B": self.battles, "Y": self.deities,
-            "W": self.faiths, "M": self.temples,
-        }.get(prefix)
-        return table.get(entity_id) if table else None
+        for width in (2, 1):
+            for table in _ENTITY_TABLES.get(entity_id[:width], ()):
+                found = getattr(self, table, {}).get(entity_id)
+                if found is not None:
+                    return found
+        return None
 
     def entity_name(self, entity_id: str) -> str:
+        """Имя существа по номеру. У чего имени нет — вопросительный знак."""
         item = self.entity(entity_id)
         if item is None:
             return "?"
-        return getattr(item, "full_name", None) or item.name
+        return (getattr(item, "full_name", None)
+                or getattr(item, "name", None)
+                or getattr(item, "title", None) or "?")
 
     # ------------------------------------------------------------------
     # Население

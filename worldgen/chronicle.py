@@ -1904,10 +1904,13 @@ def render_lore(world) -> str:
                         % (codex.name,
                            lore_mod.BIAS_NAMES.get(codex.bias, codex.bias),
                            codex.status))
-            rows.append("      где: %s; начат в %d году; охватывает %d лет; "
+            # Свод, начатый и оборванный в один год, охватывает не «0 лет»,
+            # а этот самый год: писать ноль — значит соврать о нём.
+            rows.append("      где: %s; начат в %d году; охватывает %s; "
                         "летописцев: %d"
                         % (city.name if city is not None else "—",
-                           codex.started.year, max(0, span),
+                           codex.started.year,
+                           years_text(max(1, span)),
                            len(codex.keepers)))
             names = []
             for item in codex.keepers:
