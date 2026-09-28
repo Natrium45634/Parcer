@@ -424,12 +424,86 @@ def worst_time(world, out) -> None:
         out("")
 
 
+def nonhuman(world, out) -> None:
+    """Пятый портрет: тяжелейшее имя, которое не принадлежит человеку.
+
+    Летопись мерит людей, и от этого легко решить, что история — дело
+    людское. Этот портрет берёт того, кто людям не ровня: дракона,
+    владыку демонов, бога или зверя, — и показывает его тем же способом,
+    что и человека: откуда взялся, чего хотел, когда молчал, чем кончил
+    и что от него осталось.
+    """
+    from worldgen import subject as sub
+
+    out("=" * 78)
+    out("НЕ ЧЕЛОВЕК, А ИСТОРИЧЕСКОЕ ЛИЦО")
+    out("=" * 78)
+
+    rows = [item for item in world.subjects.values()
+            if item.kind != sub.PEOPLE]
+    if not rows:
+        out("  В этом мире историю делали одни люди.")
+        out("")
+        return
+    weight = {name: index for index, name in enumerate(sub.RUNGS)}
+    item = max(rows, key=lambda one: (weight.get(one.rung, 0),
+                                      one.years_active, one.id))
+    out("  %s — %s, %s" % (item.name, item.kind, item.rung))
+    out("    в летописи с %d года: %s" % (item.entered.year, item.entry_why))
+    line = "    появился: %s" % (item.origin or "неизвестно как")
+    if item.origin_by:
+        line += "; позвал его %s, ради того чтобы %s" % (item.origin_by,
+                                                         item.origin_why)
+    out(line)
+    unclear = ["%s — %s" % (fact, state) for fact, state in item.facts.items()
+               if state not in (sub.FACT_KNOWN, sub.FACT_NONE)]
+    if unclear:
+        out("    о нём неясно: %s" % "; ".join(unclear))
+    out("    вмешивался: %s"
+        % ", ".join("%d–%d" % (int(span.get("с", 0)), int(span.get("по", 0)))
+                    for span in item.spans))
+    for quiet in item.quiet:
+        out("    молчал %d–%s: %s" % (int(quiet.get("с", 0)),
+                                      int(quiet.get("по", 0)) or "до конца",
+                                      quiet.get("отчего", "")))
+    # У бога это не желание, а мысль, ради которой он есть.
+    divine = item.kind == sub.GOD
+    out("    %s: %s%s" % ("ради чего он есть" if divine else "хотел",
+                          item.wish_first,
+                          (" → %s" % item.wish)
+                          if item.wish != item.wish_first else ""))
+    out("    %s: %s" % ("а мир принял эту мысль так" if divine
+                        else "и вышло из этого", item.wish_state))
+    for turn in item.temper_turns:
+        out("    %d: %s → %s, оттого что %s"
+            % (int(turn.get("год", 0)), turn.get("было", ""),
+               turn.get("стало", ""), turn.get("отчего", "")))
+    for mark in item.marks:
+        if int(mark.get("себе", 0)) > int(mark.get("мир", 0)):
+            out("    %d: %s — миру на %d, ему самому на %d"
+                % (int(mark.get("год", 0)), mark.get("что", ""),
+                   int(mark.get("мир", 0)), int(mark.get("себе", 0))))
+    out("    кончил: %s%s" % (item.end or item.status,
+                              (" (%d год)" % item.ended.year)
+                              if item.ended else ""))
+    if item.named_year:
+        out("    опознали только в %d году: %s"
+            % (item.named_year, item.named_how))
+    for row in item.legacy:
+        out("    осталось (%s): %s" % (row.get("род", ""), row.get("что", "")))
+    for who, what in item.told.items():
+        out("    %s: %s" % (who, what))
+    out("")
+
+
 def portraits(world, out) -> None:
-    """Четыре портрета мира: имена, ушедшие народы, старый город, злое время."""
+    """Пять портретов мира: имена, ушедшие народы, старый город, злое
+    время и тот, кто людям не ровня."""
     great_names(world, out)
     peoples_gone(world, out)
     oldest_town(world, out)
     worst_time(world, out)
+    nonhuman(world, out)
 
 
 # ---------------------------------------------------------------------------
@@ -1915,6 +1989,38 @@ def audit(world) -> list:
                     bad("город «выстоял» в земле, которую заняли (беда «%s»)"
                         % item.name)
                     break
+
+    # 36. Субъекты истории: не одни люди и не одни списки дел.
+    subjects = list(world.subjects.values())
+    if subjects:
+        from worldgen import subject as sub_cat
+        kinds = Counter(item.kind for item in subjects)
+        rungs = Counter(item.rung for item in subjects)
+        back = sum(1 for item in subjects if len(item.spans) > 1)
+        quiet = sum(1 for item in subjects if item.quiet)
+        turns = sum(1 for item in subjects if item.temper_turns)
+        got = sum(1 for item in subjects
+                  if item.wish_state == sub_cat.GOAL_DONE)
+        found.append(("=", "субъектов: %d (%s); ступени: %s; вернулись %d, "
+                      "молчали %d, переменились %d, добились своего %d"
+                      % (len(subjects),
+                         ", ".join("%s — %d" % pair
+                                   for pair in kinds.most_common(4)),
+                         ", ".join("%s — %d" % pair
+                                   for pair in rungs.most_common(3)),
+                         back, quiet, turns, got)))
+        if len(kinds) == 1 and world.total_years >= 3000:
+            note("историю в этом мире делали только «%s»"
+                 % next(iter(kinds)))
+        for item in subjects:
+            died = item.ended.year if item.ended else None
+            if died is None:
+                continue
+            late = [turn for turn in item.temper_turns
+                    if int(turn.get("год", 0)) > died]
+            if late:
+                bad("субъект «%s» переменился после своего конца" % item.name)
+                break
 
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:

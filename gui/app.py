@@ -443,6 +443,9 @@ class ChronicleApp(tk.Tk):
         self.renown_text = self._add_text_tab(
             "Вес в истории", lambda: self._set_text(
                 self.renown_text, chronicle.render_renown(self.world)))
+        self.subject_text = self._add_text_tab(
+            "Субъекты истории", lambda: self._set_text(
+                self.subject_text, chronicle.render_subjects(self.world)))
         self.crafts_text = self._add_text_tab(
             "Ремёсла", lambda: self._set_text(
                 self.crafts_text, chronicle.render_crafts(self.world)))

@@ -22,7 +22,7 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Polity,
                      LifePath,
                      Region, Reign, Relic, Scar, LostLore, CrisisEra,
-                     Invasion,
+                     Invasion, Subject,
                      Seed, Settlement, Site, Story,
                      Strife, Township, Godhead, Renown,
                      Tale,
@@ -40,7 +40,7 @@ _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
                 "sent", "returned", "started", "made", "lost", "opened",
                 "signed_at",
                 "closed", "married", "signed", "built", "began",
-                "found"}
+                "found", "entered"}
 
 
 def _defaults(cls) -> dict:
@@ -114,6 +114,8 @@ def world_to_dict(world: World) -> dict:
         "relics": [_compact(Relic, item.to_dict()) for item in world.relics.values()],
         "invasions": [_compact(Invasion, item.to_dict())
                       for item in world.invasions.values()],
+        "subjects": [_compact(Subject, item.to_dict())
+                     for item in world.subjects.values()],
         "scars": [_compact(Scar, item.to_dict()) for item in world.scars.values()],
         "lost_lore": [_compact(LostLore, item.to_dict())
                       for item in world.lost_lore.values()],
@@ -253,6 +255,9 @@ def dict_to_world(data: dict) -> World:
         world.relics[relic.id] = relic
         if relic.status == "спит":
             world.sleeping_relics.append(relic.id)
+    for item in data.get("subjects", ()):
+        subject = Subject(**_clean(Subject, item))
+        world.subjects[subject.id] = subject
     for item in data.get("invasions", ()):
         invasion = Invasion(**_clean(Invasion, item))
         world.invasions[invasion.id] = invasion

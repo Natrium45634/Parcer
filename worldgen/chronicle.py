@@ -3770,6 +3770,160 @@ def render_invasions(world) -> str:
     return "\n".join(rows)
 
 
+def render_subjects(world) -> str:
+    """Субъекты истории: те, чьи решения оставили след, кем бы они ни были.
+
+    Вес имени считает «Вес в истории», людские цели ведут «Судьбы людей».
+    Здесь то, чего нет ни там, ни там: появление, которое не обязано быть
+    рождением; первое появление в летописи отдельно от него; состояние
+    каждого факта, потому что «неизвестно» не значит «нет»; сроки, когда
+    он вообще вмешивался, и молчание между ними; перемены нрава с
+    названной причиной; три разные оценки одного и того же дела; и то,
+    что дракон, владыка демонов, бог и крестьянин проходят это одинаково.
+    """
+    from . import subject as cat
+
+    rows = ["СУБЪЕКТЫ ИСТОРИИ", ""]
+    if not world.subjects:
+        rows.append("  Мир не запомнил никого по имени.")
+        return "\n".join(rows)
+
+    items = sorted(world.subjects.values(),
+                   key=lambda item: (-cat.RUNGS.index(item.rung)
+                                     if item.rung in cat.RUNGS else 0,
+                                     item.entered.ordinal))
+    by_kind, by_rung = {}, {}
+    returned = late = turned = kept = 0
+    for item in items:
+        by_kind[item.kind] = by_kind.get(item.kind, 0) + 1
+        by_rung[item.rung] = by_rung.get(item.rung, 0) + 1
+        returned += 1 if len(item.spans) > 1 else 0
+        late += 1 if item.named_year else 0
+        turned += 1 if item.temper_turns or item.wish_turns else 0
+        kept += 1 if item.wish_state == cat.GOAL_DONE else 0
+
+    rows.append("  Записано имён: %d." % len(items))
+    rows.append("  Кто они: %s."
+                % ", ".join("%s — %d" % (kind, by_kind[kind])
+                            for kind in cat.KINDS if kind in by_kind))
+    rows.append("  Как их помнят: %s."
+                % ", ".join("%s — %d" % (rung, by_rung[rung])
+                            for rung in cat.RUNGS if rung in by_rung))
+    rows.append("  Вернулись после молчания: %d; опознаны позже: %d." %
+                (returned, late))
+    rows.append("  Переменились по ходу дела: %d; добились того, чего "
+                "хотели: %d." % (turned, kept))
+    rows.append("")
+
+    big = [item for item in items
+           if item.rung in (cat.RUNG_MYTH, cat.RUNG_LEGEND)][:25]
+    shown = {item.id for item in big}
+    for item in big:
+        rows.extend(_subject_block(world, item, cat))
+
+    rest = [item for item in items if item.id not in shown]
+    if rest:
+        rows.append("  ОСТАЛЬНЫЕ ИМЕНА")
+        rows.append("")
+        for item in rest[:150]:
+            rows.append("    %-28s %-14s %-4d %-22s %s"
+                        % (item.name[:28], item.kind[:14], item.entered.year,
+                           item.rung, item.end or item.status))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def _subject_block(world, item, cat) -> list:
+    """Один субъект: откуда взялся, чего хотел и что от него осталось."""
+    head = "%s — %s, %s" % (item.name, item.kind, item.rung)
+    rows = ["  %s" % head, "  " + "-" * (len(head) + 2)]
+    rows.append("      вошёл в летопись в %d году: %s"
+                % (item.entered.year, item.entry_why))
+    origin = "      появился: %s" % (item.origin or "неизвестно как")
+    if item.origin_year:
+        origin += " (%d год)" % item.origin_year
+    if item.origin_by:
+        origin += "; позвал его %s, ради того чтобы %s" % (item.origin_by,
+                                                           item.origin_why)
+    rows.append(origin)
+
+    unclear = ["%s — %s" % (fact, state)
+               for fact, state in item.facts.items()
+               if state not in (cat.FACT_KNOWN, cat.FACT_NONE)]
+    if unclear:
+        rows.append("      о нём неясно: %s" % "; ".join(unclear))
+
+    spans = ["%d–%d" % (int(span.get("с", 0)), int(span.get("по", 0)))
+             for span in item.spans]
+    if spans:
+        rows.append("      вмешивался в историю: %s — всего %s"
+                    % (", ".join(spans), years_text(item.years_active)))
+    for quiet in item.quiet:
+        rows.append("      молчал %d–%s: %s"
+                    % (int(quiet.get("с", 0)),
+                       int(quiet.get("по", 0)) or "до конца",
+                       quiet.get("отчего", "")))
+
+    # У бога это не желание, а мысль, ради которой он вообще есть:
+    # «хотел раздувать огонь» и «огонь не зол и не добр» — разные вещи.
+    divine = item.kind == cat.GOD
+    wish = "      %s: %s" % ("ради чего он есть" if divine else "хотел",
+                             item.wish_first)
+    if item.wish != item.wish_first:
+        wish += " → %s" % item.wish
+    rows.append(wish)
+    for turn in item.wish_turns:
+        rows.append("      %d: %s — и стал хотеть: %s"
+                    % (int(turn.get("год", 0)), turn.get("отчего", ""),
+                       turn.get("стало", "")))
+    rows.append("      %s: %s" % ("что с этой мыслью стало" if divine
+                                  else "чем кончилась эта цель",
+                                  item.wish_state))
+
+    rows.append("      каков он был: %s" % item.temper)
+    for turn in item.temper_turns:
+        rows.append("      %d: %s → %s, оттого что %s (внутри: %s)"
+                    % (int(turn.get("год", 0)), turn.get("было", ""),
+                       turn.get("стало", ""), turn.get("отчего", ""),
+                       turn.get("внутри", "")))
+
+    # Перемены нрава и цели уже названы выше — здесь только те дела,
+    # которые значили для него больше, чем для мира, и ещё не показаны.
+    said = {int(turn.get("год", 0)) for turn in item.temper_turns}
+    said |= {int(turn.get("год", 0)) for turn in item.wish_turns}
+    heavy = [mark for mark in item.marks
+             if int(mark.get("себе", 0)) > int(mark.get("мир", 0))
+             and int(mark.get("год", 0)) not in said]
+    for mark in heavy[:3]:
+        rows.append("      %d: %s — миру на %d, ему самому на %d, "
+                    "вперёд на %d"
+                    % (int(mark.get("год", 0)), mark.get("что", ""),
+                       int(mark.get("мир", 0)), int(mark.get("себе", 0)),
+                       int(mark.get("вперёд", 0))))
+
+    for tie in item.ties[:3]:
+        rows.append("      %s: %s (с %d года)"
+                    % (tie.get("кто", ""), tie.get("чем", ""),
+                       int(tie.get("с какого года", 0))))
+
+    if item.end:
+        rows.append("      кончил: %s%s"
+                    % (item.end,
+                       (" (%d год)" % item.ended.year) if item.ended else ""))
+    if item.named_year:
+        rows.append("      опознали только в %d году: %s"
+                    % (item.named_year, item.named_how))
+    for row in item.legacy:
+        rows.append("      осталось (%s): %s"
+                    % (row.get("род", ""), row.get("что", "")))
+    if not item.legacy:
+        rows.append("      не осталось ничего, кроме имени в своде")
+    for who, what in item.told.items():
+        rows.append("      %s: %s" % (who, what))
+    rows.append("")
+    return rows
+
+
 def full_text(world) -> str:
     """Полный экспорт: летопись + справочники."""
     return "\n\n".join((
@@ -3802,6 +3956,7 @@ def full_text(world) -> str:
         render_calamities(world),
         render_disasters(world),
         render_invasions(world),
+        render_subjects(world),
         render_sagas(world),
         render_causes(world),
         render_memory(world),

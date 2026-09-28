@@ -1705,6 +1705,179 @@ def check_invasions(world, seed: str) -> list:
     return problems
 
 
+def check_subjects(world, seed: str) -> list:
+    """Субъекты истории: сходится ли биография сама с собой.
+
+    Здесь ловится то, что ломается тихо: мертвец, который продолжает
+    менять нрав; возвращение раньше, чем он умолк; срок деятельности,
+    выходящий за пределы истории; мифическая ступень при жизни; две
+    записи об одном и том же человеке; наследие из несуществующего рода.
+    """
+    from worldgen import subject as cat
+
+    problems = []
+    bound = {"figure_id": set(), "monster_id": set(),
+             "deity_id": set(), "invasion_id": set()}
+    wishes = {wish for wish, _ in cat.WISHES}
+    tellers = {who for who, _ in cat.TELLERS}
+
+    for item in world.subjects.values():
+        name = item.name or item.id
+        if item.kind not in cat.KINDS:
+            problems.append("сид «%s»: у субъекта «%s» неведомый род «%s»"
+                            % (seed, name, item.kind))
+            break
+        if item.origin and item.origin not in cat.ORIGINS:
+            problems.append("сид «%s»: у субъекта «%s» неведомое появление "
+                            "«%s»" % (seed, name, item.origin))
+            break
+        if item.status not in cat.STATUSES:
+            problems.append("сид «%s»: у субъекта «%s» неведомое положение "
+                            "«%s»" % (seed, name, item.status))
+            break
+        if item.end and item.end not in cat.ENDS:
+            problems.append("сид «%s»: у субъекта «%s» неведомый конец «%s»"
+                            % (seed, name, item.end))
+            break
+        if item.rung not in cat.RUNGS:
+            problems.append("сид «%s»: у субъекта «%s» неведомая ступень "
+                            "памяти «%s»" % (seed, name, item.rung))
+            break
+        if item.wish_state and item.wish_state not in cat.GOAL_STATES:
+            problems.append("сид «%s»: у субъекта «%s» неведомое состояние "
+                            "цели «%s»" % (seed, name, item.wish_state))
+            break
+        for fact, state in item.facts.items():
+            if state not in cat.FACT_STATES:
+                problems.append("сид «%s»: у субъекта «%s» факт «%s» в "
+                                "неведомом состоянии «%s»"
+                                % (seed, name, fact, state))
+                break
+
+        if not 1 <= item.entered.year <= world.total_years:
+            problems.append("сид «%s»: субъект «%s» вошёл в летопись вне "
+                            "истории" % (seed, name))
+            break
+        if item.origin_year and item.origin_year > item.entered.year:
+            problems.append("сид «%s»: субъект «%s» появился позже, чем "
+                            "попал в летопись" % (seed, name))
+            break
+        if item.ended is not None and item.ended.ordinal < item.entered.ordinal:
+            problems.append("сид «%s»: субъект «%s» кончился раньше, чем "
+                            "начался" % (seed, name))
+            break
+        if item.named_year and item.named_year < item.entered.year:
+            problems.append("сид «%s»: субъекта «%s» опознали раньше, чем "
+                            "он появился" % (seed, name))
+            break
+
+        last_end = 0
+        broken = False
+        for span in item.spans:
+            since, until = int(span.get("с", 0)), int(span.get("по", 0))
+            if until < since or since < item.entered.year \
+                    or until > world.total_years:
+                problems.append("сид «%s»: у субъекта «%s» срок деятельности "
+                                "%d–%d не сходится" % (seed, name, since, until))
+                broken = True
+                break
+            if since < last_end:
+                problems.append("сид «%s»: у субъекта «%s» сроки "
+                                "деятельности налезают друг на друга"
+                                % (seed, name))
+                broken = True
+                break
+            last_end = until
+        if broken:
+            break
+
+        # Мертвец не действует: ни нрав, ни цель после смерти не меняются.
+        died = item.ended.year if item.ended else None
+        if died is not None:
+            late = [int(turn.get("год", 0)) for turn in item.temper_turns
+                    if int(turn.get("год", 0)) > died]
+            late += [int(turn.get("год", 0)) for turn in item.wish_turns
+                     if int(turn.get("год", 0)) > died]
+            if late:
+                problems.append("сид «%s»: субъект «%s» переменился после "
+                                "своего конца (%d год)"
+                                % (seed, name, sorted(late)[0]))
+                break
+            if item.spans and int(item.spans[-1].get("по", 0)) > died:
+                problems.append("сид «%s»: субъект «%s» действовал после "
+                                "своего конца" % (seed, name))
+                break
+
+        if item.wish_turns:
+            if item.wish_turns[0].get("было") != item.wish_first:
+                problems.append("сид «%s»: у субъекта «%s» первая перемена "
+                                "цели начинается не с той, с какой он вошёл"
+                                % (seed, name))
+                break
+            if item.wish != item.wish_turns[-1].get("стало"):
+                problems.append("сид «%s»: у субъекта «%s» нынешняя цель не "
+                                "та, к которой он пришёл по переменам"
+                                % (seed, name))
+                break
+            unknown = [turn for turn in item.wish_turns
+                       if turn.get("стало") not in wishes]
+            if unknown:
+                problems.append("сид «%s»: у субъекта «%s» цель переменилась "
+                                "на неведомую" % (seed, name))
+                break
+        for turn in item.temper_turns:
+            if turn.get("стало") not in cat.TEMPERS:
+                problems.append("сид «%s»: у субъекта «%s» неведомый нрав "
+                                "«%s»" % (seed, name, turn.get("стало")))
+                break
+
+        if item.rung == cat.RUNG_MYTH and item.status in (cat.ALIVE,
+                                                          cat.ACTING):
+            problems.append("сид «%s»: субъект «%s» стал мифом при жизни"
+                            % (seed, name))
+            break
+
+        for row in item.legacy:
+            kind = row.get("род", "")
+            if kind not in cat.LEGACY_KINDS \
+                    or row.get("что") not in cat.LEGACIES.get(kind, ()):
+                problems.append("сид «%s»: у субъекта «%s» наследие "
+                                "неведомого рода" % (seed, name))
+                break
+        for who in item.told:
+            if who not in tellers:
+                problems.append("сид «%s»: о субъекте «%s» рассказывает "
+                                "неведомый голос «%s»" % (seed, name, who))
+                break
+
+        for field, seen in bound.items():
+            value = getattr(item, field, "")
+            if not value:
+                continue
+            if value in seen:
+                problems.append("сид «%s»: о «%s» в своде две записи сразу"
+                                % (seed, name))
+                break
+            seen.add(value)
+        if item.figure_id and item.figure_id not in world.figures:
+            problems.append("сид «%s»: субъект «%s» привязан к пустой "
+                            "личности" % (seed, name))
+            break
+        if item.monster_id and item.monster_id not in world.monsters:
+            problems.append("сид «%s»: субъект «%s» привязан к пустому зверю"
+                            % (seed, name))
+            break
+        if item.deity_id and item.deity_id not in world.deities:
+            problems.append("сид «%s»: субъект «%s» привязан к пустому богу"
+                            % (seed, name))
+            break
+        if item.invasion_id and item.invasion_id not in world.invasions:
+            problems.append("сид «%s»: субъект «%s» привязан к пустому "
+                            "нашествию" % (seed, name))
+            break
+    return problems
+
+
 def check_causes(world, seed: str) -> list:
     """Причинность: следы, зёрна и цепи событий.
 
@@ -2307,6 +2480,39 @@ def check_catalogues() -> list:
     miss("что держит фронт",
          [item.needs for item in dis.HOLDS if item.needs],
          set(dis.HOLD_TERRAINS) | {"крепость"})
+
+    # Каталог субъектов истории: ссылка в пустоту здесь так же тиха —
+    # целый род существ просто никогда не получит ни цели, ни конца.
+    from worldgen import subject as sub
+    from worldgen.systems import subject as sub_sys
+
+    wishes = {wish for wish, _ in sub.WISHES}
+    miss("роды у происхождения", list(sub.ORIGIN_BY_KIND), set(sub.KINDS))
+    miss("происхождение у родов",
+         [name for rows in sub.ORIGIN_BY_KIND.values() for name, _ in rows],
+         set(sub.ORIGINS))
+    miss("роды у концов", list(sub.END_BY_KIND), set(sub.KINDS))
+    miss("концы у родов",
+         [name for rows in sub.END_BY_KIND.values() for name, _ in rows],
+         set(sub.ENDS))
+    miss("концы в переводе в положение", list(sub.END_TO_STATUS), set(sub.ENDS))
+    miss("положения в переводе из концов",
+         list(sub.END_TO_STATUS.values()), set(sub.STATUSES))
+    miss("положения, из которых возвращаются", list(sub.CAN_RETURN),
+         set(sub.STATUSES))
+    miss("роды у целей",
+         [kind for _, kinds in sub.WISHES for kind in kinds], set(sub.KINDS))
+    miss("цели в переменах целей",
+         [was for _, was, _ in sub.WISH_TURNS]
+         + [now for _, _, now in sub.WISH_TURNS], wishes)
+    miss("роды в вопросе о рождении", list(sub.ASKS_BIRTH), set(sub.KINDS))
+    miss("роды наследия", list(sub.LEGACIES), set(sub.LEGACY_KINDS))
+    miss("ступени памяти по весу", list(sub.RUNG_BY_LEVEL.values()),
+         set(sub.RUNGS))
+    miss("голоса в пересказах", list(sub.TELLER_TWISTS),
+         {who for who, _ in sub.TELLERS})
+    miss("роды, которые возвращаются", list(sub_sys.RETURN_KINDS),
+         set(sub.KINDS))
     return problems
 
 
@@ -2363,6 +2569,7 @@ def main() -> int:
         failures.extend(check_calamities(first, seed))
         failures.extend(check_disasters(first, seed))
         failures.extend(check_invasions(first, seed))
+        failures.extend(check_subjects(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
         failures.extend(check_tongues(first, seed))
@@ -2422,6 +2629,7 @@ def main() -> int:
             failures.extend(check_calamities(first, "карта/" + seed))
             failures.extend(check_disasters(first, "карта/" + seed))
             failures.extend(check_invasions(first, "карта/" + seed))
+            failures.extend(check_subjects(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_tongues(first, "карта/" + seed))
@@ -2477,7 +2685,7 @@ def main() -> int:
                             "сохранения" % seed)
         for check in (check_nobility, check_wars, check_politics,
                       check_calamities, check_disasters,
-                      check_invasions,
+                      check_invasions, check_subjects,
                       check_faiths, check_nations,
                       check_tongues, check_embassies, check_things,
                       check_causes, check_people_memory, check_migrations,

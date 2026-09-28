@@ -37,7 +37,8 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       notables,
                       peoples,
                       religion,
-                      sites, soldiery, spies, strife, succession,
+                      sites, soldiery, spies, strife, subject as subject_sys,
+                      succession,
                       renown,
                       tales, tongues, township,
                       trade,
@@ -207,6 +208,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             # Вес имён подводится после всего: к этому часу уже
             # известно, что человек успел, а мир — удержал.
             renown.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Субъекты истории идут следом за весом: в летопись заносят
+            # тех, чьи дела уже сосчитаны, — и людей, и драконов, и богов.
+            subject_sys.upkeep(ctx, year, UPKEEP_PERIOD)
             # Жизнь городов идёт до былей: быль может вырасти из тяготы
             # или тайны города, и к этому часу они уже должны быть.
             township.upkeep(ctx, year, UPKEEP_PERIOD)
@@ -252,6 +256,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     # идущим: мир, где всё улажено к сроку, честным не бывает.
     invasion_sys.close(ctx, total, ctx.date_in(
         ctx.rng("invasion", "close", total), total))
+    # Чем кончил, что оставил и на какой ступени его помнят — это
+    # считается в конце: легендарным становятся после смерти.
+    subject_sys.close(ctx, total)
     _finalize(world)
     if progress is not None:
         progress(1.0, "Готово")

@@ -21,7 +21,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Figure,
                      Folk, Fortress,
                      Guild, House, Law, League, Legend, LifePath, Memory,
-                     Scar, LostLore, CrisisEra, Invasion,
+                     Scar, LostLore, CrisisEra, Invasion, Subject,
                      Migration,
                      Monster, Pact,
                      Plot,
@@ -74,6 +74,7 @@ class World:
         self.calamities = {}           # id -> Calamity (бедствия)
         self.relics = {}               # id -> Relic (следы бедствий)
         self.invasions = {}            # id -> Invasion (нашествия как события)
+        self.subjects = {}             # id -> Subject (субъекты истории)
         self.scars = {}                # id -> Scar (шрамы мира)
         self.lost_lore = {}            # id -> LostLore (что забылось)
         self.crisis_eras = {}          # id -> CrisisEra (эпохи кризиса)
@@ -377,6 +378,25 @@ class World:
         if relic.status == "спит":
             self.sleeping_relics.append(relic.id)
         return relic
+
+    def add_subject(self, **kwargs) -> Subject:
+        """Субъект истории: тот, чьи дела оставили след, кем бы он ни был."""
+        subject = Subject(id=self.next_id("SB"), **kwargs)
+        self.subjects[subject.id] = subject
+        return subject
+
+    def subject_of(self, **keys):
+        """Субъект, привязанный к этой личности, зверю, богу или нашествию."""
+        # Пустая привязка не годится: иначе спросивший «а чей это субъект,
+        # если привязки нет» получил бы первого попавшегося.
+        asked = {field: value for field, value in keys.items() if value}
+        if not asked:
+            return None
+        for item in self.subjects.values():
+            if all(getattr(item, field, "") == value
+                   for field, value in asked.items()):
+                return item
+        return None
 
     def add_invasion(self, **kwargs) -> Invasion:
         """Нашествие: история о том, кто пришёл и чем это кончилось."""

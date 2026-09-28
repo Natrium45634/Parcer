@@ -616,6 +616,109 @@ def m_weigh_untitled(world):
     return count
 
 
+# --- субъекты истории --------------------------------------------------------
+
+def _subjects(world):
+    return list(world.subjects.values())
+
+
+def m_sub_kinds(world):
+    """В своде не одни люди: дракон и бог проходят ту же систему."""
+    return len({item.kind for item in _subjects(world)})
+
+
+def m_sub_nonhuman(world):
+    """Доля тех, кто вообще не человек."""
+    from worldgen import subject as cat
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows if item.kind != cat.PEOPLE),
+                  len(rows))
+
+
+def m_sub_not_born(world):
+    """Доля тех, кто появился не рождением: призван, разбужен, сделан."""
+    from worldgen import subject as cat
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows if item.origin != cat.BORN),
+                  len(rows))
+
+
+def m_sub_unclear(world):
+    """Доля тех, о ком хоть что-то неизвестно, спорно или обросло мифом."""
+    from worldgen import subject as cat
+    rows = _subjects(world)
+    unclear = sum(1 for item in rows
+                  if any(state not in (cat.FACT_KNOWN, cat.FACT_NONE)
+                         for state in item.facts.values()))
+    return _share(unclear, len(rows))
+
+
+def m_sub_returned(world):
+    """Доля вернувшихся: запечатанный не выбывает из истории."""
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows if len(item.spans) > 1), len(rows))
+
+
+def m_sub_quiet(world):
+    """Доля тех, у кого между делами были годы молчания."""
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows if item.quiet), len(rows))
+
+
+def m_sub_turned(world):
+    """Доля тех, у кого нрав переменился, и у перемены названа причина."""
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows if item.temper_turns), len(rows))
+
+
+def m_sub_got_it(world):
+    """Доля добившихся своего: цель не равна результату."""
+    from worldgen import subject as cat
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows
+                      if item.wish_state == cat.GOAL_DONE), len(rows))
+
+
+def m_sub_rungs(world):
+    """Ступеней памяти в ходу: не все же мифические."""
+    return len({item.rung for item in _subjects(world)})
+
+
+def m_sub_myth(world):
+    """Доля мифических имён: их должно быть мало."""
+    from worldgen import subject as cat
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows if item.rung == cat.RUNG_MYTH),
+                  len(rows))
+
+
+def m_sub_named_late(world):
+    """Доля тех, кого опознали через века после дела."""
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows if item.named_year), len(rows))
+
+
+def m_sub_legacy(world):
+    """Доля тех, после кого что-то осталось."""
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows if item.legacy), len(rows))
+
+
+def m_sub_told(world):
+    """Доля тех, о чьём конце рассказывают врозь."""
+    rows = _subjects(world)
+    return _share(sum(1 for item in rows if item.told), len(rows))
+
+
+def m_sub_inner(world):
+    """Доля тех, у кого есть дело, значившее для них больше, чем для мира."""
+    rows = _subjects(world)
+    inner = sum(1 for item in rows
+                if any(int(mark.get("себе", 0)) > int(mark.get("мир", 0))
+                       for mark in item.marks))
+    return _share(inner, len(rows))
+
+
 MEASURES = (
     Measure("были", "не про судьбу мира", m_story_small, 0.82, 0.98,
             "доля", "девять из десяти былей не спасают мир"),
@@ -760,6 +863,39 @@ MEASURES = (
             "доля", "из остатков через века растут новые беды"),
     Measure("нашествия", "отвечали врозь", m_inv_answers, 0.2, None, "доля",
             "кто воевал, не простит тому, кто заплатил"),
+    Measure("субъекты", "родов в своде", m_sub_kinds, 3, None, "из 13",
+            "дракон, бог и крестьянин проходят одну систему",
+            min_years=3000),
+    Measure("субъекты", "не люди", m_sub_nonhuman, 0.1, None, "доля",
+            "историческая личность не обязана быть человеком"),
+    Measure("субъекты", "появились не рождением", m_sub_not_born, 0.2, None,
+            "доля", "призван, разбужен, сделан — тоже появление"),
+    Measure("субъекты", "о ком что-то неясно", m_sub_unclear, 0.3, None,
+            "доля", "«неизвестно» не значит «нет»"),
+    Measure("субъекты", "вернулись после молчания", m_sub_returned, 0.03,
+            0.5, "доля", "запечатанный не выбывает из истории",
+            min_years=3000),
+    Measure("субъекты", "молчали между делами", m_sub_quiet, 0.08, None,
+            "доля", "бессмертный вмешивается не все свои тысячи лет",
+            min_years=3000),
+    Measure("субъекты", "нрав переменился", m_sub_turned, 0.15, None, "доля",
+            "и у перемены названа причина"),
+    Measure("субъекты", "добились своего", m_sub_got_it, None, 0.35, "доля",
+            "цель не равна результату"),
+    Measure("субъекты", "ступеней памяти в ходу", m_sub_rungs, 3, None,
+            "из 5", "ступень собирается из дел, а не выдаётся"),
+    Measure("субъекты", "мифических имён", m_sub_myth, None, 0.25, "доля",
+            "мифом становятся немногие и не сразу"),
+    Measure("субъекты", "опознаны позже", m_sub_named_late, 0.02, None,
+            "доля", "кто вёл ту войну, выясняли и через двести лет",
+            min_years=3000),
+    Measure("субъекты", "оставили след", m_sub_legacy, 0.5, 0.97, "доля",
+            "смерть не убирает из истории, но след держится не у всех"),
+    Measure("субъекты", "рассказывают врозь", m_sub_told, 0.3, None, "доля",
+            "объективно запечатан, а в народе убит"),
+    Measure("субъекты", "дело важнее для него, чем для мира", m_sub_inner,
+            0.2, None, "доля",
+            "мир не заметил, а он после этого стал другим"),
     Measure("мир", "правил переменилось", m_rules_changed, None, 5, "из 7",
             "мир меняется от самых глубоких бед, но не каждый век"),
     Measure("мир", "исходов из земель", m_exodus, 1, None, "штук",

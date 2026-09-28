@@ -815,6 +815,82 @@ class Invasion:
 
 
 @dataclass
+class Subject:
+    """Субъект истории: тот, чьи решения оставили след, кем бы он ни был.
+
+    Историческая личность — не обязательно человек и не обязательно
+    смертный. Дракон, владыка демонов, лич, дух и бог проходят ту же
+    систему, что крестьянин, — у них просто другие допустимые способы
+    существовать.
+
+    Это не вторая биография поверх `Figure`, `Monster` и `Deity`: вес в
+    истории по-прежнему считает `renown.py`, людские цели ведёт
+    `lifepaths.py`. Здесь то, чего у них нет: появление, которое не
+    обязано быть рождением; первое появление в летописи отдельно от него;
+    состояние каждого факта («неизвестно» не значит «нет»); сроки, когда
+    он вообще вмешивался в историю; положение вместо «жив/мёртв»;
+    перемены нрава с названной причиной; наследие девяти родов; ступень
+    памяти, на которую поднимаются и после смерти; и то, как по-разному
+    об одном и том же рассказывают.
+    """
+
+    id: str
+    name: str
+    kind: str                  # дракон, демон, нежить, божество, народ мира…
+    entered: Date              # когда он впервые попал в летопись
+    figure_id: str = ""        # если это человек из реестра личностей
+    monster_id: str = ""       # если это именной зверь
+    deity_id: str = ""         # если это божество
+    invasion_id: str = ""      # если он пришёл с нашествием
+    race_id: str = ""
+    origin: str = ""           # рождён, призван, пробуждён, создан…
+    origin_year: int = 0       # если год появления вообще известен
+    origin_by: str = ""        # кто его позвал, создал или разбудил
+    origin_why: str = ""       # и ради чего
+    entry_why: str = ""        # чем он попал в летопись
+    facts: dict = field(default_factory=dict)   # факт -> состояние факта
+    status: str = "жив"
+    end: str = ""              # убит, запечатан, развеян, ушёл в свой мир…
+    ended: Date = None
+    spans: list = field(default_factory=list)   # [{с, по, чем занят}]
+    quiet: list = field(default_factory=list)   # [{с, по, отчего молчал}]
+    wish: str = ""             # чего хочет сейчас
+    wish_first: str = ""       # чего хотел, когда вошёл в историю
+    wish_state: str = "начата"
+    wish_turns: list = field(default_factory=list)  # [{год, было, стало, отчего}]
+    temper: str = ""           # каков он сейчас
+    temper_turns: list = field(default_factory=list)
+    # [{год, было, стало, отчего, внутри}]
+    marks: list = field(default_factory=list)   # значимые дела [{год, что, мир, себе, вперёд}]
+    ties: list = field(default_factory=list)    # [{кто, чем, с какого года}]
+    legacy: list = field(default_factory=list)  # [{род, что}]
+    rung: str = "человек как человек"
+    told: dict = field(default_factory=dict)    # рассказчик -> как он это помнит
+    named_year: int = 0        # когда его опознали, если это вышло позже
+    named_how: str = ""        # и по чему
+    notes: list = field(default_factory=list)
+
+    @property
+    def years_active(self) -> int:
+        """Сколько лет он вообще вмешивался в историю."""
+        total = 0
+        for span in self.spans:
+            total += max(0, int(span.get("по", 0)) - int(span.get("с", 0)))
+        return total
+
+    @property
+    def full_name(self) -> str:
+        return self.name
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["entered"] = _date_out(self.entered)
+        data["ended"] = _date_out(self.ended)
+        data["full_name"] = self.full_name
+        return data
+
+
+@dataclass
 class Relic:
     """След бедствия: недобитый генерал, печать, проклятое место.
 
