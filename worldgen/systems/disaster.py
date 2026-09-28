@@ -47,6 +47,16 @@ STOP_TOLL = 0.55            # во сколько раз меньше берёт
 TURN_CHANCE = 0.45
 TURN_MAX = 3
 
+# Насколько решение власти двигает беду. Решений у большой беды несколько
+# (своё у каждой задетой державы), и они множатся одно на другое: три
+# удачных решения по 0,7 роняли силу в самый пол, и беда брала вдвое
+# меньше положенного. Держава может смягчить беду, но не отменить её,
+# поэтому каждое решение считается вполсилы, а пол и потолок держат итог
+# в границах: ниже 0,72 не опускается и выше 1,7 не поднимается.
+RESPONSE_WEIGHT = 0.5
+RESPONSE_FLOOR = 0.72
+RESPONSE_ROOF = 1.7
+
 
 # ---------------------------------------------------------------------------
 # Склад мира: из чего берутся причины
@@ -560,10 +570,13 @@ def respond(ctx, calamity, spec, plan, rng, year: int) -> None:
             shift = 1.0
         elif outcome == dis.DONE_WORSE:
             shift = max(1.0, 2.0 - item.toll) * 1.1
+        # Вполсилы: иначе несколько решений подряд отменяют беду совсем.
+        shift = 1.0 + (shift - 1.0) * RESPONSE_WEIGHT
         saved = 0.0
         if shift < 1.0:
             saved = 1.0 - shift
-        calamity.force = max(0.5, min(1.6, calamity.force * shift))
+        calamity.force = max(RESPONSE_FLOOR,
+                             min(RESPONSE_ROOF, calamity.force * shift))
         _unrest(world, polity, item, outcome)
 
         if item.works and outcome in (dis.DONE_HELPED, dis.DONE_LATE):
