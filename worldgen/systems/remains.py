@@ -124,7 +124,20 @@ def imprint(ctx, calamity, spec, rng, year: int, date) -> None:
         date=date, era_index=world.era_index_at(year), kind="calamity_traces",
         title=title, text=text, importance=2,
         subjects=[calamity.id], region_id=calamity.region_ids[0],
-        race_id=calamity.race_id, causes=[calamity.id])
+        race_id=calamity.race_id, causes=_roots(world, calamity))
+
+
+def _roots(world, calamity) -> list:
+    """Причина события — событие, а не сама беда.
+
+    В ткани причин стоят номера событий: беда попадает туда через то
+    событие, в котором её впервые назвали. Номер самой беды здесь был бы
+    ссылкой в пустоту — и проверка причин её честно ловила.
+    """
+    if calamity is None:
+        return []
+    root = world.event_about(calamity.id)
+    return [root] if root else []
 
 
 def _what_there_was(world, calamity) -> tuple:
@@ -330,8 +343,7 @@ def _explained(ctx, trace, rng, year: int) -> None:
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="trace_traced",
         title=title, text=text, importance=3, subjects=[trace.id],
-        region_id=trace.region_id,
-        causes=[calamity.id] if calamity is not None else None)
+        region_id=trace.region_id, causes=_roots(world, calamity))
 
 
 def _towns_near(world, region_id: str) -> int:
@@ -368,7 +380,7 @@ def _found(ctx, trace, rng, year: int) -> None:
         title=title, text=text,
         importance=3 if trace.knowledge == cat.STUDIED else 2,
         subjects=[trace.id], region_id=trace.region_id,
-        causes=[calamity.id] if calamity is not None else None)
+        causes=_roots(world, calamity))
 
     # Найденное иногда спорит с тем, что уже знали.
     if calamity is not None and rng.chance(QUARREL_CHANCE):
@@ -419,7 +431,7 @@ def _echo(ctx, trace, rng, year: int, date) -> None:
         date=date, era_index=world.era_index_at(year), kind="trace_echo",
         title=title, text=text, importance=4,
         subjects=[trace.id, fresh.id], region_id=trace.region_id,
-        causes=[parent.id])
+        causes=_roots(world, parent))
 
 
 # ---------------------------------------------------------------------------
