@@ -1625,7 +1625,12 @@ def era_watch(ctx, calamity, year: int, date) -> None:
         # три поколения покоя это уже не то же время, а другое.
         if (last and year - last > ERA_GAP) or \
                 year - era.start.year > ERA_MAX:
-            close_era(ctx, year, date, force=True)
+            # Время, которое считать одним уже нельзя: или прошло три
+            # века, или беды разошлись. Это не «беды перестали приходить» —
+            # и в летописи это должно звучать иначе.
+            long_enough = year - era.start.year > ERA_MAX
+            close_era(ctx, year, date, force=True,
+                      reason="длина" if long_enough else "разрыв")
             era = None
     if era is None or era.end is not None:
         era = world.add_crisis_era(name="", start=date)
@@ -1642,7 +1647,8 @@ def era_watch(ctx, calamity, year: int, date) -> None:
     _ = rng
 
 
-def close_era(ctx, year: int, date, force: bool = False) -> None:
+def close_era(ctx, year: int, date, force: bool = False,
+              reason: str = "покой") -> None:
     """Покой длиннее века — и набранное время становится эпохой с именем.
 
     Эпоха из двух бед — это не эпоха, а две беды: такую закрываем молча
@@ -1657,7 +1663,19 @@ def close_era(ctx, year: int, date, force: bool = False) -> None:
     if not force and (not last or year - last < ERA_GAP):
         return
     world.era_open = ""
+    # Время бед кончается тогда, когда кончилась последняя его беда, а не
+    # тогда, когда мир заметил тишину: иначе в каждую эпоху приписано
+    # шестьдесят спокойных лет, которых в ней не было.
     era.end = date
+    last_end = None
+    for calamity_id in era.calamity_ids:
+        calamity = world.calamities.get(calamity_id)
+        if calamity is None or calamity.end is None:
+            continue
+        if last_end is None or calamity.end.ordinal > last_end.ordinal:
+            last_end = calamity.end
+    if last_end is not None and last_end.ordinal <= date.ordinal:
+        era.end = last_end
     if len(era.calamity_ids) < ERA_NEED:
         era.notes.append("в одно время не сложилось: бед было мало")
         world.crisis_eras.pop(era.id, None)
@@ -1670,7 +1688,8 @@ def close_era(ctx, year: int, date, force: bool = False) -> None:
     rng = ctx.rng("disaster", "era-name", era.id)
     era.name = _era_name(world, era, rng)
     era.voices = _era_voices(world, era, rng)
-    title, text = texts.era_closed(rng, era, world)
+    era.notes.append("закрыто: %s" % reason)
+    title, text = texts.era_closed(rng, era, world, reason)
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="crisis_era",
         title=title, text=text, importance=5,

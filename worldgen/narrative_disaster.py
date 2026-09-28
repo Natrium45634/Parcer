@@ -523,8 +523,23 @@ ERA_TAILS = (
 )
 
 
-def era_closed(rng, era, world) -> tuple:
-    """Время бед кончилось и получило имя."""
+ERA_BY_REASON = {
+    "длина": "Оно не кончилось — его просто перестали считать одним "
+             "временем: тем, кто жил дальше, хватило и своих бед.",
+    "разрыв": "Считать его одним временем перестали потому, что беды пошли "
+              "врозь и в разные земли.",
+    "конец истории": "Чем оно кончилось, летопись не говорит: на этом "
+                     "кончается и она сама.",
+}
+
+
+def era_closed(rng, era, world, reason: str = "покой") -> tuple:
+    """Время бед кончилось и получило имя.
+
+    Чем оно кончилось — тоже часть истории. «Беды перестали приходить»
+    годится только для покоя; время, которое перестали считать одним из-за
+    длины, так кончиться не может, иначе летопись сама себе противоречит.
+    """
     data = {"name": era.name, "count": len(era.calamity_ids),
             "from": era.start.year,
             "to": era.end.year if era.end else era.start.year,
@@ -538,7 +553,10 @@ def era_closed(rng, era, world) -> tuple:
     if era.voices:
         said = "; ".join(item["оборот"] for item in era.voices[:4])
         lines.append("Имя у него не одно: %s." % said)
-    lines.append(rng.choice(ERA_TAILS))
+    # Кость бросаем всегда — и только потом, если у закрытия своя причина,
+    # берём её слова: иначе порядок обращений к ГСЧ зависел бы от текста.
+    tail = rng.choice(ERA_TAILS)
+    lines.append(ERA_BY_REASON.get(reason, tail))
     return ("Время бед: %s" % era.name, " ".join(lines))
 
 
