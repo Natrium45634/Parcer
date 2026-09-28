@@ -295,11 +295,16 @@ def _make(ctx, rng, year: int, taken: dict = None, **kwargs):
 
     # «Неизвестно» не значит «нет»: у каждого факта своё состояние.
     asks = sub.ASKS_BIRTH.get(kind, False)
+    # О человеке из своего мира обычно знают, откуда он родом: у него
+    # есть село, род и земля. О том, кого призвали из-за края мира, —
+    # почти никогда.
+    homely = 3.0 if kind == sub.PEOPLE else 0.0
     subject.facts = {
         "появление на свет": sub.FACT_KNOWN if subject.origin_year
         else (sub.FACT_UNKNOWN if asks else sub.FACT_NONE),
         "откуда родом": sub.FACT_KNOWN if subject.origin_by
-        else rng.weighted([(sub.FACT_UNKNOWN, 2.0), (sub.FACT_MYTH, 1.0),
+        else rng.weighted([(sub.FACT_KNOWN, homely),
+                           (sub.FACT_UNKNOWN, 2.0), (sub.FACT_MYTH, 1.0),
                            (sub.FACT_DISPUTED, 0.8)]),
         "первое появление в летописи": sub.FACT_KNOWN,
         "ради чего всё это": rng.weighted([(sub.FACT_KNOWN, 2.0),
