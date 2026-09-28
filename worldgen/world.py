@@ -21,7 +21,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Figure,
                      Folk, Fortress,
                      Guild, House, Law, League, Legend, LifePath, Memory,
-                     Scar, LostLore, CrisisEra, Invasion, Subject,
+                     Scar, LostLore, CrisisEra, Invasion, Subject, Trace,
                      Migration,
                      Monster, Pact,
                      Plot,
@@ -75,6 +75,7 @@ class World:
         self.relics = {}               # id -> Relic (следы бедствий)
         self.invasions = {}            # id -> Invasion (нашествия как события)
         self.subjects = {}             # id -> Subject (субъекты истории)
+        self.traces = {}               # id -> Trace (следы бед в мире)
         self.scars = {}                # id -> Scar (шрамы мира)
         self.lost_lore = {}            # id -> LostLore (что забылось)
         self.crisis_eras = {}          # id -> CrisisEra (эпохи кризиса)
@@ -378,6 +379,17 @@ class World:
         if relic.status == "спит":
             self.sleeping_relics.append(relic.id)
         return relic
+
+    def add_trace(self, **kwargs) -> Trace:
+        """След беды: то, по чему её восстановят, когда забудут саму беду."""
+        trace = Trace(id=self.next_id("TR"), **kwargs)
+        self.traces[trace.id] = trace
+        return trace
+
+    def traces_of(self, calamity_id: str) -> list:
+        """Все следы одной беды — её отпечаток в мире."""
+        return [item for item in self.traces.values()
+                if item.calamity_id == calamity_id]
 
     def add_subject(self, **kwargs) -> Subject:
         """Субъект истории: тот, чьи дела оставили след, кем бы он ни был."""
