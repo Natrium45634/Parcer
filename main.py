@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def run_cli(argv) -> int:
     from worldgen import chronicle, storage
     from worldgen.engine import Settings, generate
+    from worldgen.worldmap import WorldMapError
 
     options = {"--seed": "Начало", "--years": "10000", "--regions": "18",
                "--density": "1.0", "--out": "", "--importance": "3",
@@ -130,7 +131,13 @@ def run_cli(argv) -> int:
     if map_path:
         print("Карта: %s" % os.path.basename(map_path))
     print("Генерация мира «%s»…" % settings.seed)
-    world = generate(settings, progress=progress)
+    try:
+        world = generate(settings, progress=progress)
+    except WorldMapError as error:
+        # Битый или чужой файл карты — не поломка программы, а ответ
+        # человеку: сказать, что не так, и не пугать разбором вызовов.
+        print("\nКарта не читается: %s." % error)
+        return 2
     print("\nГотово.")
     for key, value in world.stats().items():
         print("  %-26s %s" % (key + ":", value))

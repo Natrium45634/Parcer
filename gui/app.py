@@ -13,6 +13,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
 from gui.atlas import Atlas
+from gui.errors import human_error
 from gui.sidetabs import SideTabs
 from gui import wizard as wizard_mod
 from gui.wizard import Wizard
@@ -772,7 +773,8 @@ class ChronicleApp(tk.Tk):
             except GenerationCancelled:
                 self.progress_queue.put(("cancelled", None, ""))
             except Exception as error:                      # показать, а не молчать
-                self.progress_queue.put(("error", None, repr(error)))
+                self.progress_queue.put(("error", None,
+                                         human_error(error)))
 
         self.worker = threading.Thread(target=work, daemon=True)
         self.worker.start()
@@ -1676,7 +1678,8 @@ class ChronicleApp(tk.Tk):
         try:
             self.world = storage.load_world(path)
         except Exception as error:
-            messagebox.showerror("Не удалось открыть", str(error))
+            messagebox.showerror("Не удалось открыть",
+                                 human_error(error))
             return
         settings = self.world.settings or {}
         self.wizard.seed_var.set(self.world.seed_text)

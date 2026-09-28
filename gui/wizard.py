@@ -28,6 +28,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from gui.errors import human_error
 from worldgen import tuning, worldforge
 from worldgen import worldmap
 from worldgen.engine import Settings
@@ -623,14 +624,16 @@ class Wizard(ttk.Frame):
             filetypes=[("Карта мира", "*.world"), ("Все файлы", "*.*")])
         if not path:
             return
-        self.map_path = path
-        self.map_mode.set(MAP_FILE)
-        self._map_mode_changed()
+        # Сначала читаем, потом выбираем: иначе после негодного файла
+        # в мастере остаётся выбранной карта, с которой мир не собрать.
         try:
             wmap = worldmap.load(path)
         except Exception as error:
-            messagebox.showerror("Карта не читается", repr(error))
+            messagebox.showerror("Не вышло с картой", human_error(error))
             return
+        self.map_path = path
+        self.map_mode.set(MAP_FILE)
+        self._map_mode_changed()
         self.map_preview = wmap
         self._preview_key = ("файл", path)
         facts = wmap.describe()
