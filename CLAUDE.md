@@ -81,7 +81,7 @@
 ## Что уже сделано — не делать заново
 
 Полный человеческий перечень возможностей лежит в **`ВОЗМОЖНОСТИ.txt`**
-(1937 строк, 39 разделов). Здесь — короткий список того, за что нельзя
+(2196 строк, 39 разделов). Здесь — короткий список того, за что нельзя
 браться повторно.
 
 | Есть | Где живёт |
@@ -142,7 +142,7 @@ gui/sidetabs.py         список разделов слева вместо л
 gui/atlas.py            живая карта: гексы картинкой, значки поверх неё
 worldgen/engine.py      Settings и главный цикл: год за годом
 worldgen/world.py       World — все реестры мира и операции над ними
-worldgen/models.py      56 моделей данных (Event, Polity, Figure, Fact, …)
+worldgen/models.py      53 модели данных (Event, Polity, Figure, Fact, …)
 worldgen/context.py     GenContext: ГСЧ по ключам, даты, карта, кузница имён
 worldgen/rng.py         свой SplitMix64: weighted, chance, bell, jitter, …
 worldgen/storage.py     сохранение мира в JSON и чтение обратно
@@ -155,8 +155,8 @@ worldgen/divinity.py    божественное: происхождение, п
 worldgen/renown.py      вес имени: ступени, влияния, роли, судьбы, след
 worldgen/disaster.py    живая беда: причины, знаки, фазы, ответы, шрамы, эпохи
 worldgen/chronicle.py   текст летописи: 40 разделов full_text
-worldgen/narrative_*.py тексты событий по темам (36 файлов)
-worldgen/systems/*.py   43 системы мира, каждая со своим tick/upkeep
+worldgen/narrative_*.py тексты событий по темам (37 файлов)
+worldgen/systems/*.py   44 системы мира, каждая со своим tick/upkeep
 worldgen/worldforge/    картогенератор (см. ниже)
 tools/selfcheck.py      самопроверка: 7 миров и ~39 проверок
 tools/audit.py          смотр: 31 мера с границами — тот ли мир вышел
