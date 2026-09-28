@@ -38,17 +38,17 @@ LEADER_FRAMES = (
 )
 
 
-def place_name(rng, where: str) -> str:
+def place_name(rng, where: str, kind: str = "") -> str:
     """Имя по месту: «Беда на земле по имени Оркхад»."""
     if not where:
-        return rng.choice(inv.NAME_BY_SIGN)
+        return inv.pick_name(rng, inv.NAME_BY_SIGN, kind)
     return rng.choice(PLACE_FRAMES) % where
 
 
-def leader_name(rng, figure) -> str:
+def leader_name(rng, figure, kind: str = "") -> str:
     """Имя по вождю: «Поход вождя по имени Архаан»."""
     if figure is None:
-        return rng.choice(inv.NAME_BY_SIGN)
+        return inv.pick_name(rng, inv.NAME_BY_SIGN, kind)
     return rng.choice(LEADER_FRAMES) % figure.plain_name
 
 
@@ -68,10 +68,10 @@ FOLK_TAILS = (
 def folk_name(rng, invasion, calamity, world) -> str:
     """Народное имя: по тому дню, который запомнили, а не по итогу."""
     if invasion.first_sign and rng.chance(0.4):
-        return rng.choice(inv.NAME_BY_MARK)
+        return inv.pick_name(rng, inv.NAME_BY_MARK, invasion.kind)
     if rng.chance(0.5):
         return rng.choice(FOLK_TAILS)
-    return rng.choice(inv.NAME_BY_TOKEN)
+    return inv.pick_name(rng, inv.NAME_BY_TOKEN, invasion.kind)
 
 
 # ---------------------------------------------------------------------------

@@ -146,9 +146,9 @@ def _first_name(ctx, invasion, calamity, rng, year: int) -> str:
     for _ in range(14):
         model = rng.weighted(pairs)
         if model == "место":
-            name = texts.place_name(rng, where)
+            name = texts.place_name(rng, where, invasion.kind)
         elif model == "вождь":
-            name = texts.leader_name(rng, leader)
+            name = texts.leader_name(rng, leader, invasion.kind)
         elif model == "держава":
             name = texts.state_name(rng, where, year)
         elif model == "след":

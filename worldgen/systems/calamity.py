@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from . import causes as causes_sys
 from . import disaster as disaster_sys
+from . import remains as remains_sys
 from . import invasion as invasion_sys
 from .. import narrative_invasion as inv_texts
 from . import houses as houses_mod
@@ -256,6 +257,10 @@ def upkeep(ctx, year: int, period: int) -> None:
     # находят заново — сперва обрывками, потом целым.
     disaster_sys.age_scars(ctx, year, period)
     disaster_sys.find_lore(ctx, year, period)
+    # Следы беды живут своей жизнью: камень ветшает, обычай держится, а
+    # забытое однажды находят — и тогда оно начинает говорить.
+    remains_sys.age(ctx, year, period)
+    remains_sys.find(ctx, year, period)
     # Век покоя — и набранное время бед становится эпохой с именем.
     disaster_sys.close_era(ctx, year, ctx.date_in(
         ctx.rng("disaster", "era-close", year), year))
@@ -1122,6 +1127,10 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
     disaster_sys.refugees(ctx, calamity, rng, year, date)
 
     _leave_relics(ctx, calamity, spec, rng, year, date)
+    # Отпечаток беды: что от неё дойдёт до потомков и что они смогут по
+    # этому восстановить. Кладётся после реликвий — живой след берёт ту
+    # же спящую угрозу, а не заводит вторую.
+    remains_sys.imprint(ctx, calamity, spec, rng, year, date)
     # Земля не поднимается сразу: следующая такая беда ляжет тяжелее.
     disaster_sys.hurt_lands(world, calamity, spec)
     _start_dark_age(ctx, calamity, spec, rng, year, date)

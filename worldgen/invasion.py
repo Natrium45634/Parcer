@@ -707,6 +707,17 @@ NAME_BY_TOKEN = (
 )
 
 
+def pick_name(rng, pool, kind: str = "") -> str:
+    """Одно имя из списка — строкой, а не парой «имя и кому оно идёт».
+
+    В списках рядом с именем лежит круг тех, к кому оно подходит. Брать
+    из такого списка напрямую нельзя: в летопись уедет вся пара.
+    """
+    if kind:
+        return rng.weighted(names_for(pool, kind))
+    return rng.weighted(tuple((name, 1.0) for name, _ in pool))
+
+
 def names_for(pool, kind: str) -> tuple:
     """Имена этого рода первыми, общие следом, чужие почти никогда.
 
@@ -799,6 +810,7 @@ __all__ = [
     "VOICES", "VOICE_STATE", "VOICE_FOLK", "VOICE_FAITH", "VOICE_ENEMY",
     "VOICE_LATER", "VOICE_NEIGHBOUR",
     "NAME_BY_MARK", "NAME_BY_SIGN", "NAME_BY_TOKEN", "names_for",
+    "pick_name",
     "NAME_FOLK_FRAMES",
     "NAME_STATE_FRAMES", "NAME_BY_END", "NAME_ENEMY_FRAMES",
     "NAME_FAITH_FRAMES", "NAME_LATER_FRAMES",

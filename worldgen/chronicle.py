@@ -4310,6 +4310,112 @@ def _year_events(world, year: int) -> list:
     return rows
 
 
+def render_remains(world) -> str:
+    """Следы бед: чем катастрофа доказывается через тысячу лет.
+
+    Справочник бедствий считает мёртвых и земли; раздел «След бедствий»
+    говорит, что беда сделала с землёй. Здесь третье: что от неё дошло
+    до потомков — братская могила, половина фрески, запрет входить в
+    пещеру, печать под храмом, — и что по этому вообще можно
+    восстановить. След не обязан объяснять событие: он обязан позволить
+    его восстановить, а получается это далеко не всегда.
+    """
+    from . import remains as cat
+    from .systems import remains as engine
+
+    rows = ["СЛЕДЫ БЕД", ""]
+    traces = list(world.traces.values())
+    if not traces:
+        rows.append("  Ни одна беда этого мира не оставила следов.")
+        return "\n".join(rows)
+
+    by_kind, by_state, by_known = {}, {}, {}
+    for trace in traces:
+        by_kind[trace.kind] = by_kind.get(trace.kind, 0) + 1
+        by_state[trace.state] = by_state.get(trace.state, 0) + 1
+        by_known[trace.knowledge] = by_known.get(trace.knowledge, 0) + 1
+    live = sum(1 for trace in traces if trace.life >= 4)
+    found = sum(1 for trace in traces if trace.found is not None)
+    quarrels = sum(1 for trace in traces if trace.quarrel)
+    echoes = sum(1 for event in world.events if event.kind == "trace_echo")
+
+    rows.append("  Следов в мире: %d от %d бед."
+                % (len(traces),
+                   len({trace.calamity_id for trace in traces})))
+    rows.append("  По родам: %s."
+                % ", ".join("%s — %d" % (kind, by_kind[kind])
+                            for kind in cat.KINDS if kind in by_kind))
+    rows.append("  Что с ними стало: %s."
+                % ", ".join("%s — %d" % (state, by_state[state])
+                            for state in cat.STATES if state in by_state))
+    rows.append("  Знают о них: %s."
+                % ", ".join("%s — %d" % (name, by_known[name])
+                            for name in cat.KNOWLEDGE if name in by_known))
+    rows.append("  Нашли за всю историю %d; за %d стоит что-то живое; "
+                "спорят между собой %d; отозвалось %d."
+                % (found, live, quarrels, echoes))
+    rows.append("")
+
+    # Беды идут по числу следов: у мира есть беды, о которых остался один
+    # камень, и беды, о которых остался целый слой.
+    by_calamity = {}
+    for trace in traces:
+        by_calamity.setdefault(trace.calamity_id, []).append(trace)
+    order = sorted(by_calamity.items(),
+                   key=lambda pair: (-len(pair[1]), pair[0]))
+    for calamity_id, group in order[:14]:
+        calamity = world.calamities.get(calamity_id)
+        if calamity is None:
+            continue
+        rows.extend(_remains_block(world, calamity, group, cat, engine))
+
+    rest = len(order) - 14
+    if rest > 0:
+        rows.append("  ...и ещё %d бед, от которых осталось по следу-двум."
+                    % rest)
+        rows.append("")
+    return "\n".join(rows)
+
+
+def _remains_block(world, calamity, group, cat, engine) -> list:
+    """Отпечаток одной беды и то, что по нему можно восстановить."""
+    end = calamity.end.year if calamity.end else calamity.start.year
+    head = "%s — %d год, следов %d" % (calamity.name, end, len(group))
+    rows = ["  %s" % head, "  " + "-" * (len(head) + 2)]
+    for trace in group:
+        line = "      %s (%s): %s" % (trace.key, trace.kind, trace.state)
+        line += "; %s" % trace.knowledge
+        if trace.life >= 4:
+            line += "; %s" % cat.LIFE_NAMES.get(trace.life, "")
+        rows.append(line)
+        rows.append("          %s" % trace.says)
+        if trace.reason:
+            rows.append("          отчего это здесь: %s" % trace.reason)
+        if trace.belief:
+            rows.append("          а думают так: %s" % trace.belief)
+        if trace.layers:
+            rows.append("          слои: %s"
+                        % "; ".join("%d — %s" % (int(row.get("год", 0)),
+                                                 row.get("что", ""))
+                                    for row in trace.layers))
+        if trace.found is not None:
+            rows.append("          нашли в %d году: %s"
+                        % (trace.found.year, trace.found_how))
+        if trace.reading:
+            rows.append("          толкуют: %s" % trace.reading)
+        if trace.quarrel:
+            rows.append("          спорит с другими: %s" % trace.quarrel)
+        if trace.lost:
+            rows.append("          место: %s" % trace.lost)
+
+    answer = engine.reconstruct(world, calamity, world.total_years)
+    rows.append("      ЧТО ИЗ ЭТОГО ВОССТАНОВИЛИ К КОНЦУ ЛЕТОПИСИ")
+    for question in cat.QUESTIONS:
+        rows.append("          %-24s %s" % (question, answer.get(question)))
+    rows.append("")
+    return rows
+
+
 def full_text(world) -> str:
     """Полный экспорт: летопись + справочники."""
     return "\n\n".join((
@@ -4343,6 +4449,7 @@ def full_text(world) -> str:
         render_disasters(world),
         render_invasions(world),
         render_subjects(world),
+        render_remains(world),
         render_sagas(world),
         render_causes(world),
         render_memory(world),

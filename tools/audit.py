@@ -719,6 +719,106 @@ def m_sub_inner(world):
     return _share(inner, len(rows))
 
 
+# --- следы бед ---------------------------------------------------------------
+
+def _traces(world):
+    return list(world.traces.values())
+
+
+def m_tr_per_calamity(world):
+    """Сколько следов остаётся от одной заметной беды."""
+    from worldgen.systems import remains as engine
+    heavy = [item for item in world.calamities.values()
+             if item.severity >= engine.IMPRINT_FROM]
+    if not heavy:
+        return None
+    return round(len(_traces(world)) / float(len(heavy)), 2)
+
+
+def m_tr_kinds(world):
+    """Родов следа в ходу: не одни могилы на весь мир."""
+    return len({trace.kind for trace in _traces(world)})
+
+
+def m_tr_indirect(world):
+    """Доля косвенных следов — тех, что не кричат о беде."""
+    rows = _traces(world)
+    return _share(sum(1 for trace in rows if not trace.direct), len(rows))
+
+
+def m_tr_whole(world):
+    """Доля следов, дошедших целыми."""
+    from worldgen import remains as cat
+    rows = _traces(world)
+    return _share(sum(1 for trace in rows if trace.state == cat.FRESH),
+                  len(rows))
+
+
+def m_tr_gone(world):
+    """Доля следов, от которых не осталось ничего."""
+    from worldgen import remains as cat
+    rows = _traces(world)
+    return _share(sum(1 for trace in rows if trace.state == cat.GONE),
+                  len(rows))
+
+
+def m_tr_unknown(world):
+    """Доля следов, о которых так и не узнали."""
+    from worldgen import remains as cat
+    rows = _traces(world)
+    return _share(sum(1 for trace in rows
+                      if trace.knowledge == cat.FORGOTTEN), len(rows))
+
+
+def m_tr_studied(world):
+    """Доля разобранных учёными: их не должно быть большинство."""
+    from worldgen import remains as cat
+    rows = _traces(world)
+    return _share(sum(1 for trace in rows
+                      if trace.knowledge == cat.STUDIED), len(rows))
+
+
+def m_tr_live(world):
+    """Доля следов, за которыми стоит что-то живое."""
+    rows = _traces(world)
+    return _share(sum(1 for trace in rows if trace.life >= 4), len(rows))
+
+
+def m_tr_echo(world):
+    """Сколько раз след отозвался новой бедой."""
+    return sum(1 for event in world.events if event.kind == "trace_echo")
+
+
+def m_tr_quarrel(world):
+    """Доля следов, которые спорят с другими о том же дне."""
+    rows = _traces(world)
+    return _share(sum(1 for trace in rows if trace.quarrel), len(rows))
+
+
+def m_tr_dark(world):
+    """Доля бед, о которых к концу истории нельзя сказать почти ничего."""
+    from worldgen.systems import remains as engine
+    heavy = [item for item in world.calamities.values()
+             if item.severity >= engine.IMPRINT_FROM]
+    if not heavy:
+        return None
+    dark = sum(1 for item in heavy
+               if engine.known_share(world, item, world.total_years) <= 0.25)
+    return _share(dark, len(heavy))
+
+
+def m_tr_clear(world):
+    """Доля бед, восстановленных почти целиком."""
+    from worldgen.systems import remains as engine
+    heavy = [item for item in world.calamities.values()
+             if item.severity >= engine.IMPRINT_FROM]
+    if not heavy:
+        return None
+    clear = sum(1 for item in heavy
+                if engine.known_share(world, item, world.total_years) >= 0.75)
+    return _share(clear, len(heavy))
+
+
 MEASURES = (
     Measure("были", "не про судьбу мира", m_story_small, 0.82, 0.98,
             "доля", "девять из десяти былей не спасают мир"),
@@ -896,6 +996,32 @@ MEASURES = (
     Measure("субъекты", "дело важнее для него, чем для мира", m_sub_inner,
             0.2, None, "доля",
             "мир не заметил, а он после этого стал другим"),
+    Measure("следы", "следов на беду", m_tr_per_calamity, 1.0, None, "штук",
+            "всякая заметная беда оставляет по себе хоть что-то"),
+    Measure("следы", "родов следа в ходу", m_tr_kinds, 6, None, "из 12",
+            "не одни могилы: обычай и кровь тоже след", min_years=3000),
+    Measure("следы", "косвенных", m_tr_indirect, 0.25, None, "доля",
+            "самые интересные следы не кричат о беде"),
+    Measure("следы", "дошло целыми", m_tr_whole, None, 0.8, "доля",
+            "время берёт своё"),
+    Measure("следы", "утрачено", m_tr_gone, 0.02, None, "доля",
+            "часть следов не доживает ни до кого", min_years=3000),
+    Measure("следы", "о которых не знают", m_tr_unknown, 0.15, None, "доля",
+            "в земле лежит больше, чем находят"),
+    Measure("следы", "разобрано учёными", m_tr_studied, None, 0.45, "доля",
+            "объяснить удаётся не всё и не всем"),
+    Measure("следы", "живых следов", m_tr_live, None, 0.18, "доля",
+            "не в каждой пещере сидит древний демон"),
+    Measure("следы", "отозвалось", m_tr_echo, None, 6, "штук",
+            "эхо беды — редкость, а не погода", min_years=3000),
+    Measure("следы", "спорят между собой", m_tr_quarrel, 0.01, None, "доля",
+            "свидетельства не обязаны сходиться", min_years=3000),
+    Measure("следы", "бед, о которых ничего не восстановить", m_tr_dark,
+            0.1, 0.92, "доля", "прошлое темнеет, но не до черноты",
+            min_years=3000),
+    Measure("следы", "бед, восстановленных целиком", m_tr_clear, None, 0.5,
+            "доля", "полная ясность о древности — подделка",
+            min_years=3000),
     Measure("мир", "правил переменилось", m_rules_changed, None, 5, "из 7",
             "мир меняется от самых глубоких бед, но не каждый век"),
     Measure("мир", "исходов из земель", m_exodus, 1, None, "штук",

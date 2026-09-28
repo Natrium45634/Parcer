@@ -470,7 +470,7 @@ TRACES = (
               answers=(Q_WHERE,)),
     TraceKind("камень не отсюда", GROUND,
               "порода, какой нет во всей округе",
-              "её принесло или выбросило, а значит, было чем",
+              "его принесло или выбросило, а значит, было чем",
               evidence=0.5, truth=0.8, weight=0.7,
               keys=("eruption", "mana_storm", "planar_rift", "sundering"),
               answers=(Q_WHERE, Q_WHO)),
@@ -618,7 +618,16 @@ LOST_FOUND = "найдено заново"
 
 LOST_STATES = (LOST_UNKNOWN, LOST_LEGEND, LOST_SHUT, LOST_FOUND)
 
-# Как его находят через века.
+# Как его находят через века. Земля находится иначе, чем черепок:
+# её замечают, сверяя карты, а не выкапывая.
+FIND_BY_GROUND = (
+    "заметили, сверив старую карту с нынешней",
+    "заметили, когда по этим местам впервые провели дорогу",
+    "заметили пастухи: скот обходит это место кругом",
+    "заметили с перевала, когда сошёл снег",
+    "заметили по тому, что здесь не садится ни одна птица",
+)
+
 FINDINGS = (
     "нашли по старому дорожному знаку",
     "нашла засуха: вода ушла, и показалась кладка",
@@ -670,6 +679,6 @@ __all__ = [
     "TraceKind", "TRACES", "TRACES_BY_KEY", "traces_for",
     "SEAL_REASONS", "SEAL_BELIEFS", "SURVIVAL_REASONS", "SURVIVOR_TURNS",
     "RUIN_KINDS", "RUIN_LAYERS", "LOST_STATES", "LOST_UNKNOWN",
-    "LOST_LEGEND", "LOST_SHUT", "LOST_FOUND", "FINDINGS", "READINGS",
+    "LOST_LEGEND", "LOST_SHUT", "LOST_FOUND", "FINDINGS", "FIND_BY_GROUND", "READINGS",
     "QUARRELS",
 ]

@@ -1878,6 +1878,124 @@ def check_subjects(world, seed: str) -> list:
     return problems
 
 
+def check_traces(world, seed: str) -> list:
+    """Следы бед: сходится ли археология мира сама с собой.
+
+    Здесь ловится то, что ломается тихо: след, появившийся раньше своей
+    беды; находка раньше самого следа; найденный след, о котором никто
+    не знает; слои руины, идущие вспять; печать с причиной, которой нет
+    в каталоге.
+    """
+    from worldgen import remains as cat
+
+    problems = []
+    readings = set(cat.READINGS)
+    findings = set(cat.FINDINGS) | set(cat.FIND_BY_GROUND)
+
+    for trace in world.traces.values():
+        name = trace.name or trace.id
+        row = cat.TRACES_BY_KEY.get(trace.key)
+        if row is None:
+            problems.append("сид «%s»: след «%s» неведомого вида «%s»"
+                            % (seed, name, trace.key))
+            break
+        if trace.kind != row.kind:
+            problems.append("сид «%s»: у следа «%s» род не тот, что в "
+                            "каталоге" % (seed, name))
+            break
+        if trace.state not in cat.STATES:
+            problems.append("сид «%s»: у следа «%s» неведомое состояние «%s»"
+                            % (seed, name, trace.state))
+            break
+        if trace.knowledge not in cat.KNOWLEDGE:
+            problems.append("сид «%s»: о следе «%s» знают неведомо как «%s»"
+                            % (seed, name, trace.knowledge))
+            break
+        if not 0 <= int(trace.life) <= 6:
+            problems.append("сид «%s»: у следа «%s» немыслимая живость %s"
+                            % (seed, name, trace.life))
+            break
+
+        calamity = world.calamities.get(trace.calamity_id)
+        if calamity is None:
+            problems.append("сид «%s»: след «%s» остался от беды, которой "
+                            "не было" % (seed, name))
+            break
+        if trace.made is None or trace.made.ordinal < calamity.start.ordinal:
+            problems.append("сид «%s»: след «%s» появился раньше своей беды"
+                            % (seed, name))
+            break
+        if trace.made.year > world.total_years:
+            problems.append("сид «%s»: след «%s» появился после конца "
+                            "летописи" % (seed, name))
+            break
+        if trace.found is not None:
+            if trace.found.ordinal < trace.made.ordinal:
+                problems.append("сид «%s»: след «%s» нашли раньше, чем он "
+                                "появился" % (seed, name))
+                break
+            if trace.knowledge == cat.FORGOTTEN:
+                problems.append("сид «%s»: след «%s» нашли, и о нём всё ещё "
+                                "не знают" % (seed, name))
+                break
+
+        if trace.region_id and trace.region_id not in world.regions:
+            problems.append("сид «%s»: след «%s» лежит в пустой земле"
+                            % (seed, name))
+            break
+        if trace.relic_id and trace.relic_id not in world.relics:
+            problems.append("сид «%s»: след «%s» держится за пустую реликвию"
+                            % (seed, name))
+            break
+
+        unknown = [item for item in trace.answers
+                   if item not in cat.QUESTIONS]
+        if unknown:
+            problems.append("сид «%s»: след «%s» отвечает на вопрос, "
+                            "которого нет" % (seed, name))
+            break
+        if trace.kind == cat.SEAL and trace.reason \
+                and trace.reason not in cat.SEAL_REASONS:
+            problems.append("сид «%s»: у печати «%s» причина не из каталога"
+                            % (seed, name))
+            break
+        if trace.kind == cat.SURVIVOR and trace.reason \
+                and trace.reason not in cat.SURVIVAL_REASONS:
+            problems.append("сид «%s»: у уцелевшего «%s» причина не из "
+                            "каталога" % (seed, name))
+            break
+        if trace.reading and trace.reading not in readings:
+            problems.append("сид «%s»: след «%s» толкуют неведомо как"
+                            % (seed, name))
+            break
+        if trace.quarrel and trace.quarrel not in cat.QUARRELS:
+            problems.append("сид «%s»: у следа «%s» неведомое расхождение"
+                            % (seed, name))
+            break
+        if trace.found_how and trace.found_how not in findings:
+            problems.append("сид «%s»: след «%s» нашли неведомо как"
+                            % (seed, name))
+            break
+        if trace.lost and trace.lost not in cat.LOST_STATES:
+            problems.append("сид «%s»: у следа «%s» неведомое состояние "
+                            "места" % (seed, name))
+            break
+
+        last = 0
+        broken = False
+        for row_layer in trace.layers:
+            when = int(row_layer.get("год", 0))
+            if when < last or when > trace.made.year:
+                problems.append("сид «%s»: у следа «%s» слои идут вспять"
+                                % (seed, name))
+                broken = True
+                break
+            last = when
+        if broken:
+            break
+    return problems
+
+
 def check_year_slices(world, seed: str) -> list:
     """Срез мира на год собирается для любого года, а не только для конца.
 
@@ -2540,6 +2658,28 @@ def check_catalogues() -> list:
     miss("роды, которые возвращаются", list(sub_sys.RETURN_KINDS),
          set(sub.KINDS))
 
+    # Следы бед: ключ беды, семья и род должны существовать, иначе целый
+    # вид следа никогда не выпадет.
+    from worldgen import remains as rem
+    miss("ключи бед у следов",
+         [key for item in rem.TRACES for key in item.keys], keys)
+    miss("семьи бед у следов",
+         [name for item in rem.TRACES for name in item.families],
+         set(cat.KIND_NAMES))
+    miss("роды следов",
+         [item.kind for item in rem.TRACES], set(rem.KINDS))
+    miss("вопросы у следов",
+         [name for item in rem.TRACES for name in item.answers],
+         set(rem.QUESTIONS))
+    miss("что нужно следу",
+         [item.needs for item in rem.TRACES if item.needs],
+         {"город", "держава", "войско", "вождь", "вера"})
+    miss("роды в скорости ветшания", list(rem.DECAY_BY_KIND), set(rem.KINDS))
+    if set(rem.KINDS) - set(rem.DECAY_BY_KIND):
+        problems.append("каталог следов: у рода нет скорости ветшания")
+    if len({item.key for item in rem.TRACES}) != len(rem.TRACES):
+        problems.append("каталог следов: два следа с одним ключом")
+
     # Имена нашествий привязаны к роду пришедших: ссылка на несуществующий
     # род сделала бы имя общим, и рой снова звался бы «Разбитой Короной».
     from worldgen import invasion as inv
@@ -2605,6 +2745,7 @@ def main() -> int:
         failures.extend(check_disasters(first, seed))
         failures.extend(check_invasions(first, seed))
         failures.extend(check_subjects(first, seed))
+        failures.extend(check_traces(first, seed))
         failures.extend(check_year_slices(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
@@ -2666,6 +2807,7 @@ def main() -> int:
             failures.extend(check_disasters(first, "карта/" + seed))
             failures.extend(check_invasions(first, "карта/" + seed))
             failures.extend(check_subjects(first, "карта/" + seed))
+            failures.extend(check_traces(first, "карта/" + seed))
             failures.extend(check_year_slices(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
@@ -2723,7 +2865,7 @@ def main() -> int:
         for check in (check_nobility, check_wars, check_politics,
                       check_calamities, check_disasters,
                       check_invasions, check_subjects,
-                      check_year_slices,
+                      check_traces, check_year_slices,
                       check_faiths, check_nations,
                       check_tongues, check_embassies, check_things,
                       check_causes, check_people_memory, check_migrations,
