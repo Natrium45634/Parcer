@@ -1826,7 +1826,7 @@ def check_subjects(world, seed: str) -> list:
                                 "на неведомую" % (seed, name))
                 break
         for turn in item.temper_turns:
-            if turn.get("стало") not in cat.TEMPERS:
+            if turn.get("стало") not in cat.TEMPER_WORDS:
                 problems.append("сид «%s»: у субъекта «%s» неведомый нрав "
                                 "«%s»" % (seed, name, turn.get("стало")))
                 break
@@ -1840,7 +1840,7 @@ def check_subjects(world, seed: str) -> list:
         for row in item.legacy:
             kind = row.get("род", "")
             if kind not in cat.LEGACY_KINDS \
-                    or row.get("что") not in cat.LEGACIES.get(kind, ()):
+                    or row.get("что") not in cat.LEGACY_WORDS.get(kind, ()):
                 problems.append("сид «%s»: у субъекта «%s» наследие "
                                 "неведомого рода" % (seed, name))
                 break

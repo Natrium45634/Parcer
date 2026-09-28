@@ -448,27 +448,38 @@ def nonhuman(world, out) -> None:
     weight = {name: index for index, name in enumerate(sub.RUNGS)}
     item = max(rows, key=lambda one: (weight.get(one.rung, 0),
                                       one.years_active, one.id))
+    she = getattr(item, "sex", "m") == "f"
+
+    def form(male, female):
+        """Историческим лицом бывает и она: «вернулся» тут не годится."""
+        return female if she else male
+
     out("  %s — %s, %s" % (item.name, item.kind, item.rung))
     out("    в летописи с %d года: %s" % (item.entered.year, item.entry_why))
-    line = "    появился: %s" % (item.origin or "неизвестно как")
+    line = "    %s: %s" % (
+        form("появился", "появилась"),
+        sub.form(sub.ORIGIN_FORMS.get(item.origin, item.origin),
+                 getattr(item, "sex", "m")) or "неизвестно как")
     if item.origin_by:
-        line += "; позвал его %s, ради того чтобы %s" % (item.origin_by,
-                                                         item.origin_why)
+        line += "; позвал %s %s, ради того чтобы %s" % (
+            form("его", "её"), item.origin_by, item.origin_why)
     out(line)
     unclear = ["%s — %s" % (fact, state) for fact, state in item.facts.items()
                if state not in (sub.FACT_KNOWN, sub.FACT_NONE)]
     if unclear:
-        out("    о нём неясно: %s" % "; ".join(unclear))
-    out("    вмешивался: %s"
-        % ", ".join("%d–%d" % (int(span.get("с", 0)), int(span.get("по", 0)))
-                    for span in item.spans))
+        out("    о %s неясно: %s" % (form("нём", "ней"), "; ".join(unclear)))
+    out("    %s: %s" % (form("вмешивался", "вмешивалась"),
+        ", ".join("%d–%d" % (int(span.get("с", 0)), int(span.get("по", 0)))
+                  for span in item.spans)))
     for quiet in item.quiet:
-        out("    молчал %d–%s: %s" % (int(quiet.get("с", 0)),
-                                      int(quiet.get("по", 0)) or "до конца",
-                                      quiet.get("отчего", "")))
+        out("    %s %d–%s: %s" % (form("молчал", "молчала"),
+                                  int(quiet.get("с", 0)),
+                                  int(quiet.get("по", 0)) or "до конца",
+                                  quiet.get("отчего", "")))
     # У бога это не желание, а мысль, ради которой он есть.
     divine = item.kind == sub.GOD
-    out("    %s: %s%s" % ("ради чего он есть" if divine else "хотел",
+    out("    %s: %s%s" % ("ради чего %s есть" % form("он", "она")
+                          if divine else form("хотел", "хотела"),
                           item.wish_first,
                           (" → %s" % item.wish)
                           if item.wish != item.wish_first else ""))
@@ -480,10 +491,14 @@ def nonhuman(world, out) -> None:
                turn.get("стало", ""), turn.get("отчего", "")))
     for mark in item.marks:
         if int(mark.get("себе", 0)) > int(mark.get("мир", 0)):
-            out("    %d: %s — миру на %d, ему самому на %d"
+            out("    %d: %s — миру на %d, %s на %d"
                 % (int(mark.get("год", 0)), mark.get("что", ""),
-                   int(mark.get("мир", 0)), int(mark.get("себе", 0))))
-    out("    кончил: %s%s" % (item.end or item.status,
+                   int(mark.get("мир", 0)), form("ему самому", "ей самой"),
+                   int(mark.get("себе", 0))))
+    out("    %s: %s%s" % (form("кончил", "кончила"),
+                          sub.form(sub.END_FORMS.get(item.end, item.end),
+                                   getattr(item, "sex", "m"))
+                          or item.status,
                               (" (%d год)" % item.ended.year)
                               if item.ended else ""))
     if item.named_year:

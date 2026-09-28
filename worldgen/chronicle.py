@@ -3828,59 +3828,76 @@ def render_subjects(world) -> str:
         for item in rest[:150]:
             rows.append("    %-28s %-14s %-4d %-22s %s"
                         % (item.name[:28], item.kind[:14], item.entered.year,
-                           item.rung, item.end or item.status))
+                           item.rung,
+                           cat.form(cat.END_FORMS.get(item.end, item.end),
+                                    getattr(item, "sex", "m"))
+                           or item.status))
         rows.append("")
     return "\n".join(rows)
 
 
 def _subject_block(world, item, cat) -> list:
     """Один субъект: откуда взялся, чего хотел и что от него осталось."""
+    # Субъектом истории бывает и женщина, и богиня: «вошёл» о ней сказать
+    # нельзя, поэтому глаголы стоят парами.
+    she = getattr(item, "sex", "m") == "f"
+
+    def form(male: str, female: str) -> str:
+        return female if she else male
+
     head = "%s — %s, %s" % (item.name, item.kind, item.rung)
     rows = ["  %s" % head, "  " + "-" * (len(head) + 2)]
-    rows.append("      вошёл в летопись в %d году: %s"
-                % (item.entered.year, item.entry_why))
-    origin = "      появился: %s" % (item.origin or "неизвестно как")
+    rows.append("      %s в летопись в %d году: %s"
+                % (form("вошёл", "вошла"), item.entered.year, item.entry_why))
+    origin = "      %s: %s" % (
+        form("появился", "появилась"),
+        cat.form(cat.ORIGIN_FORMS.get(item.origin, item.origin),
+                 getattr(item, "sex", "m")) or "неизвестно как")
     if item.origin_year:
         origin += " (%d год)" % item.origin_year
     if item.origin_by:
-        origin += "; позвал его %s, ради того чтобы %s" % (item.origin_by,
-                                                           item.origin_why)
+        # Зовущий тут третий, и глагол согласован с ним, а не с субъектом.
+        origin += "; позвал %s %s, ради того чтобы %s" % (
+            form("его", "её"), item.origin_by, item.origin_why)
     rows.append(origin)
 
     unclear = ["%s — %s" % (fact, state)
                for fact, state in item.facts.items()
                if state not in (cat.FACT_KNOWN, cat.FACT_NONE)]
     if unclear:
-        rows.append("      о нём неясно: %s" % "; ".join(unclear))
+        rows.append("      о %s неясно: %s" % (form("нём", "ней"),
+                                               "; ".join(unclear)))
 
     spans = ["%d–%d" % (int(span.get("с", 0)), int(span.get("по", 0)))
              for span in item.spans]
     if spans:
-        rows.append("      вмешивался в историю: %s — всего %s"
-                    % (", ".join(spans), years_text(item.years_active)))
+        rows.append("      %s в историю: %s — всего %s"
+                    % (form("вмешивался", "вмешивалась"), ", ".join(spans),
+                       years_text(item.years_active)))
     for quiet in item.quiet:
-        rows.append("      молчал %d–%s: %s"
-                    % (int(quiet.get("с", 0)),
+        rows.append("      %s %d–%s: %s"
+                    % (form("молчал", "молчала"), int(quiet.get("с", 0)),
                        int(quiet.get("по", 0)) or "до конца",
                        quiet.get("отчего", "")))
 
     # У бога это не желание, а мысль, ради которой он вообще есть:
     # «хотел раздувать огонь» и «огонь не зол и не добр» — разные вещи.
     divine = item.kind == cat.GOD
-    wish = "      %s: %s" % ("ради чего он есть" if divine else "хотел",
-                             item.wish_first)
+    wish = "      %s: %s" % ("ради чего %s есть" % form("он", "она") if divine
+                             else form("хотел", "хотела"), item.wish_first)
     if item.wish != item.wish_first:
         wish += " → %s" % item.wish
     rows.append(wish)
     for turn in item.wish_turns:
-        rows.append("      %d: %s — и стал хотеть: %s"
+        rows.append("      %d: %s — и %s хотеть: %s"
                     % (int(turn.get("год", 0)), turn.get("отчего", ""),
-                       turn.get("стало", "")))
+                       form("стал", "стала"), turn.get("стало", "")))
     rows.append("      %s: %s" % ("что с этой мыслью стало" if divine
                                   else "чем кончилась эта цель",
                                   item.wish_state))
 
-    rows.append("      каков он был: %s" % item.temper)
+    rows.append("      %s: %s" % (form("каков он был",
+                                       "какова она была"), item.temper))
     for turn in item.temper_turns:
         rows.append("      %d: %s → %s, оттого что %s (внутри: %s)"
                     % (int(turn.get("год", 0)), turn.get("было", ""),
@@ -3895,10 +3912,12 @@ def _subject_block(world, item, cat) -> list:
              if int(mark.get("себе", 0)) > int(mark.get("мир", 0))
              and int(mark.get("год", 0)) not in said]
     for mark in heavy[:3]:
-        rows.append("      %d: %s — миру на %d, ему самому на %d, "
+        rows.append("      %d: %s — миру на %d, %s на %d, "
                     "вперёд на %d"
                     % (int(mark.get("год", 0)), mark.get("что", ""),
-                       int(mark.get("мир", 0)), int(mark.get("себе", 0)),
+                       int(mark.get("мир", 0)),
+                       form("ему самому", "ей самой"),
+                       int(mark.get("себе", 0)),
                        int(mark.get("вперёд", 0))))
 
     for tie in item.ties[:3]:
@@ -3907,9 +3926,11 @@ def _subject_block(world, item, cat) -> list:
                        int(tie.get("с какого года", 0))))
 
     if item.end:
-        rows.append("      кончил: %s%s"
-                    % (item.end,
-                       (" (%d год)" % item.ended.year) if item.ended else ""))
+        rows.append("      %s: %s%s" % (
+                    form("кончил", "кончила"),
+                    cat.form(cat.END_FORMS.get(item.end, item.end),
+                             getattr(item, "sex", "m")),
+                    (" (%d год)" % item.ended.year) if item.ended else ""))
     if item.named_year:
         rows.append("      опознали только в %d году: %s"
                     % (item.named_year, item.named_how))

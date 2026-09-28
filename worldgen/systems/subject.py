@@ -111,13 +111,17 @@ def _from_invasions(ctx, year: int, taken: dict) -> None:
         rng = ctx.rng("subject", "invader", invasion.id)
         kind = _kind_of_invader(invasion.kind)
         subject = _make(ctx, rng, year, taken,
-                        name=figure.name, kind=kind,
+                        name=figure.name, kind=kind, sex=figure.sex,
                         figure_id=figure.id, invasion_id=invasion.id,
                         race_id=figure.race_id,
-                        entry_why="повёл нашествие по имени «%s»"
-                                  % (invasion.title or calamity.name))
+                        entry_why="%s нашествие по имени «%s»"
+                                  % ("повела" if figure.sex == "f"
+                                     else "повёл",
+                                     invasion.title or calamity.name))
         subject.wish_first = subject.wish = _wish_for(rng, kind, invasion.goal)
-        subject.notes.append("пришёл с бедой по имени «%s»" % calamity.name)
+        subject.notes.append("%s с бедой по имени «%s»"
+                             % ("пришла" if figure.sex == "f" else "пришёл",
+                                calamity.name))
         _tell_event(ctx, subject, rng, year)
 
 
@@ -136,7 +140,7 @@ def _from_monsters(ctx, year: int, taken: dict) -> None:
         kind = sub.DRAGON if "дракон" in (monster.breed or "") else sub.BEAST
         subject = _make(ctx, rng, year, taken,
                         name=monster.name, kind=kind,
-                        monster_id=monster.id,
+                        sex=monster.gender or "m", monster_id=monster.id,
                         entry_why=texts.beast_entry(rng, monster))
         subject.wish_first = subject.wish = _wish_for(rng, kind, "")
         _tell_event(ctx, subject, rng, year)
@@ -156,8 +160,10 @@ def _from_deities(ctx, year: int, taken: dict) -> None:
         rng = ctx.rng("subject", "god", deity.id)
         subject = _make(ctx, rng, year, taken,
                         name=deity.full_name, kind=sub.GOD,
-                        deity_id=deity.id,
-                        entry_why="впервые явился, и об этом записали")
+                        sex=deity.sex or "m", deity_id=deity.id,
+                        entry_why="впервые %s, и об этом записали"
+                                  % ("явилась" if deity.sex == "f"
+                                     else "явился"))
         # Бог хочет не «веры вообще»: у него есть одна мысль, ради
         # которой он есть, и её ведёт `systems/divinity`.
         head = world.godhead_of(deity.id)
@@ -181,9 +187,10 @@ def _from_figures(ctx, year: int, taken: dict) -> None:
         rng = ctx.rng("subject", "person", record.figure_id)
         race = races_mod.RACES_BY_ID.get(figure.race_id)
         subject = _make(ctx, rng, year, taken,
-                        name=figure.name, kind=sub.PEOPLE,
+                        name=figure.name, kind=sub.PEOPLE, sex=figure.sex,
                         figure_id=figure.id, race_id=figure.race_id,
-                        entry_why=texts.person_entry(rng, record))
+                        entry_why=texts.person_entry(rng, record,
+                                                     figure.sex))
         subject.wish_first = subject.wish = _person_wish(ctx, figure)
         subject.rung = sub.RUNG_BY_LEVEL.get(record.level, sub.RUNG_HISTORIC)
         if race is not None:
@@ -291,25 +298,30 @@ def _make(ctx, rng, year: int, taken: dict = None, **kwargs):
     subject.facts = {
         "появление на свет": sub.FACT_KNOWN if subject.origin_year
         else (sub.FACT_UNKNOWN if asks else sub.FACT_NONE),
-        "откуда он": sub.FACT_KNOWN if subject.origin_by
+        "откуда родом": sub.FACT_KNOWN if subject.origin_by
         else rng.weighted([(sub.FACT_UNKNOWN, 2.0), (sub.FACT_MYTH, 1.0),
                            (sub.FACT_DISPUTED, 0.8)]),
         "первое появление в летописи": sub.FACT_KNOWN,
-        "чего он хотел": rng.weighted([(sub.FACT_KNOWN, 2.0),
-                                       (sub.FACT_DISPUTED, 1.0),
-                                       (sub.FACT_UNKNOWN, 0.5)]),
+        "ради чего всё это": rng.weighted([(sub.FACT_KNOWN, 2.0),
+                                           (sub.FACT_DISPUTED, 1.0),
+                                           (sub.FACT_UNKNOWN, 0.5)]),
     }
     if not subject.entry_why:
-        subject.entry_why = rng.weighted(list(sub.ENTRIES))
-    _mark(subject, year, "вошёл в летопись: %s" % subject.entry_why,
+        subject.entry_why = sub.form(rng.weighted(list(sub.ENTRIES)),
+                                     subject.sex)
+    _mark(subject, year,
+          "%s в летопись: %s" % ("вошла" if subject.sex == "f" else "вошёл",
+                                 subject.entry_why),
           rng.randint(1, 3), rng.randint(1, 2), rng.randint(1, 2))
     if subject.origin_by:
         _tie(subject, subject.origin_by, "позвал его в мир",
              subject.origin_year or year)
-    subject.temper = rng.choice(sub.TEMPERS)
+    subject.temper = sub.form(rng.choice(sub.TEMPERS), subject.sex)
     subject.status = sub.ACTING
-    subject.spans.append({"с": int(year), "по": int(year),
-                          "чем занят": "вошёл в летопись"})
+    subject.spans.append(
+        {"с": int(year), "по": int(year),
+         "чем занят": "вошла в летопись" if subject.sex == "f"
+                      else "вошёл в летопись"})
     if taken is not None:
         # Вождь нашествия — заодно и человек из реестра: иначе его занесли
         # бы дважды, вторым разом как просто тяжёлое имя.
@@ -411,13 +423,17 @@ def _turn_temper(ctx, subject, rng, year: int) -> None:
     if len(subject.temper_turns) >= TEMPER_MAX:
         return
     was = subject.temper
-    now = rng.choice([item for item in sub.TEMPERS if item != was])
-    inner = rng.choice(sub.INNER)
-    why = rng.choice(texts.TEMPER_CAUSES)
+    sex = subject.sex
+    now = sub.form(rng.choice([pair for pair in sub.TEMPERS
+                               if sub.form(pair, sex) != was]), sex)
+    inner = sub.form(rng.choice(sub.INNER), sex)
+    why = sub.form(rng.choice(texts.TEMPER_CAUSES), sex)
     subject.temper_turns.append({"год": int(year), "было": was, "стало": now,
                                  "отчего": why, "внутри": inner})
     subject.temper = now
-    _mark(subject, year, "переменился: %s" % why,
+    _mark(subject, year,
+          "%s: %s" % ("переменилась" if subject.sex == "f"
+                      else "переменился", why),
           rng.randint(0, 1), 3, rng.randint(1, 2))
     world = ctx.world
     title, text = texts.temper_turned(rng, subject, was, now, why, inner)
@@ -435,12 +451,15 @@ def _turn_wish(ctx, subject, rng, year: int) -> None:
     fits = [row for row in sub.WISH_TURNS if row[1] == subject.wish]
     if not fits:
         return
-    why, was, now = rng.choice(fits)
+    reason, was, now = rng.choice(fits)
+    why = sub.form(reason, subject.sex)
     subject.wish_turns.append({"год": int(year), "было": was, "стало": now,
                                "отчего": why})
     subject.wish = now
     subject.wish_state = sub.GOAL_SWAPPED
-    _mark(subject, year, "стал хотеть другого: %s" % now,
+    _mark(subject, year,
+          "%s хотеть другого: %s" % ("стала" if subject.sex == "f"
+                                     else "стал", now),
           rng.randint(1, 2), 3, rng.randint(2, 3))
     world = ctx.world
     title, text = texts.wish_turned(rng, subject, why, was, now)
@@ -455,14 +474,16 @@ def _go_quiet(ctx, subject, rng, year: int) -> None:
     """Он умолк — и это не смерть, а перерыв с причиной."""
     # Дважды подряд «был не в этом мире» — не история, а заевшая кость.
     used = {row.get("отчего", "") for row in subject.quiet}
-    left = [item for item in sub.QUIET_REASONS if item not in used]
-    why = rng.choice(left or list(sub.QUIET_REASONS))
+    left = [pair for pair in sub.QUIET_REASONS
+            if sub.form(pair, subject.sex) not in used]
+    why = sub.form(rng.choice(left or list(sub.QUIET_REASONS)), subject.sex)
     subject.spans[-1]["по"] = int(year)
     subject.quiet.append({"с": int(year), "по": 0, "отчего": why})
     subject.status = rng.weighted([(sub.DORMANT, 2.0), (sub.MISSING, 1.2),
                                    (sub.EXILED, 0.8)])
     subject.notes.append("%d: %s" % (year, why))
-    _mark(subject, year, "умолк: %s" % why,
+    _mark(subject, year,
+          "%s: %s" % ("умолкла" if subject.sex == "f" else "умолк", why),
           rng.randint(2, 3), rng.randint(0, 2), 3)
     world = ctx.world
     title, text = texts.went_quiet(rng, subject, why)
@@ -494,11 +515,17 @@ def _maybe_return(ctx, subject, rng, year: int) -> None:
     if subject.quiet:
         subject.quiet[-1]["по"] = int(year)
     subject.status = sub.ACTING
-    subject.spans.append({"с": int(year), "по": int(year),
-                          "чем занят": "вернулся"})
-    how = rng.choice(texts.RETURN_WAYS)
-    subject.notes.append("%d: вернулся — %s" % (year, how))
-    _mark(subject, year, "вернулся: %s" % how, 3, rng.randint(2, 3),
+    subject.spans.append(
+        {"с": int(year), "по": int(year),
+         "чем занят": "вернулась" if subject.sex == "f" else "вернулся"})
+    how = sub.form(rng.choice(texts.RETURN_WAYS), subject.sex)
+    subject.notes.append(
+        "%d: %s — %s" % (year,
+                         "вернулась" if subject.sex == "f" else "вернулся",
+                         how))
+    _mark(subject, year,
+          "%s: %s" % ("вернулась" if subject.sex == "f" else "вернулся", how),
+          3, rng.randint(2, 3),
           rng.randint(1, 3))
 
     title, text = texts.returned(rng, subject, how, world)
@@ -524,7 +551,8 @@ def _second_coming(ctx, subject, rng, year: int) -> None:
     fresh = calamity_system.start_named(
         ctx, year, calamity.key, rng,
         severity=max(2, calamity.severity - 1),
-        note="вернулся тот же: %s" % subject.name)
+        note="вернулся%s тот же: %s" % ("сь" if subject.sex == "f" else "",
+                                        subject.name))
     if fresh is None:
         return
     fresh.leader_id = subject.figure_id
@@ -533,7 +561,9 @@ def _second_coming(ctx, subject, rng, year: int) -> None:
         invasion.leader_id = subject.figure_id
         invasion.notes.append("это второй его приход")
         subject.invasion_id = invasion.id
-    subject.notes.append("%d: начал свою вторую войну" % year)
+    subject.notes.append(
+        "%d: %s свою вторую войну"
+        % (year, "начала" if subject.sex == "f" else "начал"))
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +598,9 @@ def _end_of(ctx, subject, rng, total: int) -> None:
         subject.end = sub.END_KILLED if figure.death_cause else sub.END_OLD
         subject.ended = figure.death
         subject.status = sub.DEAD
-        _mark(subject, figure.death.year, "кончил так: %s" % subject.end,
+        _mark(subject, figure.death.year,
+              "%s так: %s" % ("кончила" if figure.sex == "f" else "кончил",
+                              subject.end),
               rng.randint(2, 3), 3, rng.randint(1, 3))
         return
     monster = world.monsters.get(subject.monster_id)
@@ -576,7 +608,10 @@ def _end_of(ctx, subject, rng, total: int) -> None:
         subject.end = sub.END_KILLED
         subject.ended = monster.ended
         subject.status = sub.DEAD
-        _mark(subject, monster.ended.year, "кончил так: убит", 3, 3,
+        _mark(subject, monster.ended.year,
+              "кончил%s так: %s" % ("а" if subject.sex == "f" else "",
+                                    sub.form(sub.END_FORMS[sub.END_KILLED],
+                                             subject.sex)), 3, 3,
               rng.randint(1, 3))
         return
     if subject.status in (sub.DORMANT, sub.MISSING, sub.EXILED):
@@ -588,7 +623,8 @@ def _end_of(ctx, subject, rng, total: int) -> None:
     subject.end = rng.weighted(pairs)
     subject.status = sub.END_TO_STATUS.get(subject.end, subject.status)
     _mark(subject, subject.ended.year if subject.ended else total,
-          "кончил так: %s" % subject.end, 3, 3, rng.randint(1, 3))
+          "%s так: %s" % ("кончила" if subject.sex == "f" else "кончил",
+                          subject.end), 3, 3, rng.randint(1, 3))
 
 
 def _ties_of(ctx, subject) -> None:
@@ -629,7 +665,8 @@ def _legacy_of(ctx, subject, rng) -> None:
     world = ctx.world
     if rng.chance(0.12):
         # Бывает и так: гремел, а не осталось ничего, кроме имени в своде.
-        subject.notes.append("следа за ним не осталось никакого")
+        subject.notes.append("следа за %s не осталось никакого"
+                             % ("ней" if subject.sex == "f" else "ним"))
         return
     want = 1 + (1 if rng.chance(0.55) else 0) + (1 if rng.chance(0.3) else 0)
     seen = set()
@@ -640,8 +677,9 @@ def _legacy_of(ctx, subject, rng) -> None:
         if kind in seen:
             continue
         seen.add(kind)
-        subject.legacy.append({"род": kind,
-                               "что": rng.choice(sub.LEGACIES[kind])})
+        subject.legacy.append(
+            {"род": kind,
+             "что": sub.form(rng.choice(sub.LEGACIES[kind]), subject.sex)})
     if subject.legacy:
         title, text = texts.legacy_told(rng, subject, world)
         year = subject.ended.year if subject.ended else world.total_years
@@ -705,13 +743,14 @@ def _told_of(ctx, subject, rng) -> None:
     """Как об этом рассказывают. Объективно он запечатан — а в народе убит."""
     if subject.told or not subject.end:
         return
-    told = {"как было": subject.end}
+    told = {"как было": sub.form(sub.END_FORMS.get(subject.end,
+                                             subject.end), subject.sex)}
     for who, _ in sub.TELLERS:
         if who == "как было":
             continue
         rows = sub.TELLER_TWISTS.get(who, ())
         if rows and rng.chance(0.6):
-            told[who] = rng.choice(rows)
+            told[who] = sub.form(rng.choice(rows), subject.sex)
     if len(told) >= 3:
         subject.told = told
 
@@ -728,7 +767,8 @@ def _named_late(ctx, subject, rng, total: int) -> None:
     if year <= subject.entered.year:
         return
     subject.named_year = int(year)
-    subject.named_how = rng.choice(texts.NAMED_WAYS)
+    subject.named_how = sub.form(rng.choice(texts.NAMED_WAYS),
+                                 subject.sex)
     subject.facts["кто это был"] = sub.FACT_DISPUTED
     title, text = texts.named_late(rng, subject)
     world.add_event(
