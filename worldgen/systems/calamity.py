@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from . import causes as causes_sys
 from . import disaster as disaster_sys
+from . import invasion as invasion_sys
+from .. import narrative_invasion as inv_texts
 from . import houses as houses_mod
 from . import succession
 from . import upheaval
@@ -208,6 +210,8 @@ def tick(ctx, year: int) -> None:
     # И беды, которым пришёл срок вырасти из прежних: голод после засухи,
     # мор после голода, восстание после мора.
     disaster_sys.tick_chains(ctx, year)
+    # И год нашествия: цель может смениться, скрытый вождь — открыться.
+    invasion_sys.tick(ctx, year)
     _advance(ctx, year)
     _tick_climate(ctx, year)
     _maybe_start(ctx, year)
@@ -507,6 +511,10 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     calamity.depth = _depth_of(calamity, spec)
 
     _bind_polities(ctx, calamity)
+    # Нашествие — не вид врага, а история: кто пришёл, отчего, чего хочет
+    # и как это назвали. Имя события даётся здесь, до первой записи, —
+    # иначе половина летописи звала бы беду одним именем, половина другим.
+    invasion = invasion_sys.begin(ctx, calamity, spec, rng, year, date)
     # У нашествия есть направление: где пролом и куда они пойдут дальше.
     disaster_sys.open_front(ctx, calamity, spec, rng, year)
     _plan(ctx, calamity, spec, rng, duration, severity)
@@ -544,6 +552,15 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     # Земля и державы запоминают беду: этот рубец переживёт всех, кто её
     # застал, и однажды станет поводом для чего-нибудь ещё.
     causes_sys.after_calamity(ctx, calamity, event, year)
+    # У нашествия своя первая запись: не «вторглись», а «пропали пастухи»,
+    # и рядом — то, чем этот приход был с их стороны.
+    if invasion is not None:
+        title, text = inv_texts.invasion_begins(rng, invasion, calamity, world)
+        world.add_event(
+            date=date, era_index=world.era_index_at(year),
+            kind="invasion_begins", title=title, text=text,
+            importance=max(3, importance), causes=[event.id],
+            subjects=[invasion.id, calamity.id], region_id=region_ids[0])
     if relic is not None:
         calamity.notes.append("пробуждение следа: %s" % relic.name)
     # Великие беды меняют не только летопись, но и саму карту: землю
@@ -792,6 +809,12 @@ def _advance(ctx, year: int) -> None:
             disaster_sys.maybe_turn(ctx, calamity, spec, plan, rng, year)
             # И тогда же в столицах решают, что с этим делать.
             disaster_sys.respond(ctx, calamity, spec, plan, rng, year)
+            # А у нашествия сверх того: каждая держава отвечает по-своему,
+            # и соседи помнят, кто воевал, а кто заплатил.
+            invasion = world.invasion_of(calamity_id)
+            if invasion is not None and not invasion.answers:
+                invasion_sys.answer(ctx, invasion, calamity, rng, year,
+                                    ctx.date_in(rng, year))
 
         # Фронт за год: шаг вперёд или задержка, и у задержки есть причина.
         disaster_sys.move_front(ctx, calamity, spec, rng, year)
@@ -1081,6 +1104,12 @@ def _resolve(ctx, calamity, spec, plan, rng, year: int) -> None:
         actors=[figure.id for figure in heroes[:4] + commanders[:2]],
         subjects=[calamity.id], region_id=calamity.region_ids[0],
         race_id=calamity.race_id)
+
+    # Чем кончилось нашествие: исход, способ, капитуляция и остатки.
+    invasion = world.invasion_of(calamity.id)
+    if invasion is not None:
+        invasion_sys.finish(ctx, invasion, calamity, spec, rng, year, date,
+                            resolution)
 
     # Чем кончился фронт: даже победой возвращают не всё.
     # Что считать победой, уже сказано в самом каталоге исходов: второе

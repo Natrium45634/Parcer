@@ -22,6 +22,7 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Polity,
                      LifePath,
                      Region, Reign, Relic, Scar, LostLore, CrisisEra,
+                     Invasion,
                      Seed, Settlement, Site, Story,
                      Strife, Township, Godhead, Renown,
                      Tale,
@@ -111,6 +112,8 @@ def world_to_dict(world: World) -> dict:
         "calamities": [_compact(Calamity, item.to_dict())
                        for item in world.calamities.values()],
         "relics": [_compact(Relic, item.to_dict()) for item in world.relics.values()],
+        "invasions": [_compact(Invasion, item.to_dict())
+                      for item in world.invasions.values()],
         "scars": [_compact(Scar, item.to_dict()) for item in world.scars.values()],
         "lost_lore": [_compact(LostLore, item.to_dict())
                       for item in world.lost_lore.values()],
@@ -250,6 +253,9 @@ def dict_to_world(data: dict) -> World:
         world.relics[relic.id] = relic
         if relic.status == "спит":
             world.sleeping_relics.append(relic.id)
+    for item in data.get("invasions", ()):
+        invasion = Invasion(**_clean(Invasion, item))
+        world.invasions[invasion.id] = invasion
     for item in data.get("scars", ()):
         scar = Scar(**_clean(Scar, item))
         world.scars[scar.id] = scar

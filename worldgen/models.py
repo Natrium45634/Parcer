@@ -744,6 +744,77 @@ class CrisisEra:
 
 
 @dataclass
+class Invasion:
+    """Нашествие как историческое событие, а не как вид врага.
+
+    Беда рода «вторжение» ведёт счёт мёртвым и землям. Это ведёт другое:
+    кто пришёл и отчего, чего хотел и как передумал по дороге, как вошёл
+    и по чему это заметили, как отвечали разные державы, чем кончилось —
+    и как это потом назвали, каждый по-своему.
+
+    Главное: захватчики не обязаны проиграть. Они могут победить,
+    договориться, поделить землю, уйти сами, перебить друг друга — или
+    осесть и через триста лет перестать считать себя пришельцами.
+    """
+
+    id: str
+    calamity_id: str
+    kind: str                  # род захватчика: драконы, нежить, великаны…
+    started: Date
+    title: str = ""            # имя, под которым это шло при современниках
+    names: dict = field(default_factory=dict)   # голос -> имя
+    mind: int = 2              # ум: 0 — нет вовсе, 3 — гениальный вождь
+    order: int = 2             # устроенность: 0 — сами по себе, 3 — держава
+    host: str = ""             # один, стая, орда, войско, народ целиком…
+    ranks: list = field(default_factory=list)   # ступени войска, если есть
+    cause: str = ""            # отчего пришли
+    cause_theirs: str = ""     # как это выглядит с их стороны
+    culprit: str = ""          # кто из людей это устроил
+    culprit_id: str = ""       # и кто именно, если у него есть имя
+    culprit_meant: bool = True  # понимал ли он, что делает
+    goal: str = ""             # чего хотят сейчас
+    goal_first: str = ""       # чего хотели, когда пришли
+    goal_turns: list = field(default_factory=list)  # [{год, было, стало, отчего}]
+    entry: str = ""            # как вошли
+    entry_region: str = ""     # и где
+    first_sign: str = ""       # по чему мир понял, что началось
+    first_meeting: str = ""    # чем была первая встреча
+    peaceful_start: bool = False   # началось ли это не с битвы
+    behavior: str = ""         # как ведут себя с людьми
+    spread: str = ""           # как расходятся по землям
+    leader_id: str = ""        # вождь, если он есть
+    leader_hidden: bool = False    # ведёт ли кто-то из тени
+    leader_shown: int = 0      # в каком году поняли, что вождь есть
+    answers: list = field(default_factory=list)   # [{год, держава, ответ, вышло}]
+    turns: list = field(default_factory=list)     # переломы [{год, что}]
+    outcome: str = ""          # чем кончилось
+    way: str = ""              # каким способом
+    decisive: str = ""         # что решило дело
+    surrender: str = ""        # если люди сдались — чем именно
+    remnants: list = field(default_factory=list)  # [{вид, о чём, земля}]
+    ended: Date = None
+    notes: list = field(default_factory=list)
+
+    @property
+    def years(self) -> int:
+        if self.ended is None or self.started is None:
+            return 0
+        return max(0, self.ended.year - self.started.year)
+
+    @property
+    def full_name(self) -> str:
+        """Имя, под которым это событие знают: народное, если оно есть."""
+        return self.title or self.id
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["started"] = _date_out(self.started)
+        data["ended"] = _date_out(self.ended)
+        data["full_name"] = self.full_name
+        return data
+
+
+@dataclass
 class Relic:
     """След бедствия: недобитый генерал, печать, проклятое место.
 

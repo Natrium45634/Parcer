@@ -21,7 +21,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Figure,
                      Folk, Fortress,
                      Guild, House, Law, League, Legend, LifePath, Memory,
-                     Scar, LostLore, CrisisEra,
+                     Scar, LostLore, CrisisEra, Invasion,
                      Migration,
                      Monster, Pact,
                      Plot,
@@ -73,6 +73,7 @@ class World:
         self.reigns = {}               # id -> Reign  (правления)
         self.calamities = {}           # id -> Calamity (бедствия)
         self.relics = {}               # id -> Relic (следы бедствий)
+        self.invasions = {}            # id -> Invasion (нашествия как события)
         self.scars = {}                # id -> Scar (шрамы мира)
         self.lost_lore = {}            # id -> LostLore (что забылось)
         self.crisis_eras = {}          # id -> CrisisEra (эпохи кризиса)
@@ -376,6 +377,19 @@ class World:
         if relic.status == "спит":
             self.sleeping_relics.append(relic.id)
         return relic
+
+    def add_invasion(self, **kwargs) -> Invasion:
+        """Нашествие: история о том, кто пришёл и чем это кончилось."""
+        invasion = Invasion(id=self.next_id("NV"), **kwargs)
+        self.invasions[invasion.id] = invasion
+        return invasion
+
+    def invasion_of(self, calamity_id: str):
+        """Нашествие этой беды, если беда была вторжением."""
+        for item in self.invasions.values():
+            if item.calamity_id == calamity_id:
+                return item
+        return None
 
     def add_scar(self, **kwargs) -> Scar:
         """Шрам мира: то, что беда оставила на земле навсегда."""

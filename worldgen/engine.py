@@ -29,6 +29,7 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       diplomacy, divinity, embassy,
                       era_events,
                       exploration, founding, geography, guilds, houses,
+                      invasion as invasion_sys,
                       laws, legacy, lifepath, lives, localstory, lore,
                       memory, migration,
                       monsters,
@@ -247,6 +248,10 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     disaster_sys.close_era(ctx, total, ctx.date_in(
         ctx.rng("disaster", "era-close", total), total), force=True,
         reason="конец истории")
+    # Нашествие, которое идёт на последнем году летописи, так и остаётся
+    # идущим: мир, где всё улажено к сроку, честным не бывает.
+    invasion_sys.close(ctx, total, ctx.date_in(
+        ctx.rng("invasion", "close", total), total))
     _finalize(world)
     if progress is not None:
         progress(1.0, "Готово")
