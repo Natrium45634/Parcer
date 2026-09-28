@@ -3972,6 +3972,7 @@ def render_year(world, year: int) -> str:
 
     rows.extend(_year_now(world, year))
     rows.extend(_year_powers(world, year))
+    rows.extend(_year_towns(world, year))
     rows.extend(_year_faiths(world, year))
     rows.extend(_year_people(world, year))
     rows.extend(_year_events(world, year))
@@ -4144,6 +4145,66 @@ def _ruler_at(world, polity, year: int):
             continue
         return "%s (с %d года)" % (ruler.name, reign.start.year)
     return None
+
+
+def _year_towns(world, year: int) -> list:
+    """Города, что стояли в этот год, и кто в этот год по земле ходил.
+
+    Людность прошлых веков нигде не записана — записан только год
+    основания. Поэтому города названы по старшинству: те, что к этому
+    году стояли дольше всех, и есть главные имена своего времени.
+    """
+    towns = [item for item in world.settlements.values()
+             if item.founded.year <= year
+             and (item.ended is None or item.ended.year >= year)]
+    rows = []
+    if towns:
+        towns.sort(key=lambda item: (item.founded.ordinal, item.id))
+        rows.extend(["ГОРОДА, ЧТО СТОЯЛИ В ЭТОТ ГОД", ""])
+        for town in towns[:10]:
+            race = races_mod.RACES_BY_ID.get(town.race_id)
+            polity = world.polities.get(town.polity_id)
+            rows.append("  %s — %s, стоит %s%s"
+                        % (town.name,
+                           race.name if race is not None else "?",
+                           years_text(year - town.founded.year + 1),
+                           "; под рукой державы по имени %s" % polity.name
+                           if polity is not None
+                           and polity.founded.year <= year else ""))
+        if len(towns) > 10:
+            rows.append("  ...и ещё %d городов помоложе." % (len(towns) - 10))
+        rows.append("")
+
+    beasts = [item for item in world.monsters.values()
+              if item.born is not None and item.born.year <= year
+              and (item.ended is None or item.ended.year >= year)]
+    if beasts:
+        rows.extend(["ЧУДОВИЩА, ЖИВЫЕ В ЭТОТ ГОД", ""])
+        for beast in sorted(beasts, key=lambda item: (-item.raids,
+                                                      item.id))[:6]:
+            region = world.regions.get(beast.region_id)
+            rows.append("  %s (%s)%s — набегов %d"
+                        % (beast.name, beast.word,
+                           ", земля %s" % region.name if region else "",
+                           beast.raids))
+        if len(beasts) > 6:
+            rows.append("  ...и ещё %d." % (len(beasts) - 6))
+        rows.append("")
+
+    stories = [item for item in world.stories.values()
+               if item.began is not None and item.began.year <= year
+               and (item.ended is None or item.ended.year >= year)]
+    if stories:
+        rows.extend(["БЫЛИ, КОТОРЫЕ ИДУТ В ЭТОТ ГОД", ""])
+        for story in stories[:5]:
+            region = world.regions.get(story.region_id)
+            rows.append("  «%s» — с %d года%s"
+                        % (story.title, story.began.year,
+                           ", земля %s" % region.name if region else ""))
+        if len(stories) > 5:
+            rows.append("  ...и ещё %d." % (len(stories) - 5))
+        rows.append("")
+    return rows
 
 
 def _year_faiths(world, year: int) -> list:
