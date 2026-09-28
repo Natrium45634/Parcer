@@ -666,25 +666,63 @@ VOICES = (VOICE_STATE, VOICE_FOLK, VOICE_FAITH, VOICE_ENEMY, VOICE_LATER,
           VOICE_NEIGHBOUR)
 
 # Модель 1 — по последствиям.
+# У каждого имени назван круг тех, к кому оно идёт. Пустой круг —
+# имя на всякого: «Годы Без Хлеба» подходят и рою, и войску великанов.
+# Без этого выходит рассогласование: набег племён зовётся «Лёт Тысячи
+# Крыльев», а нашествие роя — «Разбитая Корона».
 NAME_BY_MARK = (
-    "Пепельные Годы", "Годы Пустых Гнёзд", "Зима Без Солнца",
-    "Время Закрытых Врат", "Разорённые Берега", "Век Мёртвых Полей",
-    "Годы Без Хлеба", "Время Тихих Колоколов",
+    ("Пепельные Годы", (DRAGONS, DEMONS, ELEMENTALS)),
+    ("Годы Пустых Гнёзд", ()),
+    ("Зима Без Солнца", (VOID, ANCIENT, ELEMENTALS, UNDEAD)),
+    ("Время Закрытых Врат", ()),
+    ("Разорённые Берега", (DEEP, GIANTS, BEASTS)),
+    ("Век Мёртвых Полей", ()),
+    ("Годы Без Хлеба", ()),
+    ("Время Тихих Колоколов", ()),
 )
 
 # Модель 3 — по тому, что видели.
 NAME_BY_SIGN = (
-    "Ночи Красной Луны", "Годы Чёрного Дождя", "Лёт Тысячи Крыльев",
-    "Зов из Глубин", "Вой Вечной Стаи", "Годы, Когда Небо Горело",
-    "Время Долгого Гула", "Годы Светлых Ночей",
+    ("Ночи Красной Луны", (DEMONS, UNDEAD, VOID)),
+    ("Годы Чёрного Дождя", (VOID, DEMONS, ELEMENTALS)),
+    ("Лёт Тысячи Крыльев", (SWARM, DRAGONS, BEASTS)),
+    ("Зов из Глубин", (DEEP, ANCIENT, VOID)),
+    ("Вой Вечной Стаи", (BEASTS, UNDEAD, SWARM)),
+    ("Годы, Когда Небо Горело", (DRAGONS, ELEMENTALS, DEMONS)),
+    ("Время Долгого Гула", (SWARM, ANCIENT, ELEMENTALS, VOID)),
+    ("Годы Светлых Ночей", (FAE, VOID, UNKNOWN_KIND)),
 )
 
-# Модель 5 — по историческому знаку.
+# Модель 5 — по историческому знаку. Знак остаётся от тех, у кого есть
+# знамя, престол и свод: рой короны не бьёт.
 NAME_BY_TOKEN = (
-    "Падение Девятого Знамени", "Разбитая Корона", "Последний Колокол",
-    "Год Сломанного Меча", "Пепел Трёх Храмов", "Пустой Престол",
-    "Год Разбитых Ворот", "Сожжённый Свод",
+    ("Падение Девятого Знамени", (GIANTS, FAE, UNDEAD, DEMONS, ANCIENT)),
+    ("Разбитая Корона", (GIANTS, FAE, UNDEAD, DEMONS)),
+    ("Последний Колокол", ()),
+    ("Год Сломанного Меча", (GIANTS, FAE, UNDEAD, DEMONS, ANCIENT)),
+    ("Пепел Трёх Храмов", (DEMONS, UNDEAD, FAE, DRAGONS)),
+    ("Пустой Престол", (GIANTS, FAE, DEMONS, ANCIENT)),
+    ("Год Разбитых Ворот", ()),
+    ("Сожжённый Свод", (DEMONS, DRAGONS, FAE, UNDEAD)),
 )
+
+
+def names_for(pool, kind: str) -> tuple:
+    """Имена этого рода первыми, общие следом, чужие почти никогда.
+
+    Совсем запрещать чужое имя нельзя: современники и сами не всегда
+    понимали, кто пришёл, и рой у них выходил «войском без знамён».
+    Но выпадать оно должно редко, а не наравне со своим.
+    """
+    rows = []
+    for name, kinds in pool:
+        if not kinds:
+            rows.append((name, 1.0))
+        elif kind in kinds:
+            rows.append((name, 3.0))
+        else:
+            rows.append((name, 0.12))
+    return tuple(rows)
 
 # Модель 7 — народное: «Ночь, когда пришли…»
 NAME_FOLK_FRAMES = (
@@ -760,7 +798,8 @@ __all__ = [
     "OUT_GOING", "OUT_UNKNOWN",
     "VOICES", "VOICE_STATE", "VOICE_FOLK", "VOICE_FAITH", "VOICE_ENEMY",
     "VOICE_LATER", "VOICE_NEIGHBOUR",
-    "NAME_BY_MARK", "NAME_BY_SIGN", "NAME_BY_TOKEN", "NAME_FOLK_FRAMES",
+    "NAME_BY_MARK", "NAME_BY_SIGN", "NAME_BY_TOKEN", "names_for",
+    "NAME_FOLK_FRAMES",
     "NAME_STATE_FRAMES", "NAME_BY_END", "NAME_ENEMY_FRAMES",
     "NAME_FAITH_FRAMES", "NAME_LATER_FRAMES",
 ]

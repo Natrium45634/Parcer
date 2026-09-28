@@ -62,6 +62,7 @@ from worldgen.rng import random_seed_text                        # noqa: E402
 from worldgen.models import ACTIVE                                # noqa: E402
 from worldgen.systems.upheaval import GREAT as GREAT_KEYS        # noqa: E402
 from worldgen.world import RURAL_FACTOR                          # noqa: E402
+from worldgen.timeline import years_text                         # noqa: E402
 
 # Даты берутся по одной из каждой полосы истории: так срезы не сбиваются
 # в кучу и охватывают и первобытный мир, и закат.
@@ -511,14 +512,183 @@ def nonhuman(world, out) -> None:
     out("")
 
 
+def loudest(world, out) -> None:
+    """Шестой портрет: самое громкое, что вообще было в этом мире.
+
+    Срезы показывают, чем мир жил в пять случайных лет. Этот портрет
+    отвечает на другой вопрос — что из десяти тысяч лет человек стал бы
+    пересказывать: самую долгую и самую кровавую войну, державу, которая
+    поднялась выше всех, и беду, которой мир испугался сильнее прочих.
+    """
+    out("=" * 78)
+    out("САМОЕ ГРОМКОЕ В ИСТОРИИ")
+    out("=" * 78)
+
+    wars = [war for war in world.wars.values() if war.end is not None]
+    if not wars:
+        out("  Больших войн в этом мире не было.")
+    else:
+        longest = max(wars, key=lambda war: (war.years, war.deaths, war.id))
+        bloodiest = max(wars, key=lambda war: (war.deaths, war.years, war.id))
+        out("  САМАЯ ДОЛГАЯ ВОЙНА")
+        _war_lines(world, longest, out)
+        if bloodiest.id != longest.id:
+            out("")
+            out("  САМАЯ КРОВАВАЯ ВОЙНА")
+            _war_lines(world, bloodiest, out)
+        else:
+            out("      она же и самая кровавая")
+    out("")
+
+    polities = list(world.polities.values())
+    if not polities:
+        out("  Держав в этом мире не поднялось.")
+    else:
+        # «Величайшая» — не самая многолюдная и не самая долгая порознь:
+        # держава на три города, простоявшая девять тысяч лет, и держава
+        # на миллион душ, прожившая век, весят по-разному в разном. Здесь
+        # считается и то и другое, а рядом называется, чем именно она
+        # взяла.
+        def weight(polity):
+            years = _polity_years(world, polity)
+            return (polity.peak_population * (1.0 + years / 2000.0)
+                    + len(polity.settlement_ids) * 5000.0)
+
+        greatest = max(polities, key=lambda item: (weight(item), item.id))
+        out("  ВЕЛИЧАЙШАЯ ДЕРЖАВА ЗА ВСЮ ИСТОРИЮ")
+        _polity_lines(world, greatest, out)
+        oldest = max(polities, key=lambda item: (_polity_years(world, item),
+                                                 item.id))
+        if oldest.id != greatest.id:
+            out("      а дольше всех стояла другая: %s — %s"
+                % (oldest.full_name,
+                   years_text(_polity_years(world, oldest))))
+    out("")
+
+    calamities = list(world.calamities.values())
+    if not calamities:
+        out("  Больших бед мир не знал.")
+        out("")
+        return
+    worst = max(calamities, key=lambda item: (item.deaths, item.severity,
+                                              item.id))
+    out("  СТРАШНЕЙШАЯ БЕДА")
+    _calamity_lines(world, worst, out)
+    out("")
+
+
+def _war_lines(world, war, out) -> None:
+    """Одна война: кто, из-за чего, сколько лет и чем кончилась."""
+    attacker = world.polities.get(war.attacker_id)
+    defender = world.polities.get(war.defender_id)
+    out("      %s — %s против %s" % (
+        war.name, attacker.full_name if attacker else "?",
+        defender.full_name if defender else "?"))
+    out("      %d–%s, %s; повод: %s, цель: %s" % (
+        war.start.year, war.end.year if war.end else "не кончилась",
+        years_text(war.years), warfare.cause_label(war.cause),
+        warfare.AIM_NAMES.get(war.aim, war.aim)))
+    marks = ["сражений %d" % len(war.battle_ids)]
+    if war.deaths:
+        marks.append("погибло %s" % _souls(war.deaths))
+    if war.sieges:
+        marks.append("осад %d" % len(war.sieges))
+    if war.razed:
+        marks.append("городов сожжено %d" % war.razed)
+    if war.taken_ids:
+        marks.append("городов перешло %d" % len(war.taken_ids))
+    if war.fallen_ids:
+        marks.append("имён легло %d" % len(war.fallen_ids))
+    out("      %s" % "; ".join(marks))
+    if war.outcome:
+        out("      чем кончилась: %s%s" % (
+            war.outcome, ", мир «%s»" % war.peace_name if war.peace_name
+            else ""))
+
+
+def _polity_years(world, polity) -> int:
+    """Сколько лет держава простояла — до гибели или до конца летописи."""
+    end = polity.ended.year if polity.ended else world.total_years
+    return max(0, end - polity.founded.year)
+
+
+def _polity_lines(world, polity, out) -> None:
+    """Одна держава: чем взяла, кто её поднял и чем кончилась."""
+    capital = world.settlements.get(polity.capital_id)
+    faith = world.faiths.get(polity.faith_id)
+    founder = world.figures.get(polity.founder_id)
+    out("      %s — %s, %s" % (polity.full_name, race_name(polity.race_id),
+                               polity.form))
+    out("      %d–%s, %s; городов за всю жизнь %d, в лучшую пору %s" % (
+        polity.founded.year,
+        polity.ended.year if polity.ended else "стоит и поныне",
+        years_text(_polity_years(world, polity)),
+        len(polity.settlement_ids), _souls(polity.peak_population)))
+    marks = []
+    if capital is not None:
+        marks.append("престол в городе по имени %s" % capital.name)
+    if faith is not None:
+        marks.append("вера «%s»" % faith.name)
+    if founder is not None:
+        marks.append("поднял %s" % founder.name)
+    if marks:
+        out("      %s" % "; ".join(marks))
+    wars = "войн выиграно %d, проиграно %d" % (polity.wars_won,
+                                               polity.wars_lost)
+    if polity.conquests:
+        wars += "; завоеваний %d" % len(polity.conquests)
+    out("      %s" % wars)
+    if polity.ended is not None and polity.end_reason:
+        out("      чем кончилась: %s" % polity.end_reason)
+
+
+def _calamity_lines(world, item, out) -> None:
+    """Одна беда: чем была, кого выкосила и чем кончилась."""
+    out("      %s — %s, %s" % (item.name,
+                               KIND_NAMES.get(item.kind, item.kind),
+                               SEVERITY_NAMES.get(item.severity,
+                                                  str(item.severity))))
+    out("      %d–%s, %s" % (
+        item.start.year, item.end.year if item.end else "не кончилась",
+        years_text(max(1, (item.end.year if item.end else world.total_years)
+                       - item.start.year))))
+    lands = [world.regions[rid].name for rid in item.region_ids
+             if rid in world.regions]
+    if lands:
+        out("      земли: %s%s" % (", ".join(lands[:6]),
+                                   " и ещё %d" % (len(lands) - 6)
+                                   if len(lands) > 6 else ""))
+    marks = ["унесло %s" % _souls(item.deaths)]
+    if item.settlements_lost:
+        marks.append("городов потеряно %d" % item.settlements_lost)
+    if item.polities_lost:
+        marks.append("держав пало %d" % item.polities_lost)
+    leader = world.figures.get(item.leader_id)
+    if leader is not None:
+        marks.append("во главе %s" % leader.name)
+    out("      %s" % "; ".join(marks))
+    if item.resolution:
+        out("      чем кончилась: %s" % item.resolution)
+    era = None
+    for crisis in world.crisis_eras.values():
+        if item.id in crisis.calamity_ids and crisis.name:
+            era = crisis
+            break
+    if era is not None:
+        out("      её помнят как часть времени бед: «%s» (%d–%s)"
+            % (era.name, era.start.year,
+               era.end.year if era.end else "не кончилось"))
+
+
 def portraits(world, out) -> None:
-    """Пять портретов мира: имена, ушедшие народы, старый город, злое
-    время и тот, кто людям не ровня."""
+    """Шесть портретов мира: имена, ушедшие народы, старый город, злое
+    время, тот, кто людям не ровня, и самое громкое за всю историю."""
     great_names(world, out)
     peoples_gone(world, out)
     oldest_town(world, out)
     worst_time(world, out)
     nonhuman(world, out)
+    loudest(world, out)
 
 
 # ---------------------------------------------------------------------------

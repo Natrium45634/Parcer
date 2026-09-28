@@ -2513,6 +2513,15 @@ def check_catalogues() -> list:
          {who for who, _ in sub.TELLERS})
     miss("роды, которые возвращаются", list(sub_sys.RETURN_KINDS),
          set(sub.KINDS))
+
+    # Имена нашествий привязаны к роду пришедших: ссылка на несуществующий
+    # род сделала бы имя общим, и рой снова звался бы «Разбитой Короной».
+    from worldgen import invasion as inv
+    miss("роды у имён нашествий",
+         [kind for pool in (inv.NAME_BY_MARK, inv.NAME_BY_SIGN,
+                            inv.NAME_BY_TOKEN)
+          for _, kinds in pool for kind in kinds],
+         set(inv.KINDS))
     return problems
 
 

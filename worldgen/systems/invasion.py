@@ -152,11 +152,14 @@ def _first_name(ctx, invasion, calamity, rng, year: int) -> str:
         elif model == "держава":
             name = texts.state_name(rng, where, year)
         elif model == "след":
-            name = rng.choice(inv.NAME_BY_MARK)
+            name = rng.weighted(inv.names_for(inv.NAME_BY_MARK,
+                                              invasion.kind))
         elif model == "знак":
-            name = rng.choice(inv.NAME_BY_TOKEN)
+            name = rng.weighted(inv.names_for(inv.NAME_BY_TOKEN,
+                                              invasion.kind))
         else:
-            name = rng.choice(inv.NAME_BY_SIGN)
+            name = rng.weighted(inv.names_for(inv.NAME_BY_SIGN,
+                                              invasion.kind))
         if name and name not in taken:
             return name
     # Все имена разобраны — тогда имя даёт год, а не счёт по порядку.
@@ -518,15 +521,17 @@ def _later_names(ctx, invasion, calamity, rng, year: int) -> None:
     told[inv.VOICE_STATE] = texts.state_name(
         rng, _where(world, calamity), calamity.start.year)
     told[inv.VOICE_FOLK] = texts.folk_name(rng, invasion, calamity, world)
-    ends = inv.NAME_BY_END.get(invasion.outcome, inv.NAME_BY_MARK)
-    told[inv.VOICE_LATER] = rng.choice(ends)
+    ends = inv.NAME_BY_END.get(invasion.outcome)
+    told[inv.VOICE_LATER] = rng.choice(ends) if ends else rng.weighted(
+        inv.names_for(inv.NAME_BY_MARK, invasion.kind))
     if world.faiths and rng.chance(0.7):
         told[inv.VOICE_FAITH] = rng.choice(inv.NAME_FAITH_FRAMES)
     nature = inv.INVADERS_BY_KEY.get(invasion.kind)
     if nature is not None and nature.talks and rng.chance(0.8):
         told[inv.VOICE_ENEMY] = rng.choice(inv.NAME_ENEMY_FRAMES)
     if len(world.active_polities) > 1 and rng.chance(0.5):
-        told[inv.VOICE_NEIGHBOUR] = rng.choice(inv.NAME_BY_MARK)
+        told[inv.VOICE_NEIGHBOUR] = rng.weighted(
+            inv.names_for(inv.NAME_BY_MARK, invasion.kind))
     # Своё имя не повторяем чужим голосом: это было бы не «несколько
     # имён», а одно, записанное пять раз.
     invasion.names = {voice: name for voice, name in told.items()
