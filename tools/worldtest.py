@@ -680,15 +680,216 @@ def _calamity_lines(world, item, out) -> None:
                era.end.year if era.end else "не кончилось"))
 
 
+def land_portrait(world, out) -> None:
+    """Разбор самой карты: что это за земля, прежде чем на ней начнётся история.
+
+    Летопись рассказывает, кто где жил, но не говорит главного о мире:
+    холодный он или жаркий, водный или сухой, из одного материка или из
+    россыпи островов. Это читается прямо по слоям карты — и одной
+    страницей объясняет половину того, почему история пошла именно так.
+    """
+    link = getattr(world, "map_link", None)
+    wmap = getattr(link, "wmap", None) if link is not None else None
+    if wmap is None:
+        return          # мир без карты: разбирать нечего
+
+    from worldgen import worldmap as wmod
+    from worldgen.mapregions import FEATURE_NOUNS, translit
+
+    out("=" * 78)
+    out("КАРТА МИРА: ЧТО ЭТО ЗА ЗЕМЛЯ")
+    out("=" * 78)
+
+    size = wmap.size
+    land = [i for i in range(size) if wmap.is_land(i)]
+    if not land:
+        out("  Суши на этой карте нет вовсе.")
+        out("")
+        return
+    share = len(land) * 100.0 / max(1, size)
+    out("  %d×%d гексов, суши %.1f%% (%d гексов), %s по долготе" % (
+        wmap.width, wmap.height, share, len(land),
+        "замкнута" if wmap.wrap else "разомкнута"))
+
+    # --- материки и острова ---
+    masses = Counter()
+    for index in land:
+        masses[wmap.value(wmod.L_LANDREG, index, -1)] += 1
+    masses.pop(-1, None)
+    if masses:
+        biggest = masses.most_common(1)[0][1]
+        islands = sum(1 for value in masses.values() if value < 40)
+        out("  Массивов суши %d; крупнейший держит %.0f%% всей земли, "
+            "мелких островов %d" % (len(masses), biggest * 100.0 / len(land),
+                                    islands))
+
+    # --- тепло и влага ---
+    temps = [wmap.value(wmod.L_TEMP, index, 0.0) for index in land]
+    wets = [wmap.value(wmod.L_MOIST, index, 0.0) for index in land]
+    bands = Counter()
+    for value in temps:
+        if value < -5:
+            bands["мороз"] += 1
+        elif value < 5:
+            bands["холод"] += 1
+        elif value < 15:
+            bands["прохлада"] += 1
+        elif value < 25:
+            bands["тепло"] += 1
+        else:
+            bands["зной"] += 1
+    mean_t = sum(temps) / len(temps)
+    mean_w = sum(wets) / len(wets)
+    out("  Тепло: в среднем %+.1f °C (от %+.0f до %+.0f); %s" % (
+        mean_t, min(temps), max(temps),
+        ", ".join("%s %.0f%%" % (name, count * 100.0 / len(land))
+                  for name, count in bands.most_common())))
+    dry = sum(1 for value in wets if value < 0.3)
+    wet = sum(1 for value in wets if value > 0.6)
+    out("  Влага: в среднем %.2f; сухих земель %.0f%%, мокрых %.0f%%" % (
+        mean_w, dry * 100.0 / len(land), wet * 100.0 / len(land)))
+
+    # --- чем это заросло ---
+    biomes = Counter()
+    for index in land:
+        biomes[wmap.biome_name(wmap.value(wmod.L_BIOME, index, 0))] += 1
+    out("  Биомы: %s" % ", ".join(
+        "%s %.0f%%" % (name, count * 100.0 / len(land))
+        for name, count in biomes.most_common(6)))
+
+    # --- вода ---
+    rivers = {wmap.value(wmod.L_RIVERREG, index, -1) for index in land
+              if wmap.is_river(index)}
+    rivers.discard(-1)
+    lakes = sum(1 for index in range(size) if wmap.is_lake(index))
+    coast = sum(1 for index in land if wmap.is_coast(index))
+    out("  Вода: речных бассейнов %d, речных гексов %d, озёрных %d; "
+        "берег у %.0f%% суши" % (
+            len(rivers),
+            sum(1 for index in land if wmap.is_river(index)), lakes,
+            coast * 100.0 / len(land)))
+
+    # --- горы и огонь ---
+    ranges = {wmap.value(wmod.L_RANGEREG, index, -1) for index in land}
+    ranges.discard(-1)
+    highs = sorted(wmap.peaks, key=lambda item: -int(item.get("m", 0)))[:3]
+    line = "  Горы: хребтов %d" % len(ranges)
+    if highs:
+        line += "; выше всех — %s" % ", ".join(
+            "%s (%d м)" % (_map_name(item.get("name", ""), translit),
+                           item.get("m", 0))
+            for item in highs)
+    out(line)
+    live = [item for item in wmap.volcanoes
+            if item.get("status") != "extinct"]
+    if wmap.volcanoes:
+        out("  Вулканов %d, из них живых %d" % (len(wmap.volcanoes),
+                                                len(live)))
+
+    # --- чем эта земля кормит и чем грозит ---
+    fert = [wmap.value(wmod.L_FERTILITY, index, 0.0) for index in land]
+    good = sum(1 for value in fert if value > 0.6)
+    risks = [wmap.value(wmod.L_EVENTCHANCE, index, 0) for index in land]
+    wild = [wmap.value(wmod.L_SAVAGERY, index, 0) for index in land]
+    out("  Земля: плодородие в среднем %.2f, тучных земель %.0f%%; "
+        "дикость %.0f из 255; риск местных бед %.0f из 255" % (
+            sum(fert) / len(fert), good * 100.0 / len(land),
+            sum(wild) / float(len(wild)), sum(risks) / float(len(risks))))
+
+    magic = [wmap.value(wmod.L_MAGIC, index, 0.0) for index in land]
+    light = sum(1 for value in magic if value > 0.35)
+    dark = sum(1 for value in magic if value < -0.35)
+    if light or dark:
+        out("  Магия: светлых мест %.0f%%, тёмных %.0f%%" % (
+            light * 100.0 / len(land), dark * 100.0 / len(land)))
+
+    # --- как карта это назвала ---
+    named = {}
+    for feature in wmap.features:
+        noun = FEATURE_NOUNS.get(feature.get("type"))
+        if not noun:
+            continue
+        named.setdefault(noun, []).append(
+            (int(feature.get("area", 0)), translit(feature.get("name", ""))))
+    for noun in ("океан", "море", "материк", "большой остров", "хребет"):
+        rows = sorted(named.get(noun, ()), reverse=True)[:3]
+        if rows:
+            out("  %s: %s" % (noun.capitalize(),
+                              ", ".join(
+                                  "%s (%d %s)" % (name, area,
+                                                  _plural(area, "гекс",
+                                                          "гекса", "гексов"))
+                                  for area, name in rows)))
+
+    # --- что с этим миром делало время ---
+    events = wmap.climate.get("events") or []
+    if events:
+        rows = sorted(events, key=lambda item: int(item.get("start", 0)))
+        out("  Климат по векам: %d перемен — %s" % (
+            len(rows),
+            ", ".join("%s (%d–%d)" % (item.get("name", "?"),
+                                      int(item.get("start", 0)),
+                                      int(item.get("start", 0))
+                                      + int(item.get("dur", 0)))
+                      for item in rows[:5])))
+
+    out("  Коротко: %s" % _land_verdict(mean_t, mean_w, share, biomes,
+                                        len(land)))
+    out("")
+
+
+def _map_name(name: str, translit) -> str:
+    """Имя с карты по-русски. «г. Stenumark» — это «г.» плюс латынь.
+
+    Готовая кириллица в начале обманывает общий перевод имён: он видит
+    русскую букву и решает, что переводить нечего. Поэтому сокращение
+    отделяется, а переводится только само имя.
+    """
+    text = str(name or "")
+    for mark in ("г. ", "влк. ", "оз. ", "р. "):
+        if text.startswith(mark):
+            return mark + translit(text[len(mark):])
+    return translit(text)
+
+
+def _land_verdict(mean_t: float, mean_w: float, land_share: float,
+                  biomes, land: int) -> str:
+    """Одна строка, по которой мир узнаётся: холодный, сухой, островной."""
+    marks = []
+    if mean_t < 2:
+        marks.append("холодный мир")
+    elif mean_t < 12:
+        marks.append("прохладный мир")
+    elif mean_t < 22:
+        marks.append("умеренный мир")
+    else:
+        marks.append("жаркий мир")
+    if mean_w < 0.3:
+        marks.append("сухой")
+    elif mean_w > 0.55:
+        marks.append("мокрый")
+    if land_share < 20:
+        marks.append("воды на нём вчетверо больше суши")
+    elif land_share > 45:
+        marks.append("суши на нём больше, чем воды")
+    top = biomes.most_common(1)[0] if biomes else None
+    if top is not None:
+        marks.append("больше всего земли занято тем, что зовётся «%s»"
+                     % top[0])
+    return ", ".join(marks)
+
+
 def portraits(world, out) -> None:
-    """Шесть портретов мира: имена, ушедшие народы, старый город, злое
-    время, тот, кто людям не ровня, и самое громкое за всю историю."""
+    """Семь портретов мира: имена, ушедшие народы, старый город, злое
+    время, тот, кто людям не ровня, самое громкое за всю историю и —
+    если мир стоит на гексовой карте — сама эта земля."""
     great_names(world, out)
     peoples_gone(world, out)
     oldest_town(world, out)
     worst_time(world, out)
     nonhuman(world, out)
     loudest(world, out)
+    land_portrait(world, out)
 
 
 # ---------------------------------------------------------------------------
