@@ -108,6 +108,16 @@ def _from_invasions(ctx, year: int, taken: dict) -> None:
         figure = world.figures.get(invasion.leader_id)
         if figure is None:
             continue
+        if figure.id in taken["figure_id"]:
+            # Тот же человек привёл второе войско: это не второй субъект,
+            # а вторая война того же самого. Запись у него одна.
+            old = world.subject_of(figure_id=figure.id)
+            if old is not None and not old.invasion_id:
+                old.invasion_id = invasion.id
+                old.notes.append("%d: повёл нашествие по имени «%s»"
+                                 % (year, invasion.title or calamity.name))
+                taken["invasion_id"].add(invasion.id)
+            continue
         rng = ctx.rng("subject", "invader", invasion.id)
         kind = _kind_of_invader(invasion.kind)
         subject = _make(ctx, rng, year, taken,
@@ -560,6 +570,9 @@ def _second_coming(ctx, subject, rng, year: int) -> None:
                                         subject.name))
     if fresh is None:
         return
+    # Второй приход растёт из первого, а не поднимается ниоткуда: у бед,
+    # которые обязаны быть осколком прошлого, это ещё и условие.
+    fresh.parent_id = calamity.id
     fresh.leader_id = subject.figure_id
     invasion = world.invasion_of(fresh.id)
     if invasion is not None:
