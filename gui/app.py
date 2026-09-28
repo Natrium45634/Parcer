@@ -337,6 +337,7 @@ class ChronicleApp(tk.Tk):
 
         self._build_chronicle_tab()
         self._build_map_tab()
+        self._build_timeline_tab()
         self.eras_text = self._add_text_tab("Эпохи")
         self.polity_tree = self._add_tree_tab(
             "Страны",
@@ -501,6 +502,117 @@ class ChronicleApp(tk.Tk):
     def _fill_atlas(self) -> None:
         if self.world is not None:
             self.atlas.show(self.world)
+
+    def _build_timeline_tab(self) -> None:
+        """Временная шкала: весь мир на один названный год.
+
+        Летопись читается подряд, и в ней теряется, что происходило
+        одновременно. Здесь человек ставит год — ползунком, стрелками или
+        прямо числом — и видит весь мир этого года: что идёт, кто держит
+        землю, во что верят, кто жив и что записано этим годом.
+        """
+        frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text="Временная шкала")
+
+        bar = ttk.Frame(frame)
+        bar.pack(fill="x", pady=(6, 4))
+
+        ttk.Label(bar, text="Год:").pack(side="left", padx=(4, 6))
+        # Пусто значит «ещё не выбирали»: при первом показе берётся
+        # последний год мира — он и есть мир целиком, как он вышел.
+        self.year_var = tk.StringVar(value="")
+        entry = ttk.Entry(bar, textvariable=self.year_var, width=8)
+        entry.pack(side="left")
+        entry.bind("<Return>", lambda event: self.show_year())
+
+        for text, step in (("−100", -100), ("−10", -10),
+                           ("+10", 10), ("+100", 100)):
+            ttk.Button(bar, text=text, width=5,
+                       command=lambda value=step: self.step_year(value)).pack(
+                           side="left", padx=2)
+        ttk.Button(bar, text="Показать", command=self.show_year).pack(
+            side="left", padx=10)
+        ttk.Button(bar, text="Последний год",
+                   command=lambda: self.step_year(0, last=True)).pack(
+                       side="left")
+
+        # Ползунок ведёт себя как год, а не как проценты: его цена деления
+        # — один год, и он же показывает, где этот год лежит в истории.
+        self.year_scale = ttk.Scale(frame, from_=1, to=100,
+                                    orient="horizontal",
+                                    command=self._on_year_slide)
+        self.year_scale.pack(fill="x", padx=8, pady=(0, 4))
+        self._year_sliding = False
+
+        self.timeline_text = self._make_text(frame)
+        self._fillers[str(frame)] = self._fill_timeline
+
+    def _fill_timeline(self) -> None:
+        """Первый показ: год берётся последний — мир целиком, как он вышел."""
+        if self.world is None:
+            return
+        total = max(1, int(self.world.total_years))
+        self.year_scale.config(from_=1, to=total)
+        try:
+            year = int(self.year_var.get())
+        except (TypeError, ValueError):
+            year = total
+        if not 1 <= year <= total:
+            year = total
+        self.year_var.set(str(year))
+        self.show_year()
+
+    def _on_year_slide(self, value) -> None:
+        """Ползунок двигают — год меняется сразу, без кнопки."""
+        if self.world is None or self._year_sliding:
+            return
+        try:
+            year = int(round(float(value)))
+        except (TypeError, ValueError):
+            return
+        if str(year) == self.year_var.get():
+            return
+        self.year_var.set(str(year))
+        self.show_year(from_slider=True)
+
+    def step_year(self, step: int, last: bool = False) -> None:
+        """Шаг на сто лет вперёд или назад — и не дальше краёв истории."""
+        if self.world is None:
+            return
+        total = max(1, int(self.world.total_years))
+        if last:
+            year = total
+        else:
+            try:
+                year = int(self.year_var.get())
+            except (TypeError, ValueError):
+                year = 1
+            year += step
+        self.year_var.set(str(max(1, min(total, year))))
+        self.show_year()
+
+    def show_year(self, from_slider: bool = False) -> None:
+        """Собирает срез мира на выбранный год и кладёт его на вкладку."""
+        if self.world is None:
+            return
+        total = max(1, int(self.world.total_years))
+        try:
+            year = int(self.year_var.get())
+        except (TypeError, ValueError):
+            year = total
+        year = max(1, min(total, year))
+        self.year_var.set(str(year))
+        if not from_slider:
+            # Ползунок двигается следом за числом, но не отвечает на это
+            # собственным пересчётом — иначе выйдет кольцо.
+            self._year_sliding = True
+            try:
+                self.year_scale.set(year)
+            finally:
+                self._year_sliding = False
+        self._set_text(self.timeline_text,
+                       chronicle.render_year(self.world, year))
+        self.status_var.set("Год %d из %d." % (year, total))
 
     def _build_chronicle_tab(self) -> None:
         frame = ttk.Frame(self.tabs)
@@ -732,6 +844,8 @@ class ChronicleApp(tk.Tk):
     def _fill_all(self) -> None:
         world = self.world
         self._filled = set()
+        # Новый мир — новая шкала: год прошлого мира к нему не относится.
+        self.year_var.set("")
         if self.atlas is not None:
             self.atlas.clear()     # чтобы не осталась карта прошлого мира
         self.refresh_chronicle()

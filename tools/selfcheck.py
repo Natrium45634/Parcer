@@ -1878,6 +1878,32 @@ def check_subjects(world, seed: str) -> list:
     return problems
 
 
+def check_year_slices(world, seed: str) -> list:
+    """Срез мира на год собирается для любого года, а не только для конца.
+
+    Вкладка «Временная шкала» строит этот текст на лету, и человек может
+    назвать любой год — первый, последний и любой между. Проверяем края и
+    середину: пустой срез или поломка на первом году мира заметна только
+    здесь, потому что летопись целиком собирается другим путём.
+    """
+    from worldgen import chronicle
+
+    problems = []
+    total = max(1, world.total_years)
+    for year in (1, total // 3, total // 2, total):
+        try:
+            text = chronicle.render_year(world, year)
+        except Exception as error:          # noqa: BLE001 — сообщаем, а не падаем
+            problems.append("сид «%s»: срез на %d год не собрался: %s"
+                            % (seed, year, error))
+            break
+        if not text or "ГОД %d" % year not in text:
+            problems.append("сид «%s»: срез на %d год вышел пустым"
+                            % (seed, year))
+            break
+    return problems
+
+
 def check_causes(world, seed: str) -> list:
     """Причинность: следы, зёрна и цепи событий.
 
@@ -2579,6 +2605,7 @@ def main() -> int:
         failures.extend(check_disasters(first, seed))
         failures.extend(check_invasions(first, seed))
         failures.extend(check_subjects(first, seed))
+        failures.extend(check_year_slices(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
         failures.extend(check_tongues(first, seed))
@@ -2639,6 +2666,7 @@ def main() -> int:
             failures.extend(check_disasters(first, "карта/" + seed))
             failures.extend(check_invasions(first, "карта/" + seed))
             failures.extend(check_subjects(first, "карта/" + seed))
+            failures.extend(check_year_slices(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_tongues(first, "карта/" + seed))
@@ -2695,6 +2723,7 @@ def main() -> int:
         for check in (check_nobility, check_wars, check_politics,
                       check_calamities, check_disasters,
                       check_invasions, check_subjects,
+                      check_year_slices,
                       check_faiths, check_nations,
                       check_tongues, check_embassies, check_things,
                       check_causes, check_people_memory, check_migrations,

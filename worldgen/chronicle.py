@@ -3945,6 +3945,310 @@ def _subject_block(world, item, cat) -> list:
     return rows
 
 
+def render_year(world, year: int) -> str:
+    """Срез мира на любой год: что идёт прямо сейчас и кто в этот год жив.
+
+    Летопись читается подряд, и в ней легко потерять, что происходило
+    одновременно: пока на севере шла война, на юге стоял голод, а бог,
+    которому ещё будут молиться пять тысяч лет, в этот год только явился.
+    Здесь всё сведено на одну дату — и, в отличие от срезов стандартного
+    теста, собрано не по живому ходу времени, а по записанным срокам: год
+    можно назвать любой, хоть первый, хоть последний.
+    """
+    year = max(1, min(int(year), world.total_years))
+    era = world.era_at(year)
+    rows = ["ГОД %d" % year, ""]
+    if era is not None:
+        rows.append("  Эпоха: %s (%d–%d), идёт %s"
+                    % (era.name, era.start_year, era.end_year,
+                       years_text(year - era.start_year + 1)))
+    left = world.total_years - year
+    rows.append("  От начала мира прошло %s%s."
+                % (years_text(year),
+                   ", до конца летописи ещё %s" % years_text(left) if left
+                   else "; это последний год летописи"))
+    rows.extend(_year_fate(world, year))
+    rows.append("")
+
+    rows.extend(_year_now(world, year))
+    rows.extend(_year_powers(world, year))
+    rows.extend(_year_faiths(world, year))
+    rows.extend(_year_people(world, year))
+    rows.extend(_year_events(world, year))
+    return "\n".join(rows)
+
+
+def _year_fate(world, year: int) -> list:
+    """Где этот год лежит на кривой, по которой идёт населённость мира."""
+    from . import fates
+
+    note = (world.notes or {}).get("судьба") or {}
+    fate = fates.FATES_BY_KEY.get(note.get("ключ", ""))
+    if fate is None:
+        return []
+    part = (year - 1) / float(max(1, world.total_years))
+    best = max(fate.at(step / 100.0) for step in range(101)) or 1.0
+    now = fate.at(part)
+    after = fate.at(min(1.0, part + 0.03))
+    if after > now * 1.03:
+        way = "земля кормит всё лучше"
+    elif after < now * 0.97:
+        way = "земля кормит всё хуже"
+    else:
+        way = "держится ровно"
+    return ["  Судьба мира: %s — сейчас %.0f%% от лучшей поры, %s."
+            % (note.get("имя", fate.name), now * 100.0 / best, way)]
+
+
+def _year_now(world, year: int) -> list:
+    """Что идёт прямо в этот год: беды, нашествия, войны, тьма."""
+    from .catastrophe import KIND_NAMES as cat_names
+
+    rows = ["ЧТО ИДЁТ ПРЯМО СЕЙЧАС", ""]
+    said = False
+
+    dark = world.darkness_snapshot(year)
+    if dark:
+        lands = [world.regions[key].name for key in dark
+                 if key and key in world.regions]
+        if dark.get(""):
+            where = "по всему миру"
+        elif lands:
+            where = "в землях: %s%s" % (", ".join(lands[:6]),
+                                        " и ещё %d" % (len(lands) - 6)
+                                        if len(lands) > 6 else "")
+        else:
+            where = "местами"
+        rows.append("  Тёмные века %s; тяжесть до %.2f"
+                    % (where, max(dark.values())))
+        said = True
+
+    live = [item for item in world.calamities.values()
+            if item.start.year <= year
+            and (item.end is None or item.end.year >= year)]
+    for item in sorted(live, key=lambda row: (-row.severity, row.id))[:8]:
+        lands = [world.regions[rid].name for rid in item.region_ids
+                 if rid in world.regions]
+        rows.append("  Беда «%s» — %s, идёт %s"
+                    % (item.name, cat_names.get(item.kind, item.kind),
+                       years_text(year - item.start.year + 1)))
+        if lands:
+            rows.append("      земли: %s%s"
+                        % (", ".join(lands[:5]),
+                           " и ещё %d" % (len(lands) - 5)
+                           if len(lands) > 5 else ""))
+        invasion = world.invasion_of(item.id)
+        if invasion is not None:
+            leader = world.figures.get(invasion.leader_id)
+            rows.append("      пришли: %s; ведёт %s"
+                        % (invasion.kind,
+                           leader.name if leader is not None
+                           and not invasion.leader_hidden
+                           else "неизвестно кто"))
+        said = True
+
+    wars = [item for item in world.wars.values()
+            if item.start.year <= year
+            and (item.end is None or item.end.year >= year)]
+    for war in sorted(wars, key=lambda row: (-row.scale, row.id))[:6]:
+        attacker = world.polities.get(war.attacker_id)
+        defender = world.polities.get(war.defender_id)
+        rows.append("  Война «%s»: %s против %s, с %d года"
+                    % (war.name,
+                       attacker.full_name if attacker else "?",
+                       defender.full_name if defender else "?",
+                       war.start.year))
+        said = True
+
+    eras = [item for item in world.crisis_eras.values()
+            if item.name and item.start.year <= year
+            and (item.end is None or item.end.year >= year)]
+    for item in eras:
+        rows.append("  Это время зовут «%s» (с %d года)"
+                    % (item.name, item.start.year))
+        said = True
+
+    if not said:
+        rows.append("  Тихий год: ни войн, ни бедствий.")
+    rows.append("")
+    return rows
+
+
+def _year_powers(world, year: int) -> list:
+    """Кто в этот год держит землю: державы, племена, города."""
+    polities = [item for item in world.polities.values()
+                if item.founded.year <= year
+                and (item.ended is None or item.ended.year >= year)]
+    towns = [item for item in world.settlements.values()
+             if item.founded.year <= year
+             and (item.ended is None or item.ended.year >= year)]
+    tribes = [item for item in world.tribes.values()
+              if item.founded.year <= year
+              and (item.ended is None or item.ended.year >= year)]
+    rows = ["ДЕРЖАВЫ И НАРОДЫ", "",
+            "  Держав %d, городов %d, племён %d."
+            % (len(polities), len(towns), len(tribes))]
+    if not polities:
+        rows.append("  Мир ещё племенной: держав нет.")
+        rows.append("")
+        return rows
+
+    # Порядок — по тому, сколько городов держава успела поставить к этому
+    # году: людность прошлых веков нигде не записана, а города записаны.
+    def held(polity):
+        return sum(1 for town in towns
+                   if town.polity_id == polity.id
+                   or town.id in polity.settlement_ids)
+
+    polities.sort(key=lambda item: (-held(item), item.founded.ordinal,
+                                    item.id))
+    for polity in polities[:12]:
+        race = races_mod.RACES_BY_ID.get(polity.race_id)
+        rows.append("  %s — %s, с %d года"
+                    % (polity.full_name,
+                       race.name if race is not None else "?",
+                       polity.founded.year))
+        marks = []
+        ruler = _ruler_at(world, polity, year)
+        if ruler is not None:
+            marks.append("правит %s" % ruler)
+        capital = world.settlements.get(polity.capital_id)
+        if capital is not None and capital.founded.year <= year:
+            marks.append("престол в городе по имени %s" % capital.name)
+        faith = world.faiths.get(polity.faith_id)
+        if faith is not None and faith.founded.year <= year:
+            marks.append("вера «%s»" % faith.name)
+        count = held(polity)
+        if count:
+            marks.append("городов %d" % count)
+        if marks:
+            rows.append("      %s" % "; ".join(marks))
+    if len(polities) > 12:
+        rows.append("  ...и ещё %d держав помельче." % (len(polities) - 12))
+    rows.append("")
+    return rows
+
+
+def _ruler_at(world, polity, year: int):
+    """Кто сидел на престоле в этот год — по срокам правлений."""
+    for reign_id in polity.reign_ids:
+        reign = world.reigns.get(reign_id)
+        if reign is None or reign.start is None:
+            continue
+        if reign.start.year > year:
+            continue
+        if reign.end is not None and reign.end.year < year:
+            continue
+        ruler = world.figures.get(reign.ruler_id)
+        if ruler is None:
+            continue
+        return "%s (с %d года)" % (ruler.name, reign.start.year)
+    return None
+
+
+def _year_faiths(world, year: int) -> list:
+    """Во что верят в этот год."""
+    faiths = [item for item in world.faiths.values()
+              if item.founded.year <= year
+              and (item.ended is None or item.ended.year >= year)]
+    if not faiths:
+        return []
+    rows = ["ВЕРА", "", "  Вер живых: %d." % len(faiths)]
+    faiths.sort(key=lambda item: (-item.peak_followers, item.id))
+    for faith in faiths[:8]:
+        deity = world.deities.get(faith.chief_deity_id)
+        rows.append("  «%s» — с %d года%s"
+                    % (faith.name, faith.founded.year,
+                       ", главный среди богов %s" % deity.full_name
+                       if deity is not None else ""))
+    if len(faiths) > 8:
+        rows.append("  ...и ещё %d вер." % (len(faiths) - 8))
+    rows.append("")
+    return rows
+
+
+def _year_people(world, year: int) -> list:
+    """Кто из тяжёлых имён в этот год жив — и кто из них уже не человек."""
+    from . import subject as subject_cat
+
+    rows = []
+    weighty = []
+    for weight in world.renowns.values():
+        figure = world.figures.get(weight.figure_id)
+        if figure is None or figure.birth is None:
+            continue
+        if figure.birth.year > year:
+            continue
+        if figure.death is not None and figure.death.year < year:
+            continue
+        weighty.append((weight, figure))
+    weighty.sort(key=lambda pair: (-pair[0].peak_level, pair[1].id))
+    if weighty:
+        rows.extend(["ИМЕНА, КОТОРЫЕ В ЭТОТ ГОД ЖИВЫ", ""])
+        for weight, figure in weighty[:10]:
+            race = races_mod.RACES_BY_ID.get(figure.race_id)
+            rows.append("  %s — %s, %s; вес в истории %d из 10"
+                        % (figure.name,
+                           race.name if race is not None else "?",
+                           years_text(year - figure.birth.year),
+                           weight.peak_level))
+        if len(weighty) > 10:
+            rows.append("  ...и ещё %d взвешенных имён." % (len(weighty) - 10))
+        rows.append("")
+
+    acting = []
+    for subject in world.subjects.values():
+        if subject.entered.year > year:
+            continue
+        if subject.ended is not None and subject.ended.year < year:
+            continue
+        busy = any(int(span.get("с", 0)) <= year <= int(span.get("по", 0))
+                   for span in subject.spans)
+        if busy:
+            acting.append(subject)
+    if acting:
+        rows.extend(["СУБЪЕКТЫ ИСТОРИИ, ДЕЙСТВУЮЩИЕ В ЭТОТ ГОД", ""])
+        for subject in acting[:8]:
+            race = races_mod.RACES_BY_ID.get(subject.race_id)
+            what = subject.kind
+            if what == subject_cat.PEOPLE:
+                what = race.name if race is not None else "человек мира"
+            rows.append("  %s — %s; %s: %s"
+                        % (subject.name, what,
+                           "ради чего есть" if what == subject_cat.GOD
+                           else "хочет", subject.wish))
+        if len(acting) > 8:
+            rows.append("  ...и ещё %d." % (len(acting) - 8))
+        rows.append("")
+    return rows
+
+
+def _year_events(world, year: int) -> list:
+    """Что записано этим годом — и что помнят из ближних лет."""
+    rows = ["ЧТО СЛУЧИЛОСЬ В ЭТОТ ГОД", ""]
+    same = [event for event in world.events if event.date.year == year]
+    if same:
+        for event in sorted(same, key=lambda item: (-item.importance,
+                                                    item.date.ordinal))[:25]:
+            rows.append("  %s %s" % (IMPORTANCE_MARKS.get(event.importance,
+                                                          "   "),
+                                     event.title))
+        if len(same) > 25:
+            rows.append("  ...и ещё %d записей этого года." % (len(same) - 25))
+    else:
+        rows.append("  В этот год летопись молчит.")
+    rows.append("")
+
+    near = [event for event in world.events
+            if year - 50 <= event.date.year < year and event.importance >= 4]
+    if near:
+        rows.extend(["ЧТО ЕЩЁ ПОМНЯТ ИЗ БЛИЖНИХ ПЯТИДЕСЯТИ ЛЕТ", ""])
+        for event in sorted(near, key=lambda item: item.date.ordinal)[-10:]:
+            rows.append("  [%d] %s" % (event.date.year, event.title))
+        rows.append("")
+    return rows
+
+
 def full_text(world) -> str:
     """Полный экспорт: летопись + справочники."""
     return "\n\n".join((
