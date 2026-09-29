@@ -623,8 +623,17 @@ def start_chained(ctx, year: int, spec, rng, severity: int, region_ids,
 
 def start_named(ctx, year: int, spec_key: str, rng, severity: int = 0,
                 region_ids=None, note: str = ""):
-    """Запускает бедствие заданного вида — для войн за веру и походов."""
+    """Запускает бедствие заданного вида — для войн за веру и походов.
+
+    Позвавший беду по имени не обходит общую память великих бед. Иначе
+    конец света становится погодой: вернувшийся вождь приводит своё
+    пробуждение в третий раз, сорванная печать будит Долгую Тьму через
+    век после предыдущей — и каждый такой приход мимо жребия, которым
+    великие беды держат друг друга в узде.
+    """
     spec = cat.get_spec(spec_key)
+    if spec.key in upheaval.GREAT and not rng.chance(_great_memory(ctx, year)):
+        return None
     calamity = _start_calamity(ctx, year, spec, rng, severity=severity,
                                region_ids=region_ids)
     if calamity is not None and note:
