@@ -189,9 +189,12 @@ def _decode_rle(flat) -> list:
 class Atlas(ttk.Frame):
     """Карта мира со всеми слоями, значками и карточкой гекса."""
 
-    def __init__(self, master, fonts=None):
+    def __init__(self, master, fonts=None, on_history=None):
         ttk.Frame.__init__(self, master)
         self.fonts = fonts or {}
+        # Обратная дорога: с карты — в «Историю мира», к записям об этой
+        # земле. Прямая (из истории на карту) уже есть.
+        self.on_history = on_history
         self.world = None
         self.wmap = None
 
@@ -330,6 +333,10 @@ class Atlas(ttk.Frame):
         side.pack_propagate(False)
         ttk.Label(side, textvariable=self.note_var, anchor="w",
                   wraplength=330).pack(fill="x", pady=(0, 4))
+        self.to_history = ttk.Button(side, text="Эта земля в истории",
+                                     command=self.ask_history,
+                                     state="disabled")
+        self.to_history.pack(fill="x", pady=(0, 4))
         holder = ttk.Frame(side)
         holder.pack(fill="both", expand=True)
         bar = ttk.Scrollbar(holder, orient="vertical")
@@ -1592,6 +1599,16 @@ class Atlas(ttk.Frame):
         self.describe(hex_index)
         self.redraw()
 
+    def ask_history(self) -> None:
+        """Показать в «Истории мира» всё, что записано об этой земле."""
+        if self.on_history is None or self._picked < 0 or self.world is None:
+            return
+        link = getattr(self.world, "map_link", None)
+        region_id = (getattr(link, "region_of_hex", {}) or {}).get(self._picked)
+        if not region_id:
+            return
+        self.on_history(region_id, self._year_now())
+
     def _region_hex(self, region_id: str) -> int:
         """Какой-нибудь гекс этой земли — лучше тот, где стоит город."""
         world = self.world
@@ -1636,6 +1653,11 @@ class Atlas(ttk.Frame):
                 self.card.insert("end", line + "\n")
         self.card.config(state="disabled")
         self.card.see("1.0")
+        link = getattr(self.world, "map_link", None)
+        has_land = bool((getattr(link, "region_of_hex", {}) or {}).get(index))
+        self.to_history.config(
+            state="normal" if (self.on_history is not None and has_land)
+            else "disabled")
 
     def _card_land(self, index: int) -> list:
         """Первое, что нужно знать о месте: что это за земля."""

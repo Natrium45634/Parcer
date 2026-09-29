@@ -534,7 +534,8 @@ class ChronicleApp(tk.Tk):
         заполняется лениво — только когда его открыли.
         """
         self.atlas = Atlas(self.tabs, fonts={"ui": self.ui_font,
-                                             "mono": self.mono})
+                                             "mono": self.mono},
+                           on_history=self.show_in_history)
         self.tabs.add(self.atlas, text="Карта мира")
         self._fillers[str(self.atlas)] = self._fill_atlas
 
@@ -559,6 +560,21 @@ class ChronicleApp(tk.Tk):
     def _fill_history(self) -> None:
         if self.world is not None:
             self.history.set_world(self.world)
+
+    def show_in_history(self, region_id: str, year: int) -> None:
+        """С карты — в «Историю мира»: всё, что записано об этой земле."""
+        if self.world is None:
+            return
+        titles = list(self.tabs._titles)
+        if "История мира" not in titles:
+            return
+        self.tabs.select(titles.index("История мира"))
+        self.update_idletasks()
+        self._on_tab_changed()
+        region = self.world.regions.get(region_id)
+        if region is not None:
+            self.history.region_var.set(region.name)
+        self.history.all_years()
 
     def show_on_map(self, year: int, region_id: str) -> None:
         """Перейти на карту и показать на ней место и год записи."""
