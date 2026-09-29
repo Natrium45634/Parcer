@@ -50,6 +50,53 @@ DENSITY_CHOICES = (
     ("Очень густая — летопись на каждый год", 2.2),
 )
 
+# Сколько записей самое большее уходит в окно летописи. На десяти тысячах
+# лет мир пишет сто с лишним тысяч записей, и «всё подряд» собиралось в
+# текст на тридцать семь мегабайт: окно вставало на восемь секунд, а
+# читать такое всё равно нельзя. Предел раскладывается по эпохам, так что
+# виден весь ход мира; вся история без изъятий лежит на вкладке «История
+# мира» и уходит в выгрузку файлом.
+# Ручки отбора в списке личностей. «Вес в истории» — ступень из
+# renown.py: она собрана из дел, а не из должности, поэтому «государственный
+# человек и выше» отсекает и королей без дел.
+ANY_RACE = "Все расы"
+ANY_TITLE = "Любой титул"
+ANY_ROLE = "Любая роль"
+SEX_CHOICES = ("Любой", "Мужчины", "Женщины")
+WEIGHT_CHOICES = (
+    ("Все, кто есть", 0),
+    ("Заметные в округе и выше", 2),
+    ("Люди своей земли и выше", 3),
+    ("Государственные люди и выше", 5),
+    ("Эпохальные и выше", 6),
+    ("Легендарные и выше", 7),
+    ("Мировые и выше", 8),
+)
+
+# Сколько строк самое большее уходит в список личностей. Больше в таблицу
+# кладать незачем: сорок тысяч строк не читают, а отбор на то и дан.
+FIGURES_LIMIT = 4000
+
+
+def _as_year(var):
+    """Год из поля ввода: пусто и ерунда — это «не задано», а не ноль."""
+    if var is None:
+        return None
+    text = var.get().strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+CHRONICLE_LIMIT = 3000
+
+# То же для былей: их под тысячу, и каждая расписана вдвое — разбором и
+# пересказом. Двести штук вразбивку по всей истории — уже долгое чтение.
+STORIES_LIMIT = 200
+
 IMPORTANCE_CHOICES = (
     ("Только эпохальное", 5),
     ("Главное: страны, расы, эпохи", 4),
@@ -473,7 +520,8 @@ class ChronicleApp(tk.Tk):
                 self.lives_text, chronicle.render_lifepaths(self.world)))
         self.stories_text = self._add_text_tab(
             "Были", lambda: self._set_text(
-                self.stories_text, chronicle.render_stories(self.world)))
+                self.stories_text, chronicle.render_stories(self.world,
+                                          limit=STORIES_LIMIT)))
         self.towns_text = self._add_text_tab(
             "Жизнь городов", lambda: self._set_text(
                 self.towns_text, chronicle.render_towns(self.world)))
@@ -752,14 +800,101 @@ class ChronicleApp(tk.Tk):
         return self._make_text(frame)
 
     def _figures_toolbar(self, parent) -> None:
-        bar = ttk.Frame(parent)
-        bar.pack(fill="x", pady=(6, 2))
+        """Ручки отбора над списком личностей.
+
+        Людей в мире на десять тысяч лет — сто с лишним тысяч, и даже
+        тех, кто попал в летопись, под сорок тысяч. Простыня такой длины
+        не читается и не листается: её можно только прокручивать мимо.
+        Поэтому список спрашивают, а не пролистывают — расой, весом в
+        истории, титулом, ролью, полом, веком и словом в имени.
+        """
+        top = ttk.Frame(parent)
+        top.pack(fill="x", pady=(6, 1))
+        bottom = ttk.Frame(parent)
+        bottom.pack(fill="x", pady=(1, 3))
+
+        def pick(bar, label, var, values, width):
+            ttk.Label(bar, text=label).pack(side="left", padx=(8, 4))
+            box = ttk.Combobox(bar, textvariable=var, state="readonly",
+                               width=width, values=values)
+            box.pack(side="left")
+            box.bind("<<ComboboxSelected>>", lambda _e: self._refill_figures())
+            return box
+
+        self.fig_race_var = tk.StringVar(value=ANY_RACE)
+        self.fig_race_box = pick(top, "Раса:", self.fig_race_var, [ANY_RACE], 20)
+        self.fig_weight_var = tk.StringVar(value=WEIGHT_CHOICES[0][0])
+        pick(top, "Вес в истории:", self.fig_weight_var,
+             [name for name, _ in WEIGHT_CHOICES], 30)
+        self.fig_title_var = tk.StringVar(value=ANY_TITLE)
+        self.fig_title_box = pick(top, "Титул:", self.fig_title_var,
+                                  [ANY_TITLE], 22)
+        self.fig_role_var = tk.StringVar(value=ANY_ROLE)
+        self.fig_role_box = pick(top, "Роль:", self.fig_role_var, [ANY_ROLE], 20)
+
+        self.fig_sex_var = tk.StringVar(value=SEX_CHOICES[0])
+        pick(bottom, "Пол:", self.fig_sex_var, list(SEX_CHOICES), 10)
+
+        ttk.Label(bottom, text="Годы:").pack(side="left", padx=(8, 4))
+        self.fig_from_var = tk.StringVar(value="")
+        entry = ttk.Entry(bottom, textvariable=self.fig_from_var, width=7)
+        entry.pack(side="left")
+        entry.bind("<Return>", lambda _e: self._refill_figures())
+        ttk.Label(bottom, text="—").pack(side="left", padx=3)
+        self.fig_to_var = tk.StringVar(value="")
+        entry = ttk.Entry(bottom, textvariable=self.fig_to_var, width=7)
+        entry.pack(side="left")
+        entry.bind("<Return>", lambda _e: self._refill_figures())
+
+        ttk.Label(bottom, text="Имя:").pack(side="left", padx=(12, 4))
+        self.fig_find_var = tk.StringVar(value="")
+        entry = ttk.Entry(bottom, textvariable=self.fig_find_var, width=18)
+        entry.pack(side="left")
+        entry.bind("<Return>", lambda _e: self._refill_figures())
+
         self.only_noble = tk.BooleanVar(value=True)
-        ttk.Checkbutton(bar, text="Только те, кто попал в летопись",
+        ttk.Checkbutton(bottom, text="Только те, кто попал в летопись",
                         variable=self.only_noble,
-                        command=self._refill_figures).pack(side="left", padx=6)
+                        command=self._refill_figures).pack(side="left", padx=10)
+        ttk.Button(bottom, text="Показать",
+                   command=self._refill_figures).pack(side="left", padx=6)
+        ttk.Button(bottom, text="Сбросить",
+                   command=self._reset_figures).pack(side="left")
         self.figures_note = tk.StringVar(value="")
-        ttk.Label(bar, textvariable=self.figures_note).pack(side="left", padx=10)
+        ttk.Label(bottom, textvariable=self.figures_note).pack(side="left",
+                                                               padx=10)
+
+    def _reset_figures(self) -> None:
+        self.fig_race_var.set(ANY_RACE)
+        self.fig_weight_var.set(WEIGHT_CHOICES[0][0])
+        self.fig_title_var.set(ANY_TITLE)
+        self.fig_role_var.set(ANY_ROLE)
+        self.fig_sex_var.set(SEX_CHOICES[0])
+        self.fig_from_var.set("")
+        self.fig_to_var.set("")
+        self.fig_find_var.set("")
+        self.only_noble.set(True)
+        self._refill_figures()
+
+    def _fill_figure_picks(self) -> None:
+        """Заполнить списки выбора тем, что в этом мире действительно есть.
+
+        Двадцать одна раса и сотня титулов в справочнике — а в конкретном
+        мире может не быть ни кобольдов, ни архимагов. Предлагать выбор,
+        который заведомо ничего не найдёт, — обманывать.
+        """
+        world = self.world
+        races, titles, roles = set(), set(), set()
+        for figure in world.figures.values():
+            races.add(figure.race_id)
+            if figure.titles:
+                titles.add(figure.titles[0])
+            for role in figure.roles:
+                roles.add(role)
+        order = [race.name for race in RACES if race.id in races]
+        self.fig_race_box.config(values=[ANY_RACE] + order)
+        self.fig_title_box.config(values=[ANY_TITLE] + sorted(titles))
+        self.fig_role_box.config(values=[ANY_ROLE] + sorted(roles))
 
     def _add_tree_tab(self, title, columns, widths, on_open,
                       toolbar=None, filler=None) -> ttk.Treeview:
@@ -936,6 +1071,7 @@ class ChronicleApp(tk.Tk):
             self.atlas.clear()     # чтобы не осталась карта прошлого мира
         if getattr(self, "history", None) is not None:
             self.history.world = None
+        self._fill_figure_picks()   # в списках выбора — только то, что в мире есть
         self.refresh_chronicle()
         self._set_text(self.eras_text, chronicle.render_eras(world))
         self._set_text(self.folks_text, chronicle.render_folks(world))
@@ -972,7 +1108,7 @@ class ChronicleApp(tk.Tk):
         self.update_idletasks()
         text = chronicle.render_chronicle(
             self.world, min_importance=level, race_id=race_id,
-            search=self.search_var.get())
+            search=self.search_var.get(), limit=CHRONICLE_LIMIT)
         self._set_text(self.chronicle_text, text)
         self.status_var.set("Летопись обновлена.")
 
@@ -1104,9 +1240,60 @@ class ChronicleApp(tk.Tk):
         world = self.world
         only_noble = getattr(self, "only_noble", None)
         filtered = only_noble.get() if only_noble is not None else True
+
+        race_id = ""
+        chosen = getattr(self, "fig_race_var", None)
+        if chosen is not None and chosen.get() != ANY_RACE:
+            for race in RACES:
+                if race.name == chosen.get():
+                    race_id = race.id
+                    break
+        floor = dict(WEIGHT_CHOICES).get(
+            getattr(self, "fig_weight_var", None)
+            and self.fig_weight_var.get(), 0)
+        want_title = getattr(self, "fig_title_var", None)
+        want_title = want_title.get() if want_title is not None else ANY_TITLE
+        want_role = getattr(self, "fig_role_var", None)
+        want_role = want_role.get() if want_role is not None else ANY_ROLE
+        want_sex = getattr(self, "fig_sex_var", None)
+        want_sex = want_sex.get() if want_sex is not None else SEX_CHOICES[0]
+        find = getattr(self, "fig_find_var", None)
+        find = find.get().strip().lower() if find is not None else ""
+        year_from = _as_year(getattr(self, "fig_from_var", None))
+        year_to = _as_year(getattr(self, "fig_to_var", None))
+
         rows = []
+        matched = 0
         for figure in world.figures.values():
             if filtered and not figure.deeds:
+                continue
+            if race_id and figure.race_id != race_id:
+                continue
+            if want_sex == SEX_CHOICES[1] and figure.sex != "m":
+                continue
+            if want_sex == SEX_CHOICES[2] and figure.sex != "f":
+                continue
+            if want_title != ANY_TITLE and (
+                    not figure.titles or figure.titles[0] != want_title):
+                continue
+            if want_role != ANY_ROLE and want_role not in figure.roles:
+                continue
+            if year_from is not None and figure.birth is not None \
+                    and figure.birth.year < year_from:
+                continue
+            if year_to is not None and figure.birth is not None \
+                    and figure.birth.year > year_to:
+                continue
+            if find and find not in figure.name.lower():
+                continue
+            if floor:
+                # Вес записан у считаных: у прочих его просто нет, и это
+                # не ноль, а «не взвешен».
+                weight = world.renown_of(figure.id)
+                if weight is None or weight.level < floor:
+                    continue
+            matched += 1
+            if len(rows) >= FIGURES_LIMIT:
                 continue
             house = world.houses.get(figure.house_id)
             rows.append((figure.id, (
@@ -1119,9 +1306,24 @@ class ChronicleApp(tk.Tk):
                 len(figure.deeds))))
         self._fill_tree(self.figure_tree, rows)
         if hasattr(self, "figures_note"):
-            self.figures_note.set("показано %d из %d" % (len(rows), len(world.figures)))
+            if matched > len(rows):
+                self.figures_note.set(
+                    "подошло %d, показаны первые %d — сузьте отбор"
+                    % (matched, len(rows)))
+            else:
+                self.figures_note.set("показано %d из %d"
+                                      % (matched, len(world.figures)))
 
     def _sort_tree(self, tree, column, descending) -> None:
+        """Переставить строки списка по одному столбцу.
+
+        Строк тут бывает под сорок тысяч, и переставлять их по одной
+        (`tree.move`) нельзя: каждый такой вызов уходит в Tk отдельно, и
+        на списке личностей щелчок по заголовку вставал на полминуты —
+        снаружи это выглядело как зависшая программа. Поэтому порядок
+        считается в Python, а Tk получает его целиком одним вызовом
+        `set_children`: вместо сорока тысяч разговоров — один.
+        """
         data = [(tree.set(item, column), item) for item in tree.get_children("")]
 
         def key(pair):
@@ -1131,8 +1333,7 @@ class ChronicleApp(tk.Tk):
                 return (1, 0.0, pair[0])
 
         data.sort(key=key, reverse=descending)
-        for position, (_, item) in enumerate(data):
-            tree.move(item, "", position)
+        tree.set_children("", *[item for _, item in data])
         tree.heading(column, command=lambda: self._sort_tree(tree, column, not descending))
 
     # ------------------------------------------------------------------

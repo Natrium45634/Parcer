@@ -129,8 +129,21 @@ def render_header(world) -> str:
 
 
 def render_chronicle(world, min_importance: int = 1, kinds=None,
-                     race_id: str = "", search: str = "", width: int = 100) -> str:
-    """Основной текст летописи, разбитый по эпохам."""
+                     race_id: str = "", search: str = "", width: int = 100,
+                     limit: int = None) -> str:
+    """Основной текст летописи, разбитый по эпохам.
+
+    `limit` — сколько записей самое большее показать. Он нужен окну, а не
+    выгрузке: на десяти тысячах лет мир пишет сто с лишним тысяч записей,
+    и на подробности «всё» текст выходит на тридцать семь мегабайт. Такое
+    не читают — такое ждут. Поэтому окно просит предел, а выгрузка в файл
+    зовёт без него и получает всё до последнего племени.
+
+    Предел раскладывается по эпохам соразмерно тому, сколько в каждую
+    попало, и внутри эпохи берётся самое важное. Так видно весь ход мира
+    от первой эпохи до последней, а не первые три века в подробностях и
+    обрыв: летопись, показывающая только начало, хуже короткой.
+    """
     search_low = search.strip().lower()
     parts = [render_header(world), ""]
 
@@ -138,10 +151,15 @@ def render_chronicle(world, min_importance: int = 1, kinds=None,
     for event in world.events:
         by_era.setdefault(event.era_index, []).append(event)
 
+    # Отбор идёт один раз: прежде он считался дважды — отдельно для
+    # показа и отдельно для строки «показано столько из столько», и на
+    # ста тысячах записей второй проход стоил ровно столько же, сколько
+    # первый.
+    picked = {}
+    matched = 0
     for era in world.eras:
-        events = by_era.get(era.index, [])
         shown = []
-        for event in events:
+        for event in by_era.get(era.index, []):
             if event.importance < min_importance:
                 continue
             if kinds and event.kind not in kinds:
@@ -151,6 +169,41 @@ def render_chronicle(world, min_importance: int = 1, kinds=None,
             if search_low and search_low not in (event.title + " " + event.text).lower():
                 continue
             shown.append(event)
+        picked[era.index] = shown
+        matched += len(shown)
+
+    trimmed = 0
+    if limit and matched > limit:
+        for era in world.eras:
+            shown = picked[era.index]
+            if not shown:
+                continue
+            # Соразмерная доля, но не меньше пяти записей: эпоха, в
+            # которую попало мало, всё равно должна сказать о себе.
+            quota = max(5, int(limit * len(shown) / float(matched)))
+            if len(shown) <= quota:
+                continue
+            # Сначала самое важное, а потом снова по годам: читается
+            # летопись по порядку, а отбирается по весу.
+            shown.sort(key=lambda item: (-item.importance, item.date.ordinal,
+                                         item.id))
+            del shown[quota:]
+            shown.sort(key=lambda item: (item.date.ordinal, item.id))
+            trimmed = 1
+        if trimmed:
+            total_shown = sum(len(rows) for rows in picked.values())
+            parts.append("  " + "-" * 74)
+            parts.append("  Записей по этим условиям: %d. Показано самое "
+                         "весомое — %d," % (matched, total_shown))
+            parts.append("  соразмерно по всем эпохам, от первой до последней.")
+            parts.append("  Вся история без изъятий — на вкладке «История мира»:")
+            parts.append("  там отбор по годам, важности, роду, земле, державе "
+                         "и слову.")
+            parts.append("  " + "-" * 74)
+            parts.append("")
+
+    for era in world.eras:
+        shown = picked[era.index]
 
         parts.append("-" * 78)
         parts.append("  %s   (%d — %d, %s)" % (
@@ -170,13 +223,14 @@ def render_chronicle(world, min_importance: int = 1, kinds=None,
         parts.append("")
 
     parts.append("=" * 78)
-    parts.append("  Событий показано: %d из %d" % (
-        sum(1 for era in world.eras for event in by_era.get(era.index, [])
-            if event.importance >= min_importance
-            and (not kinds or event.kind in kinds)
-            and (not race_id or event.race_id == race_id)
-            and (not search_low or search_low in (event.title + " " + event.text).lower())),
-        len(world.events)))
+    total_shown = sum(len(rows) for rows in picked.values())
+    if trimmed:
+        parts.append("  Событий показано: %d; подошло по условиям: %d; "
+                     "всего в мире: %d" % (total_shown, matched,
+                                           len(world.events)))
+    else:
+        parts.append("  Событий показано: %d из %d" % (matched,
+                                                       len(world.events)))
     return "\n".join(parts)
 
 
@@ -1657,7 +1711,7 @@ def _faith_name(world, faith_id: str) -> str:
     return faith.name if faith is not None else faith_id
 
 
-def render_stories(world) -> str:
+def render_stories(world, limit: int = None) -> str:
     """Были: маленькие истории, выросшие из большой.
 
     У каждой были здесь два представления — того же требует её
@@ -1671,6 +1725,14 @@ def render_stories(world) -> str:
     Девять из десяти былей не спасают мир, и сводка вверху это
     показывает числами: если бы каждая вторая история была про древнее
     зло, живого мира не получилось бы.
+
+    `limit` нужен окну: на десяти тысячах лет мир находит под тысячу
+    былей, и все они вместе — почти четыре мегабайта текста. Отбираются
+    они не первые подряд, а вразбивку по всей истории: иначе в окно
+    попадут только те, что случились в первых веках, а поздние эпохи
+    останутся без своих историй. Сводка вверху при этом считается по
+    всем былям, а не по показанным, — числа о мире не должны зависеть от
+    того, сколько мы взялись читать. Выгрузка файлом зовёт без предела.
     """
     from . import history
     from . import localstory as cat
@@ -1721,7 +1783,18 @@ def render_stories(world) -> str:
         rows.append("  Через поколение выросло в предание: %d." % songs)
     rows.append("")
 
-    for story in order:
+    shown = order
+    if limit and total > limit:
+        # Шаг по всей истории: берём каждую N-ю быль, чтобы в окне были и
+        # первые века, и последние.
+        step = total / float(limit)
+        shown = [order[int(index * step)] for index in range(limit)]
+        rows.append("  Показано былей: %d из %d — вразбивку по всей истории."
+                    % (len(shown), total))
+        rows.append("  Все до последней уходят в выгрузку летописи файлом.")
+        rows.append("")
+
+    for story in shown:
         rows.extend(_story_block(world, story, cat, texts, history))
     return "\n".join(rows)
 
