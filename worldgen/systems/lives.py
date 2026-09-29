@@ -46,7 +46,8 @@ def name_cause(ctx, figure, race=None, age: int = 0) -> str:
     if age <= 0:
         age = max(1, figure.death.year - figure.birth.year)
     rng = ctx.rng("death-cause", figure.id)
-    figure.death_cause = mortality.cause_for(rng, figure, race, age)
+    gift = ctx.world.race_gifts.get(figure.race_id, "")
+    figure.death_cause = mortality.cause_for(rng, figure, race, age, gift)
     return figure.death_cause
 
 

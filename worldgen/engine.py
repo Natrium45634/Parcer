@@ -21,6 +21,7 @@ from .chronicle_map import MapRecorder
 from .context import GenContext
 from .eras import build_eras
 from . import fates
+from . import mortality
 from .rng import normalize_seed, seed_to_int
 from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       disaster as disaster_sys,
@@ -47,6 +48,11 @@ from .timeline import Date
 from .world import World
 from . import tuning
 from . import narrative
+
+# Как часто мир достаётся высшим эльфам без старости. Треть — чтобы такой
+# мир был находкой, а не правилом: если они бессмертны всегда, это уже не
+# свойство мира, а свойство расы, и говорить о нём нечего.
+UNAGING_ELVES_CHANCE = 0.34
 
 UPKEEP_PERIOD = 10          # раз во столько лет пересчитываются население и упадок
 
@@ -117,6 +123,7 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     # падений. Дальше её знает только ёмкость земель.
     ctx.fate = fates.choose(ctx.rng("fate"))
     world.notes["судьба"] = ctx.fate.describe()
+    _race_gifts(ctx)
     geography.build(ctx)
 
     rng = ctx.rng("world_begin")
@@ -263,6 +270,29 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     if progress is not None:
         progress(1.0, "Готово")
     return world
+
+
+def _race_gifts(ctx) -> None:
+    """Чем раса в этом мире отличается от себя же в другом.
+
+    Пока здесь одно, но важное: **высшие эльфы не в каждом мире умирают от
+    старости**. В одном мире они стареют, как все прочие эльфы, только
+    медленнее; в другом старости у них нет вовсе — и тогда конец у них не
+    смерть, а уход: за море, в чертоги богов, в глубь леса, в камень. Убить
+    их это не мешает, и в бою они гибнут наравне со смертными.
+
+    Жребий бросается раз на мир, до первого его года, своим потоком — и
+    записывается в мир, чтобы летопись могла об этом сказать прямо. Это
+    свойство мира, а не расы: два мира на разных сидах будут в этом
+    отличаться, и отличие названо, а не спрятано.
+    """
+    world = ctx.world
+    rng = ctx.rng("race-gifts")
+    if rng.chance(UNAGING_ELVES_CHANCE):
+        world.race_gifts["high_elf"] = mortality.UNAGING
+        world.notes["высшие эльфы"] = (
+            "в этом мире высшие эльфы не умирают от старости: их убивают, "
+            "они уходят за море, их забирают боги — но век им не отмерен")
 
 
 def _finalize(world: World) -> None:

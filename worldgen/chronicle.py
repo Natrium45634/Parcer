@@ -266,7 +266,31 @@ def fate_lines(world) -> list:
     level = fate.get("людность")
     if level:
         rows.append("    Мир %s." % level)
+    rows.extend(gift_lines(world))
     rows.append("")
+    return rows
+
+
+def gift_lines(world) -> list:
+    """Чем расы этого мира отличаются от себя же в другом.
+
+    Такое надо говорить прямо, а не оставлять человека гадать, отчего
+    высшие эльфы у него живут по три тысячи лет и ни один не умирает
+    стариком. Свойство мира, названное вслух, — часть мира; не названное —
+    похоже на поломку.
+    """
+    gifts = getattr(world, "race_gifts", None) or {}
+    if not gifts:
+        return []
+    from . import races as races_mod
+
+    rows = ["", "    ОСОБЕННОСТЬ ЭТОГО МИРА"]
+    for race_id, gift in sorted(gifts.items()):
+        race = races_mod.RACES_BY_ID.get(race_id)
+        rows.append("    %s — %s." % (race.name if race else race_id, gift))
+    note = (world.notes or {}).get("высшие эльфы")
+    if note:
+        rows.append("    %s%s." % (note[0].upper(), note[1:]))
     return rows
 
 

@@ -195,6 +195,7 @@ def world_to_dict(world: World) -> dict:
                    for item in world.cabals.values()],
         "seeds": [_compact(Seed, item.to_dict()) for item in world.seeds.values()],
         "race_awakening": world.race_awakening,
+        "race_gifts": world.race_gifts,
         "counters": world._counters,
         "notes": world.notes,
         "census": world.census,
@@ -353,6 +354,7 @@ def dict_to_world(data: dict) -> World:
         if league.status == ACTIVE:
             world.active_leagues.append(league.id)
     world.dark_ages = list(data.get("dark_ages") or ())
+    world.race_gifts = dict(data.get("race_gifts") or {})
     for item in data.get("deities", ()):
         deity = Deity(**_clean(Deity, item))
         world.deities[deity.id] = deity

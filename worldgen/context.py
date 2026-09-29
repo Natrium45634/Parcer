@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from . import mortality
 from . import races as races_mod
 from .eras import spec_for
 from .names import NameForge
@@ -224,6 +225,13 @@ class GenContext:
 
         low, high = race.lifespan
         lifespan = rng.randint(low, high)
+        # Раса, которой век не отмерен, живёт дольше своего же предела — и
+        # кончается не старостью, а уходом. Совсем без срока нельзя: мир
+        # должен идти дальше, а государь, сидящий на престоле десять тысяч
+        # лет, останавливает историю своей державы вернее любого бедствия.
+        if world.race_gifts.get(race.id) == mortality.UNAGING:
+            least, most = mortality.UNAGING_SPAN
+            lifespan = int(high * rng.uniform(least, most))
         if not birth_year:
             # Возраст в момент деяния: зрелость, но ещё не закат.
             age = int(lifespan * rng.uniform(0.22, 0.48))
