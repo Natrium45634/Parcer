@@ -358,7 +358,9 @@ def _declare(ctx, attacker, defender, year: int, rng, forced: str = "",
     at_sea = (not by_land) or (attacker_ships >= 2 and defender_ships >= 1
                                and rng.chance(0.5))
 
-    scale = warfare.war_scale(attacker_men, defender_men)
+    scale = warfare.war_scale(attacker_men, defender_men,
+                              attacker.population + defender.population,
+                              world.greatest_polity_souls())
     parity = min(attacker_men, defender_men) / float(max(1, max(attacker_men,
                                                                 defender_men)))
     date = ctx.date_in(rng, year)
@@ -685,6 +687,7 @@ def _campaign_year(ctx, war, year: int) -> None:
                          + rng.uniform(0.022, 0.065) / max(0.6, zeal))
     attacker.weariness = min(1.0, attacker.weariness + 0.035)
     defender.weariness = min(1.0, defender.weariness + 0.045)
+    _ravage(ctx, war, attacker, defender, year, rng)
 
     # --- чем занят год ---
     # Чем крупнее война, тем чаще сходятся: у больших держав и войск
@@ -868,7 +871,7 @@ def _battle(ctx, war, attacker, defender, year: int, rng) -> None:
                           d_general, attacker_wins, big, year, rng)
     if extra:
         text = "%s %s" % (text, " ".join(extra))
-    _toll(ctx, settlement, winner_dead + loser_dead, rng)
+    war.civil_losses += _toll(ctx, settlement, winner_dead + loser_dead, rng)
 
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="battle",
@@ -950,13 +953,67 @@ def _ennoble(ctx, polity, year: int, battle, rng):
     return hero
 
 
-def _toll(ctx, settlement, deaths: int, rng) -> None:
-    """Война выкашивает не только войско: округа сражения беднеет."""
-    if settlement is None or settlement.status != ACTIVE:
+# Сколько душ в год теряет земля, по которой идёт война, — доля от
+# людности поселений, попавших под поход. Войско не воюет круглый год, но
+# оно круглый год стоит на чьей-то земле и кормится с неё: угнанный скот,
+# вытоптанное поле и сожжённая деревня стоят людей вернее сражения.
+RAVAGE_SHARE = 0.004
+RAVAGE_TOWNS = 3        # сколько поселений затрагивает поход за год
+
+
+def _ravage(ctx, war, attacker, defender, year: int, rng) -> None:
+    """Земля, по которой идёт война, беднеет каждый год, а не только в бою.
+
+    Это и есть главная цена войны, которой прежде не было в счёте. В
+    летописи стояли одни убитые под знамёнами, и война двух княжеств
+    выходила в сто двадцать человек: сто двадцать ратников, а деревни
+    вокруг — ноль, потому что их никто не считал.
+
+    Разоряют того, кто отступает: войско стоит на его земле. Считаются
+    несколько поселений, а не все, — поход идёт по дороге, а не по всей
+    державе сразу.
+    """
+    world = ctx.world
+    losing = defender if war.momentum >= 0 else attacker
+    cities = [world.settlements[cid] for cid in losing.settlement_ids
+              if cid in world.settlements
+              and world.settlements[cid].status == ACTIVE]
+    if not cities:
         return
+    # Чем крупнее война, тем шире её след по земле.
+    count = min(len(cities), 1 + war.scale // 2, RAVAGE_TOWNS)
+    # Берём по порядку в списке державы, а не жребием: жребий тут добавил
+    # бы броски и сдвинул все миры, а порядок и без того свой у каждой
+    # державы.
+    start = (year + war.start.year) % len(cities)
+    lost = 0
+    for step in range(count):
+        town = cities[(start + step) % len(cities)]
+        share = RAVAGE_SHARE * rng.uniform(0.5, 1.8)
+        loss = int(town.population * share)
+        if loss <= 0:
+            continue
+        town.population = max(50, town.population - loss)
+        lost += loss
+    if lost:
+        war.civil_losses += lost
+
+
+def _toll(ctx, settlement, deaths: int, rng) -> int:
+    """Война выкашивает не только войско: округа сражения беднеет.
+
+    Убыль эта случалась и прежде, но нигде не считалась: население города
+    уменьшалось молча, а в итогах войны стояли одни ратники. Оттого война
+    двух княжеств и стоила «сто двадцать человек» — сто двадцать под
+    знамёнами, а сколько по деревням вокруг, не писал никто. Теперь
+    возвращает, сколько мирных потеряно, и это идёт в счёт войны.
+    """
+    if settlement is None or settlement.status != ACTIVE:
+        return 0
     loss = int(min(settlement.population * 0.12,
                    deaths * rng.uniform(0.2, 0.6)))
     settlement.population = max(50, settlement.population - loss)
+    return max(0, loss)
 
 
 # ---------------------------------------------------------------------------
@@ -1103,14 +1160,15 @@ def _tick_sieges(ctx, war, attacker, defender, year: int, rng) -> None:
                 region_id=settlement.region_id, race_id=target.race_id)
             continue
 
-        # Город пал.
+        # Город пал. Погибшие при этом — горожане, а не войско: прежде
+        # они шли в потери обороняющейся державы, и выходило, будто под
+        # знамёнами стояли все, кто жил за стенами.
         deaths = int(settlement.population * rng.uniform(0.10, 0.30))
         settlement.population = max(60, settlement.population - deaths)
+        war.civil_losses += deaths
         if side == "attacker":
-            war.defender_losses += deaths
             war.momentum = min(1.0, war.momentum + 0.28)
         else:
-            war.attacker_losses += deaths
             war.momentum = max(-1.0, war.momentum - 0.28)
         _seize_city(ctx, war, besieger, target, settlement, date, year, rng)
 
@@ -1509,6 +1567,26 @@ def _join_feud(ctx, war, attacker, defender, year: int, rng) -> None:
         race_id=attacker.race_id)
 
 
+def _late_name(feud, rng) -> None:
+    """Поздние своды зовут распрю по её настоящему сроку.
+
+    Имя распре дают, пока она идёт, — на третьей войне, — и оно почти
+    всегда врёт: «Двухвековая война» получала имя, когда прошло двести
+    сорок лет, а тянулась потом пятьсот. Переписывать первое имя нельзя:
+    так её звали современники, и это факт истории. Поэтому у распри два
+    имени: то, под которым её знали, и то, под которым её знают. Если
+    первое имя и так верно, второго нет.
+    """
+    if not feud.first_name:
+        feud.first_name = feud.name
+    # Сравниваются не имена целиком, а слово о сроке: имена берутся из
+    # нескольких оборотов, и сравнение целиком объявляло бы переименование
+    # всегда.
+    word = texts.feud_span_word(feud.years)
+    if word.lower() not in feud.first_name.lower():
+        feud.late_name = texts.feud_name(rng, feud.years, feud.deaths)
+
+
 def _retire_feud(ctx, feud, year: int, rng) -> None:
     """Распря кончается тем, что о ней перестают вспоминать.
 
@@ -1528,6 +1606,7 @@ def _retire_feud(ctx, feud, year: int, rng) -> None:
     feud.end = last or ctx.date_in(rng, year)
     feud.deaths = sum(world.wars[wid].deaths for wid in feud.war_ids
                       if wid in world.wars)
+    _late_name(feud, rng)
     title, text = texts.feud_close(rng, feud, len(feud.war_ids), feud.deaths)
     first = world.polities.get(feud.polity_ids[0]) if feud.polity_ids else None
     world.add_event(
@@ -1552,6 +1631,7 @@ def _close_feud(ctx, war, year: int, rng) -> None:
     feud.end = war.end or ctx.date_in(rng, year)
     feud.deaths = sum(world.wars[wid].deaths for wid in feud.war_ids
                       if wid in world.wars)
+    _late_name(feud, rng)
     title, text = texts.feud_close(rng, feud, len(feud.war_ids), feud.deaths)
     world.add_event(
         date=feud.end, era_index=world.era_index_at(year), kind="feud_end",

@@ -2549,8 +2549,16 @@ def render_wars(world) -> str:
             span = "%s—%s" % (feud.start.year if feud.start else "?",
                               feud.end.year if feud.end else "…")
             rows.append("    %-26s %-12s войн %2d, погибло %8d   %s"
-                        % (feud.name, span, len(feud.war_ids), feud.deaths,
+                        % (feud.late_name or feud.name, span,
+                           len(feud.war_ids), feud.deaths,
                            " против ".join(sides)))
+            # Имя, данное при жизни распри, почти всегда врёт о сроке: его
+            # дают на третьей войне, а срок выходит вдвое больше. Оба имени
+            # тут и стоят.
+            if feud.late_name and feud.first_name \
+                    and feud.late_name != feud.first_name:
+                rows.append("        современники звали её иначе: %s"
+                            % feud.first_name)
         rows.append("")
 
     wars = sorted(world.wars.values(), key=lambda w: w.start.ordinal)
@@ -2558,18 +2566,21 @@ def render_wars(world) -> str:
         rows.append("  Войн в этой истории не было.")
         return "\n".join(rows)
 
-    header = "  %-8s %-34s %-9s %5s %9s  %s" % (
-        "Год", "Война", "Масштаб", "Лет", "Погибло", "Чем кончилась")
+    # Ратники и мирные — врозь. Прежде стояло одно число, и в нём тонуло
+    # главное: войну чаще всего платит не войско.
+    header = "  %-8s %-30s %-9s %4s %8s %8s  %s" % (
+        "Год", "Война", "Масштаб", "Лет", "Ратных", "Мирных",
+        "Чем кончилась")
     rows.append(header)
     rows.append("  " + "-" * (len(header) - 2))
     for war in wars:
         attacker = world.polities.get(war.attacker_id)
         defender = world.polities.get(war.defender_id)
-        rows.append("  %-8d %-34s %-9s %5s %9d  %s" % (
-            war.start.year, war.name[:34],
+        rows.append("  %-8d %-30s %-9s %4s %8d %8d  %s" % (
+            war.start.year, war.name[:30],
             "%d из 5" % war.scale,
             war.years if war.end else "идёт",
-            war.deaths, war.outcome or "идёт"))
+            war.soldiers, war.civil_losses, war.outcome or "идёт"))
         rows.append("        %s → %s" % (
             attacker.full_name if attacker else "?",
             defender.full_name if defender else "?"))
@@ -2593,8 +2604,11 @@ def render_wars(world) -> str:
             rows.append("        мира не заключали")
     rows.append("")
     finished = [w for w in wars if w.end is not None]
-    rows.append("  Всего войн: %d, погибших в них: %d" % (
-        len(wars), sum(w.deaths for w in wars)))
+    rows.append("  Всего войн: %d; погибло под знамёнами %d, мирных %d, "
+                "всего %d"
+                % (len(wars), sum(w.soldiers for w in wars),
+                   sum(w.civil_losses for w in wars),
+                   sum(w.deaths for w in wars)))
     if finished:
         longest = max(finished, key=lambda w: w.years)
         bloodiest = max(finished, key=lambda w: w.deaths)

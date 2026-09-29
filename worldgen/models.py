@@ -1310,6 +1310,11 @@ class War:
     defender_men: int = 0
     attacker_losses: int = 0
     defender_losses: int = 0
+    # Мирные — врозь от ратников. Прежде убитые при взятии города
+    # приписывались к потерям войска, а разорение округи не считалось
+    # вовсе: выходило, что война двух княжеств стоит сто двадцать человек,
+    # хотя по деревням вокруг она стоила вдесятеро больше.
+    civil_losses: int = 0
     momentum: float = 0.0      # -1 берут верх оборонявшиеся, +1 нападавшие
     exhaustion: float = 0.0    # насколько обе стороны выдохлись
     taken_ids: list = field(default_factory=list)     # перешедшие города
@@ -1326,8 +1331,14 @@ class War:
         return max(0, self.end.year - self.start.year)
 
     @property
-    def deaths(self) -> int:
+    def soldiers(self) -> int:
+        """Убитые под знамёнами — только они."""
         return self.attacker_losses + self.defender_losses
+
+    @property
+    def deaths(self) -> int:
+        """Чего война стоила всего: и ратников, и мирных."""
+        return self.attacker_losses + self.defender_losses + self.civil_losses
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -1621,6 +1632,13 @@ class Feud:
     end: Date = None
     status: str = ONGOING
     deaths: int = 0
+    # Имя распре дают, когда она ещё идёт, — и оно почти всегда врёт о
+    # сроке: «Двухвековая война» получала своё имя на третьей войне, а
+    # потом тянулась пять веков, и имя не менялось. Поздние своды зовут её
+    # по настоящему сроку, и оба имени остаются: у одного события несколько
+    # имён — это в этом мире правило, а не исключение.
+    first_name: str = ""       # как назвали, пока она шла
+    late_name: str = ""        # как зовут поздние своды, по настоящему сроку
 
     @property
     def years(self) -> int:

@@ -725,13 +725,16 @@ FEUD_ENDINGS = (
 )
 
 
-def feud_name(rng, years: int, deaths: int) -> str:
-    span = FEUD_SPANS[-1][1]
+def feud_span_word(years: int) -> str:
+    """Слово о сроке распри: «Столетняя», «Двухвековая», «Бесконечная»."""
     for threshold, word in FEUD_SPANS:
         if years >= threshold:
-            span = word
-            break
-    return rng.choice(FEUD_NAMES) % {"span": span}
+            return word
+    return FEUD_SPANS[-1][1]
+
+
+def feud_name(rng, years: int, deaths: int) -> str:
+    return rng.choice(FEUD_NAMES) % {"span": feud_span_word(years)}
 
 
 def feud_open(rng, feud, first, second):
@@ -741,9 +744,20 @@ def feud_open(rng, feud, first, second):
 
 
 def feud_close(rng, feud, wars: int, deaths: int):
-    return ("Конец распри: %s" % feud.name,
-            "%s Войн в ней было %d, погибших — %s."
-            % (cap(rng.choice(FEUD_ENDINGS)), wars, souls_text(deaths)))
+    """Конец распри — и то имя, под которым её будут знать потом.
+
+    Имя ей дали, пока она шла, и оно почти всегда врёт о сроке. Поздние
+    своды считают годы уже целиком — и зовут иначе. Оба имени остаются: под
+    первым её знали современники, под вторым знают потомки.
+    """
+    tail = ""
+    late = getattr(feud, "late_name", "")
+    if late and late != feud.name:
+        tail = (" Современники звали её иначе — %s: имя дали на третьей "
+                "войне, а срок вышел вдвое больше." % feud.name)
+    return ("Конец распри: %s" % (late or feud.name),
+            "%s Войн в ней было %d, погибших — %s.%s"
+            % (cap(rng.choice(FEUD_ENDINGS)), wars, souls_text(deaths), tail))
 
 # Город, запертый и с суши, и с моря: подвоза нет вовсе.
 SEALED_LINES = (

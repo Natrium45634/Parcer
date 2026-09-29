@@ -1601,6 +1601,21 @@ class World:
             polity.peak_population = max(polity.peak_population, polity.population)
             polity.peoples = peoples.get(polity_id, {})
 
+    def greatest_polity_souls(self) -> int:
+        """Сколько душ у самой крупной живой державы прямо сейчас.
+
+        Этим мерится размах войны: война двух первых держав мира — война
+        империй, сколько бы душ в том мире ни было. Абсолютные числа тут не
+        годятся: в молодом мире держав мало и все крупные, в старом их
+        полторы сотни и все мелкие.
+        """
+        top = 0
+        for polity_id in self.active_polities:
+            polity = self.polities.get(polity_id)
+            if polity is not None and polity.population > top:
+                top = polity.population
+        return top
+
     def world_population(self) -> int:
         total = 0
         for settlement_id in self.active_settlements:
