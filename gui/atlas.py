@@ -284,6 +284,14 @@ class Atlas(ttk.Frame):
                                     orient="horizontal",
                                     command=self._year_moved)
         self.year_scale.pack(side="left", fill="x", expand=True)
+        # Ползунок ходит по снятым кадрам, а человеку нужен год: набрал
+        # число — и карта встала на ближайший кадр не позже него.
+        self.ask_year = tk.StringVar(value="")
+        entry = ttk.Entry(self.year_bar, textvariable=self.ask_year, width=7)
+        entry.pack(side="left", padx=(8, 2))
+        entry.bind("<Return>", lambda _e: self.goto_year())
+        ttk.Button(self.year_bar, text="перейти",
+                   command=self.goto_year).pack(side="left")
         self.year_label = ttk.Label(self.year_bar, text="—", width=30,
                                     anchor="w")
         self.year_label.pack(side="left", padx=8)
@@ -1490,6 +1498,14 @@ class Atlas(ttk.Frame):
             self._direct_key = None
         self._schedule(160)
 
+    def goto_year(self) -> None:
+        """Встать на названный год — на ближайший снятый кадр не позже."""
+        try:
+            year = int(self.ask_year.get())
+        except (TypeError, ValueError):
+            return
+        self.look_at(year=year)
+
     def _update_year_label(self) -> None:
         if not self._frames:
             self.year_label.config(text="кадров нет")
@@ -1499,6 +1515,7 @@ class Atlas(ttk.Frame):
         era = self.world.era_at(year) if self.world else None
         self.year_label.config(text="%d год — %s"
                                % (year, era.name if era else "—"))
+        self.ask_year.set(str(year))
 
     def look_at(self, year: int = 0, region_id: str = "",
                 hex_index: int = -1) -> None:
