@@ -70,7 +70,9 @@ IMPORTANCE = (
     ("только эпохальное", 5),
 )
 
-MARKS = {1: "·", 2: "•", 3: "◆", 4: "★", 5: "✷"}
+# Значки важности. Нарочно взяты только те, что есть в любом шрифте:
+# редкий знак на чужой машине превращается в пустой квадрат.
+MARKS = {1: "·", 2: "•", 3: "◆", 4: "★", 5: "★★"}
 SHOW_LIMIT = 2000
 
 
@@ -207,7 +209,7 @@ class HistoryTab(ttk.Frame):
         self.list.heading("mark", text="!")
         self.list.heading("what", text="что случилось")
         self.list.column("year", width=70, anchor="e", stretch=False)
-        self.list.column("mark", width=30, anchor="center", stretch=False)
+        self.list.column("mark", width=44, anchor="center", stretch=False)
         self.list.column("what", width=460, anchor="w")
         self.list.pack(side="left", fill="both", expand=True)
         scroll.config(command=self.list.yview)
