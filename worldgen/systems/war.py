@@ -1137,7 +1137,7 @@ def _seize_city(ctx, war, winner, loser, settlement, date, year: int,
     was_capital = settlement.is_capital
     settlement.polity_id = winner.id
     settlement.is_capital = False
-    winner.settlement_ids.append(settlement.id)
+    world.hold_settlement(winner, settlement.id)
     if settlement.region_id not in winner.region_ids:
         winner.region_ids.append(settlement.region_id)
     if settlement.id not in war.taken_ids:

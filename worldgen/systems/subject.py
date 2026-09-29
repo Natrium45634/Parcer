@@ -609,10 +609,25 @@ def close(ctx, total: int) -> None:
         _named_late(ctx, subject, rng, total)
 
 
+def _outlived(subject) -> None:
+    """Он пережил саму летопись.
+
+    Дракон, эльф или бог живут дольше, чем идёт запись: их смерть
+    назначена на год, до которого летопись не дошла. Записывать такой
+    конец нельзя — кончилась не его история, а запись о ней.
+    """
+    subject.notes.append(
+        "%s летопись: чем это кончилось, мир не узнал"
+        % ("пережила" if subject.sex == "f" else "пережил"))
+
+
 def _end_of(ctx, subject, rng, total: int) -> None:
     world = ctx.world
     figure = world.figures.get(subject.figure_id)
     if figure is not None and figure.death is not None:
+        if figure.death.year > total:
+            _outlived(subject)
+            return
         subject.end = sub.END_KILLED if figure.death_cause else sub.END_OLD
         subject.ended = figure.death
         subject.status = sub.DEAD
@@ -623,6 +638,9 @@ def _end_of(ctx, subject, rng, total: int) -> None:
         return
     monster = world.monsters.get(subject.monster_id)
     if monster is not None and monster.ended is not None:
+        if monster.ended.year > total:
+            _outlived(subject)
+            return
         subject.end = sub.END_KILLED
         subject.ended = monster.ended
         subject.status = sub.DEAD
@@ -677,8 +695,12 @@ def _fix_entry(subject) -> None:
 
 
 def _legacy_of(ctx, subject, rng) -> None:
-    """Смерть не убирает субъекта из истории: она оставляет наследие."""
-    if subject.legacy:
+    """Смерть не убирает субъекта из истории: она оставляет наследие.
+
+    Но у того, кто пережил летопись, наследия ещё нет: «что осталось
+    после» — запись о том, чего пока не случилось.
+    """
+    if subject.legacy or not subject.end:
         return
     world = ctx.world
     if rng.chance(0.12):

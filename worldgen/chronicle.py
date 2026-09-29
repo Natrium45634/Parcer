@@ -2491,6 +2491,57 @@ def render_faiths(world) -> str:
     return "\n".join(rows)
 
 
+def _calamity_count(world, calamities) -> list:
+    """Сколько бед было и часто ли это.
+
+    Читая летопись подряд, легко решить, что беда в этом мире каждый
+    год. Так и есть — но «где-то в мире»; на отдельную землю она
+    приходит раз в несколько веков, и разница между этими двумя числами
+    и есть ответ.
+    """
+    total = max(1, int(world.total_years))
+    if not calamities:
+        return ["  За всю историю мира не случилось ни одной беды.", ""]
+    busy = set()
+    together = {}
+    heavy = {"лёгких": 0, "средних": 0, "тяжёлых": 0}
+    by_scale = {}
+    land_years = 0          # сколько раз беда вообще касалась какой-либо земли
+    for item in calamities:
+        start = item.start.year if item.start else 1
+        end = item.end.year if item.end else start
+        for year in range(max(1, start), min(end, total) + 1):
+            busy.add(year)
+            together[year] = together.get(year, 0) + 1
+        land_years += max(1, len(item.region_ids))
+        if item.severity <= 1:
+            heavy["лёгких"] += 1
+        elif item.severity <= 3:
+            heavy["средних"] += 1
+        else:
+            heavy["тяжёлых"] += 1
+        scale = getattr(item, "scale", "") or "неизвестного размаха"
+        by_scale[scale] = by_scale.get(scale, 0) + 1
+    lands = max(1, len(world.regions))
+    every = total / float(len(calamities))
+    rows = ["  СКОЛЬКО ИХ БЫЛО",
+            "    всего ............ %d за %s — одна на %s"
+            % (len(calamities), years_text(total), years_text(int(every))),
+            "    где-то в мире .... беда шла в %d годах из ста; разом их "
+            "бывало до %d" % (round(len(busy) * 100.0 / total),
+                              max(together.values()) if together else 0),
+            "    на одну землю .... раз в %s"
+            % years_text(max(1, int(total * lands / float(land_years)))),
+            "    по тяжести ....... %s"
+            % ", ".join("%s %d" % (name, count)
+                        for name, count in heavy.items() if count),
+            "    по размаху ....... %s"
+            % ", ".join("%s %d" % (name, count) for name, count
+                        in sorted(by_scale.items(), key=lambda p: -p[1])),
+            ""]
+    return rows
+
+
 def render_calamities(world) -> str:
     """Справочник бедствий: что, когда, какой ценой и чем кончилось."""
     from . import catastrophe as cat
@@ -2510,6 +2561,7 @@ def render_calamities(world) -> str:
             rows.append("")
 
     calamities = sorted(world.calamities.values(), key=lambda c: c.start.ordinal)
+    rows.extend(_calamity_count(world, calamities))
     for calamity in calamities:
         spec = cat.CATALOG_BY_KEY.get(calamity.key)
         years = "%d—%s" % (calamity.start.year,

@@ -270,6 +270,10 @@ class Polity:
     capital_id: str = ""
     region_ids: list = field(default_factory=list)
     settlement_ids: list = field(default_factory=list)
+    # Нынешние города у державы отбирают: погиб — вычеркнули, отошёл
+    # победителю — тоже. А эти не вычёркивают никогда: держава остаётся
+    # тем, чем владела, даже когда не владеет уже ничем.
+    held_ids: list = field(default_factory=list)
     ruler_id: str = ""
     status: str = ACTIVE
     ended: Date = None

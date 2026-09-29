@@ -971,11 +971,17 @@ class ChronicleApp(tk.Tk):
         for polity in world.polities.values():
             founder = world.figures.get(polity.founder_id)
             capital = world.settlements.get(polity.capital_id)
+            # У павшей державы городов нет — их забрали или они погибли.
+            # Строка «0» об этом молчит, поэтому рядом стоит, чем она
+            # владела при жизни.
+            now = len(polity.settlement_ids)
+            ever = len(polity.held_ids)
+            towns = str(now) if now >= ever else "%d (держала %d)" % (now, ever)
             rows.append((polity.id, (
                 polity.name, polity.form, get_race(polity.race_id).name,
                 polity.founded.year, founder.name if founder else "—",
                 capital.name if capital else "—",
-                len(polity.settlement_ids), polity.population,
+                towns, polity.population,
                 (world.faiths[polity.faith_id].name
                  if polity.faith_id in world.faiths else "—"),
                 polity.status if polity.status == ACTIVE
@@ -1211,7 +1217,9 @@ class ChronicleApp(tk.Tk):
                 ("Нынешний правитель", name_of(entity.ruler_id)),
                 ("Правлений", len(entity.reign_ids)),
                 ("Знатных родов", len(entity.house_ids)),
-                ("Поселений", len(entity.settlement_ids)),
+                ("Поселений сейчас", len(entity.settlement_ids)),
+                ("Держала когда-либо",
+                 ", ".join(name_of(sid) for sid in entity.held_ids) or "—"),
                 ("Земли", ", ".join(name_of(rid) for rid in entity.region_ids) or "—"),
                 ("Состояние", entity.status),
                 ("Конец", entity.ended.long() if entity.ended else "—"),

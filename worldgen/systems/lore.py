@@ -31,6 +31,8 @@ HANDOVER_SPAN = (25, 70)    # сколько лет ведёт один лето
 BREAK_CHANCE = 0.18         # шанс, что преемника не найдётся
 LOSS_RATE = 0.03
 REFIND_RATE = 0.05
+RECALL_YEARS = 140          # насколько назад помнит город, заводя свод
+RECALL_COUNT = (2, 5)       # и сколько записей выходит из этой памяти
 
 LEGEND_RATE = 0.11          # шанс, что за такт родится новая легенда
 LEGEND_AGE = 150            # сколько лет делу должно быть
@@ -118,12 +120,50 @@ def _start_codex(ctx, year: int, rng) -> None:
         accuracy=lore.accuracy_for(bias, 1), keeper_id=keeper.id,
         keepers=[{"figure": keeper.id, "from": year, "to": 0}])
 
+    # Первый летописец не начинает с чистого листа: он записывает то,
+    # что город ещё помнит. Иначе в мире заводятся своды, в которых нет
+    # ни единой записи, — а это не летопись, а пустая книга.
+    _recall(ctx, codex, year, rng)
+
     title, text = texts.codex_started(rng, codex, keeper, city)
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="codex_started",
         title=title, text=text, importance=2, actors=[keeper.id],
         subjects=[codex.id, city.id], region_id=city.region_id,
         race_id=race.id)
+
+
+def _recall(ctx, codex, year: int, rng) -> None:
+    """Что город помнит к тому дню, как сел за свод первый летописец.
+
+    Записано это по памяти, а память — не свидетельство: такие записи
+    помечены отдельно, и верить им можно меньше, чем сделанным по
+    свежему следу.
+    """
+    world = ctx.world
+    window = []
+    for event in reversed(world.events):
+        if event.date.year > year:
+            continue
+        if year - event.date.year > RECALL_YEARS:
+            break
+        if event.importance < 3 or event.kind.startswith("codex"):
+            continue
+        weight = 1.0 + 0.5 * (event.importance - 3)
+        if event.region_id == codex.region_id:
+            weight *= 3.0
+        window.append((event, weight))
+        if len(window) >= 30:
+            break
+    if not window:
+        return
+    for _ in range(rng.randint(*RECALL_COUNT)):
+        if not window:
+            break
+        event = rng.weighted(window)
+        window = [pair for pair in window if pair[0] is not event]
+        codex.entries.append({"year": event.date.year, "event": event.id,
+                              "kind": "по памяти"})
 
 
 def _scribe(ctx, city, race, year: int, rng):
@@ -257,6 +297,13 @@ def _refind(ctx, codex, year: int, rng) -> None:
     span = max(1, year - (codex.ended.year if codex.ended else year))
     codex.status = lore.FOUND
     codex.notes.append("найден в %d году" % year)
+    # Найденный свод не кладут обратно в сундук: его продолжают. Но
+    # только там, где есть кому продолжать, — в живом городе.
+    city = world.settlements.get(codex.seat_id)
+    if city is not None and city.status == ACTIVE \
+            and codex.id not in world.active_codices:
+        world.active_codices.append(codex.id)
+        codex.notes.append("%d: свод продолжили" % year)
     title, text = texts.codex_found(rng, codex, span)
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="codex_found",

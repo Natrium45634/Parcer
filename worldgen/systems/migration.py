@@ -322,7 +322,7 @@ def _plant_town(ctx, settlement, race, target, souls: int, host, year: int,
     # многонародной; вольный посад остаётся сам по себе.
     if host is not None:
         town.polity_id = host.id
-        host.settlement_ids.append(town.id)
+        world.hold_settlement(host, town.id)
         if target.id not in host.region_ids:
             host.region_ids.append(target.id)
 

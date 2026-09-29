@@ -915,6 +915,21 @@ class World:
         self.active_camps.append(camp.id)
         return camp
 
+    def hold_settlement(self, polity, settlement_id: str) -> None:
+        """Город достался державе.
+
+        Список нынешних городов потом почистят — от погибших и от тех,
+        что отошли соседу. Список «держала когда-то» не чистят никогда:
+        иначе в летописи остаются державы без единого города, и о том,
+        чем они были, сказать уже нечего.
+        """
+        if not settlement_id:
+            return
+        if settlement_id not in polity.settlement_ids:
+            polity.settlement_ids.append(settlement_id)
+        if settlement_id not in polity.held_ids:
+            polity.held_ids.append(settlement_id)
+
     def add_event(self, date: Date, era_index: int, kind: str, title: str,
                   text: str, importance: int = 2, actors=None, subjects=None,
                   region_id: str = "", race_id: str = "",

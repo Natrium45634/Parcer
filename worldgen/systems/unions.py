@@ -174,7 +174,7 @@ def _merge(ctx, union, first, second, year: int, rng) -> None:
         settlement.polity_id = first.id
         settlement.is_capital = False
         if settlement_id not in first.settlement_ids:
-            first.settlement_ids.append(settlement_id)
+            world.hold_settlement(first, settlement_id)
         if settlement.region_id not in first.region_ids:
             first.region_ids.append(settlement.region_id)
     for house_id in list(second.house_ids):

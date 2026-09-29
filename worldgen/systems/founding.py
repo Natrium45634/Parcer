@@ -246,7 +246,7 @@ def tick_colonies(ctx, year: int) -> None:
     leader.home_id = settlement.id
     subjects = [settlement.id]
     if polity is not None:
-        polity.settlement_ids.append(settlement.id)
+        world.hold_settlement(polity, settlement.id)
         if region.id not in polity.region_ids:
             polity.region_ids.append(region.id)
         subjects.append(polity.id)
@@ -333,7 +333,7 @@ def tick_polities(ctx, year: int) -> None:
     )
     for settlement in members:
         settlement.polity_id = polity.id
-        polity.settlement_ids.append(settlement.id)
+        world.hold_settlement(polity, settlement.id)
         if settlement.region_id not in polity.region_ids:
             polity.region_ids.append(settlement.region_id)
     capital.is_capital = True

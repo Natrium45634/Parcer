@@ -369,7 +369,7 @@ def _secede(ctx, polity, race, house, year: int, rng) -> bool:
             polity.settlement_ids.remove(settlement.id)
         settlement.polity_id = new_polity.id
         settlement.is_capital = settlement.id == seat.id
-        new_polity.settlement_ids.append(settlement.id)
+        world.hold_settlement(new_polity, settlement.id)
         if settlement.region_id not in new_polity.region_ids:
             new_polity.region_ids.append(settlement.region_id)
 

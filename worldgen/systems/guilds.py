@@ -301,7 +301,7 @@ def _republic(ctx, guild, polity, seat, year: int, rng) -> None:
             polity.settlement_ids.remove(settlement.id)
         settlement.polity_id = republic.id
         settlement.is_capital = settlement.id == seat.id
-        republic.settlement_ids.append(settlement.id)
+        world.hold_settlement(republic, settlement.id)
         if settlement.region_id not in republic.region_ids:
             republic.region_ids.append(settlement.region_id)
 

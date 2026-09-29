@@ -197,7 +197,7 @@ def _exodus(ctx, calamity, survivors, refuge, rng, year: int, date) -> None:
     refuge.known = True
     subjects = [settlement.id, calamity.id]
     if polity is not None:
-        polity.settlement_ids.append(settlement.id)
+        world.hold_settlement(polity, settlement.id)
         if refuge.id not in polity.region_ids:
             polity.region_ids.append(refuge.id)
         subjects.append(polity.id)

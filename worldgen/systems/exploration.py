@@ -320,7 +320,7 @@ def _plant_colony(ctx, expedition, region, rng, year: int) -> None:
         ctx.map.claim(hex_index, settlement.id)
     founder.home_id = settlement.id
     if polity is not None:
-        polity.settlement_ids.append(settlement.id)
+        world.hold_settlement(polity, settlement.id)
         if region.id not in polity.region_ids:
             polity.region_ids.append(region.id)
 
@@ -390,7 +390,7 @@ def _maybe_independence(ctx, year: int) -> None:
             polity.settlement_ids.remove(settlement.id)
         settlement.polity_id = new_polity.id
         settlement.is_capital = settlement.id == capital.id
-        new_polity.settlement_ids.append(settlement.id)
+        world.hold_settlement(new_polity, settlement.id)
         if settlement.region_id not in new_polity.region_ids:
             new_polity.region_ids.append(settlement.region_id)
     succession.install_founder(ctx, new_polity, leader, capital, date, year)
