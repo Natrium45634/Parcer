@@ -1411,7 +1411,9 @@ class ChronicleApp(tk.Tk):
                 ("Годы жизни", entity.lifespan_text()),
                 ("Рождение", entity.birth.long() if entity.birth else "—"),
                 ("Смерть", entity.death.long() if entity.death else "—"),
-                ("Причина смерти", entity.death_cause or "—"),
+                # «Не записано» — честнее черты: черта выглядит как
+                # недоделка, а это состояние факта.
+                ("Причина смерти", entity.death_cause or "не записано"),
                 ("Титулы", ", ".join(entity.titles) or "—"),
                 ("Роли", ", ".join(entity.roles) or "—"),
                 ("Отец", name_of(entity.father_id)),

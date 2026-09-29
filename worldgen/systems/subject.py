@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+from .. import mortality
 from .. import narrative_subject as texts
 from .. import races as races_mod
 from .. import subject as sub
@@ -600,6 +601,7 @@ def close(ctx, total: int) -> None:
         _keep_span(subject, min(total, subject.spans[-1].get("по", total))
                    if subject.spans else total)
         _end_of(ctx, subject, rng, total)
+        _how_of(subject, rng)
         _fix_entry(subject)
         _ties_of(ctx, subject)
         _legacy_of(ctx, subject, rng)
@@ -621,6 +623,20 @@ def _outlived(subject) -> None:
         % ("пережила" if subject.sex == "f" else "пережил"))
 
 
+def _how_of(subject, rng) -> None:
+    """Не только «чем кончил», но и как именно — и держится ли это.
+
+    «Запечатан» ничего не говорит: под храмом или в собственном имени, на
+    тысячу лет или навсегда, теми, кто знал, что делает, или теми, кто не
+    понял. Разница тут не в красоте слова: из неё растут возвращения — тот,
+    кого изгнали с ошибкой в обряде, вернётся, а развеянный не вернётся
+    никогда.
+    """
+    if not subject.end or subject.end == sub.END_GOING:
+        return
+    subject.end_how, subject.end_holds = mortality.end_how(rng, subject)
+
+
 def _end_of(ctx, subject, rng, total: int) -> None:
     world = ctx.world
     figure = world.figures.get(subject.figure_id)
@@ -628,7 +644,12 @@ def _end_of(ctx, subject, rng, total: int) -> None:
         if figure.death.year > total:
             _outlived(subject)
             return
-        subject.end = sub.END_KILLED if figure.death_cause else sub.END_OLD
+        # Прежде здесь стояло «раз причина записана — значит убит»: причину
+        # записывали только казнённым. Теперь она есть почти у каждого, и
+        # различать надо по самой причине, а не по её наличию.
+        subject.end = (sub.END_KILLED
+                       if mortality.by_violence(figure.death_cause)
+                       else sub.END_OLD)
         subject.ended = figure.death
         subject.status = sub.DEAD
         _mark(subject, figure.death.year,

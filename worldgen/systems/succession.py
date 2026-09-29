@@ -57,6 +57,11 @@ def _check_throne(ctx, polity, year: int) -> None:
     if reign is not None and reign.end is None and ruler is not None:
         death_date = ruler.death or ctx.date_in(rng, year)
         close_reign(ctx, reign, death_date, "смерть")
+        # Причину надо назвать до некролога, а не после: наследование в
+        # году идёт задолго до системы жизней, и государь, умерший своей
+        # смертью, иначе уходит со строкой «отчего — неизвестно».
+        from . import lives as lives_mod
+        lives_mod.name_cause(ctx, ruler)
         years_ruled = max(0, death_date.year - reign.start.year)
         if years_ruled >= 1 or rng.chance(0.5):
             title, text = texts.ruler_death(rng, polity, ruler, years_ruled,

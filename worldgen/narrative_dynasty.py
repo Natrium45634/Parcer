@@ -13,7 +13,7 @@ from .morph import accusative_noun, dative_noun, genitive_noun
 from .narrative import cap
 from .races import (ABSOLUTE_PRIMOGENITURE, COUNCIL, ELECTIVE, MALE_PRIMOGENITURE,
                     MATRILINEAL, SENIORITY, STRENGTH)
-from .timeline import years_text
+from .timeline import years_after, years_text
 
 
 def by_sex(pair, sex: str) -> str:
@@ -762,7 +762,7 @@ RULER_DEATH_TEMPLATES = (
     "Правление кончается смертью: %(ruler)s уходит, процарствовав "
     "%(reign)s. %(legacy)s",
     "%(ruler)s не встаёт с ложа. Правление длилось %(reign)s. %(legacy)s",
-    "После %(reign)s правления %(ruler)s уходит — тихо и не вовремя. "
+    "После %(reign_of)s правления %(ruler)s уходит — тихо и не вовремя. "
     "%(legacy)s",
     "Колокола бьют с рассвета: %(ruler)s мёртв. На престоле было проведено "
     "%(reign)s. %(legacy)s",
@@ -774,9 +774,31 @@ RULER_DEATH_TEMPLATES = (
     "Последним распоряжением %(ruler)s велит открыть житницы. Правление "
     "длилось %(reign)s. %(legacy)s",
     "%(ruler)s умирает во сне, процарствовав %(reign)s. %(legacy)s",
-    "Престол пустеет: %(ruler)s уходит после %(reign)s. %(legacy)s",
+    "Престол пустеет: %(ruler)s уходит после %(reign_of)s. %(legacy)s",
     "Двор узнаёт последним. %(ruler_cap)s мёртв, правление длилось "
     "%(reign)s. %(legacy)s",
+)
+
+# Шаблоны для того случая, когда причина смерти известна. Прежние сюда не
+# годятся: они сами говорят, как он умер («умирает во сне», «не встаёт с
+# ложа», «не доживает до весны»), и с причиной выходило прямое
+# противоречие — «умирает во сне. Зарублена у своего порога». Здесь
+# шаблон о причине молчит и оставляет ей место, а причина и есть то, как
+# он умер.
+RULER_DEATH_WITH_CAUSE = (
+    "%(ruler)s уходит после %(reign_of)s на престоле: %(cause)s. %(legacy)s",
+    "Правление длилось %(reign)s и кончилось так: %(cause)s. %(legacy)s",
+    "Престол пустеет после %(reign_of)s: %(cause)s. %(legacy)s",
+    "Двор узнаёт последним: %(cause)s. Правление длилось %(reign)s. "
+    "%(legacy)s",
+    "Летопись называет и срок, и причину: %(reign)s у власти, и %(cause)s. "
+    "%(legacy)s",
+    "%(ruler)s не доживает до конца года: %(cause)s. На престоле было "
+    "проведено %(reign)s. %(legacy)s",
+    "Колокола бьют с рассвета: %(cause)s. Правление длилось %(reign)s. "
+    "%(legacy)s",
+    "%(ruler_cap)s мёртв: %(cause)s. Правление длилось %(reign)s. "
+    "%(legacy)s",
 )
 
 RULER_LEGACY = (
@@ -841,17 +863,24 @@ def ruler_death(rng, polity, ruler, reign_years: int, cause: str = "",
     # есть и причина смерти, и приговор истории, лишняя строка только
     # разбавляет запись — и она же чаще всего и повторяется.
     legacy = rng.choice(RULER_LEGACY) if rng.chance(0.75) else ""
-    if cause:
-        legacy = ("%s %s" % (cap(cause), legacy)).strip()
     data = {
         "ruler": with_title(ruler),
         "ruler_bare": ruler.name,
         "ruler_cap": cap(with_title(ruler)),
         "polity": polity.full_name,
         "reign": years_text(max(1, reign_years)),
+        # Родительный падеж — для тех шаблонов, где перед числом стоит
+        # «после»: «уходит после 23 лет», а не «после 23 года».
+        "reign_of": years_after(max(1, reign_years)),
         "legacy": legacy,
+        "cause": cause,
     }
-    text = " ".join(cap(rng.choice(RULER_DEATH_TEMPLATES) % data).split())
+    # Причина смерти — это и есть то, как он умер, поэтому при ней берётся
+    # шаблон, который сам об этом молчит. Прежде причина просто дописывалась
+    # после готовой фразы, и выходило двумя бедами сразу: без точки и
+    # наперекор сказанному — «умирает во сне. Зарублена у своего порога».
+    bag = RULER_DEATH_WITH_CAUSE if cause else RULER_DEATH_TEMPLATES
+    text = " ".join(cap(rng.choice(bag) % data).split())
     if verdict:
         text = "%s %s" % (text.rstrip(), verdict)
     if byname:

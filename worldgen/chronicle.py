@@ -4068,6 +4068,11 @@ def _subject_block(world, item, cat) -> list:
                     cat.form(cat.END_FORMS.get(item.end, item.end),
                              getattr(item, "sex", "m")),
                     (" (%d год)" % item.ended.year) if item.ended else ""))
+        # «Запечатан» ничего не говорит: важно, где, чем и держится ли.
+        if getattr(item, "end_how", ""):
+            rows.append("      а именно: %s" % item.end_how)
+        if getattr(item, "end_holds", ""):
+            rows.append("      и это %s" % item.end_holds)
     if item.named_year:
         rows.append("      опознали только в %d году: %s"
                     % (item.named_year, item.named_how))

@@ -9,11 +9,45 @@
 from __future__ import annotations
 
 from . import houses as houses_mod
+from .. import mortality
 from .. import narrative
 from .. import races as races_mod
 from ..models import ACTIVE
 
 NOTABLE_ROLES = ("основатель страны", "основатель поселения", "основатель племени")
+
+
+def name_cause(ctx, figure, race=None, age: int = 0) -> str:
+    """Назвать причину смерти, если её ещё никто не назвал.
+
+    Живёт здесь, а зовётся из двух мест. Дело в порядке: о смерти государя
+    пишет наследование, и оно в году идёт двенадцатым, а эта система —
+    последней. Если ставить причину только тут, у каждого государя в
+    некрологе оставалась бы пустота, потому что некролог к тому времени уже
+    написан. Поэтому наследование спрашивает причину само, а здесь она
+    достаётся всем прочим.
+
+    Жребий берётся из потока, привязанного к самому человеку, а не к году.
+    Так сделано по двум причинам. Первая: добавь эти броски в общий поток
+    года — сдвинется всё, что берётся из него дальше, и все миры поменяются
+    целиком. Вторая: поток по человеку не зависит от того, в каком порядке
+    до него дошли, — а до него доходят из двух разных мест.
+
+    Казнь, убийство и гибель в бою записаны там, где случились, и
+    переписывать их нельзя. Причина ставится тем, кого летопись так или
+    иначе заметила: у безымянного её и в жизни никто не спрашивал.
+    """
+    if figure.death_cause or figure.death is None or figure.birth is None:
+        return figure.death_cause
+    if not (figure.deeds or figure.titles or figure.posthumous):
+        return ""
+    if race is None:
+        race = races_mod.get_race(figure.race_id)
+    if age <= 0:
+        age = max(1, figure.death.year - figure.birth.year)
+    rng = ctx.rng("death-cause", figure.id)
+    figure.death_cause = mortality.cause_for(rng, figure, race, age)
+    return figure.death_cause
 
 
 def tick(ctx, year: int) -> None:
@@ -26,6 +60,7 @@ def tick(ctx, year: int) -> None:
     for figure in departed:
         race = races_mod.get_race(figure.race_id)
         age = max(1, figure.death.year - figure.birth.year)
+        name_cause(ctx, figure, race, age)
         houses_mod.note_death(ctx, figure, figure.death, year)
         _maybe_bury(ctx, figure, year, rng)
 
