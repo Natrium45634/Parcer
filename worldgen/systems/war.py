@@ -37,6 +37,7 @@ from .. import narrative_causes as cause_texts
 from .. import narrative_diplomacy as dip_texts
 from .. import narrative_war as texts
 from .. import races as races_mod
+from .. import township as town_cat
 from .. import rulers as rulers_mod
 from .. import troops as troops_mod
 from .. import history
@@ -1128,6 +1129,54 @@ def _tick_sieges(ctx, war, attacker, defender, year: int, rng) -> None:
             region_id=settlement.region_id, race_id=besieger.race_id)
 
 
+# Как часто победитель переименовывает взятый город. Не всегда: чужое имя
+# держится, если город берут свои по языку или если брать его случилось
+# мимоходом. Переименовывают там, где хотят, чтобы забыли, чей он был.
+RENAME_CHANCE = 0.26
+RENAME_ALIEN = 2.0          # чужой язык — куда более веская причина
+
+
+def _maybe_rename(ctx, settlement, winner, loser, date, year: int) -> None:
+    """Победитель даёт городу своё имя, а прежнее остаётся в памяти.
+
+    Это и есть преобразование вместо размножения: мир не заводит новый
+    город рядом, он переписывает старый. Прежнее имя не пропадает — оно
+    ложится в память поселения, и через века о нём вспомнят: город,
+    называемый двумя именами, — готовый узел для были.
+
+    Своих по языку переименовывают редко: чужое имя мешает не само по
+    себе, а тем, что оно чужое.
+    """
+    world = ctx.world
+    rng = ctx.rng("rename-town", settlement.id, year)
+    chance = RENAME_CHANCE
+    if winner.race_id != settlement.race_id:
+        chance *= RENAME_ALIEN
+    # Великий город переименовать труднее: его имя знают дальше, чем
+    # достают знамёна победителя.
+    if settlement.rank in (town_cat.BIG_TOWN, town_cat.GREAT_CITY):
+        chance *= 0.5
+    if not rng.chance(min(0.7, chance)):
+        return
+    race = races_mod.get_race(winner.race_id)
+    was = settlement.name
+    fresh = ctx.forge.settlement(rng, race, ctx.tongue_of(winner.folk_id)
+                                 if getattr(winner, "folk_id", "") else None)
+    if not fresh or fresh == was:
+        return
+    settlement.name = fresh
+    if was not in settlement.old_names:
+        settlement.old_names.append(was)
+    settlement.notes.append("%d: прежде звался %s, переименован державой "
+                            "по имени %s" % (year, was, winner.name))
+    title, text = texts.town_renamed(rng, fresh, was, winner.name)
+    world.add_event(
+        date=date, era_index=world.era_index_at(year), kind="city_renamed",
+        title=title, text=text, importance=2,
+        subjects=[settlement.id, winner.id, loser.id],
+        region_id=settlement.region_id, race_id=winner.race_id)
+
+
 def _seize_city(ctx, war, winner, loser, settlement, date, year: int,
                 rng) -> None:
     """Город переходит к победителю вместе с жителями."""
@@ -1142,6 +1191,7 @@ def _seize_city(ctx, war, winner, loser, settlement, date, year: int,
         winner.region_ids.append(settlement.region_id)
     if settlement.id not in war.taken_ids:
         war.taken_ids.append(settlement.id)
+    _maybe_rename(ctx, settlement, winner, loser, date, year)
 
     if was_capital:
         rest = _live_cities(world, loser)

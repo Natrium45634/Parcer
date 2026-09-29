@@ -17,6 +17,8 @@ from . import upheaval
 from .. import crafts as crafts_mod
 from .. import laws as laws_mod
 from .. import narrative
+from .. import narrative_town as town_texts
+from .. import township as town_cat
 from .. import races as races_mod
 from .. import rulers as rulers_mod
 from ..models import ACTIVE, GONE, GREAT, MINOR, RUINED, SETTLED
@@ -426,6 +428,92 @@ def _townfolk(world) -> dict:
     return counts
 
 
+# Насколько заметно поселению шагнуть по ступени, чтобы летопись об этом
+# написала. Каждое село, дорастающее до городка, событием быть не должно —
+# таких за историю тысячи; а вот город, ставший великим, или большой город,
+# осевший в село, — событие.
+RANK_NEWS_FROM = 3          # с этой ступени и выше о переменах пишут
+
+# Насколько надо перешагнуть порог, чтобы ступень сменилась.
+RANK_MARGIN = 0.08
+
+
+def _restep(ctx, settlement, race, year: int, era_index: int, rng) -> None:
+    """Пересчитать ступень поселения и, если надо, переименовать его.
+
+    Две беды разом. Первая: вид поселения ставился при основании и не менялся
+    никогда, поэтому в мире заводилась «Застава» на сто двадцать тысяч душ.
+    Вторая: словом «город» звалось и поселение на триста душ — а если городом
+    зовётся всё, то города в мире нет ни одного.
+
+    Теперь ступень считается из людности каждое десятилетие и живёт своей
+    жизнью: поселение растёт по ступеням и оседает обратно. А то, что
+    доросло до города, но названо заставой или рудником, своё прежнее имя
+    теряет: застава — это застава, а не город на сорок тысяч душ. Имя при
+    этом не выдумывается заново, меняется только слово перед ним, и прежнее
+    остаётся в памяти поселения.
+    """
+    world = ctx.world
+    was = settlement.rank
+    souls = settlement.population
+    now = town_cat.rank_of(souls)
+    if now == was:
+        return
+    step_up = town_cat.rank_index(now) > town_cat.rank_index(was)
+    # Гистерезис. Без него поселение, стоящее у самого порога, каждые
+    # десять лет прыгает туда и обратно: «Рунная Жила — город», через
+    # двадцать лет «уже городок», через десять снова город. Летопись от
+    # этого превращается в перепись скота, поэтому ступень меняется
+    # только тогда, когда порог перешагнут заметно.
+    edge = town_cat.rank_edge(now if step_up else was)
+    if edge and abs(souls - edge) < edge * RANK_MARGIN:
+        return
+    settlement.rank = now
+    top = max(town_cat.rank_index(now), town_cat.rank_index(was))
+    # Как называть это место в записи. Если вид поселения — общее слово
+    # «Город», называть его видом нельзя: выйдет «город такой-то стал
+    # городом». Тогда говорим оборотом.
+    if settlement.kind in ("Город", "Городище"):
+        place = "поселение по имени %s" % settlement.name
+    else:
+        place = "%s %s" % (settlement.kind.lower(), settlement.name)
+
+    # Переросло своё имя: то, что ставили заставой, городом зваться заставой
+    # уже не может.
+    renamed = ""
+    if step_up and town_cat.is_city(now) and settlement.kind in town_cat.OUTGROWN:
+        words = race.settlement_words or ("Город",)
+        renamed = settlement.kind
+        settlement.kind = words[0]
+        settlement.notes.append(
+            "%d: перестало быть %s — выросло в %s"
+            % (year, renamed.lower(), settlement.kind.lower()))
+
+    if top < RANK_NEWS_FROM:
+        return          # выселок, ставший селом, — не новость для летописи
+    date = ctx.date_in(rng, year)
+    if renamed:
+        title = "Переросло своё имя: %s" % settlement.name
+        text = town_texts.renamed_text(rng, settlement.name, renamed,
+                                       settlement.kind, souls)
+    elif step_up:
+        title = "%s: %s" % (now.capitalize(), settlement.name)
+        text = town_texts.grew_text(rng, place, settlement.name, was,
+                                    now, souls)
+    else:
+        title = "Измельчало: %s" % settlement.name
+        text = town_texts.shrank_text(rng, place, settlement.name,
+                                      was, now, souls)
+    world.add_event(
+        date=date, era_index=era_index,
+        kind="settlement_rank" if not renamed else "settlement_renamed",
+        title=title, text=text,
+        importance=2 if top >= len(town_cat.RANKS) - 1 else 1,
+        subjects=[settlement.id], region_id=settlement.region_id,
+        race_id=settlement.race_id,
+    )
+
+
 def upkeep(ctx, year: int, period: int) -> None:
     world = ctx.world
     spec = ctx.era_spec(year)
@@ -484,6 +572,12 @@ def upkeep(ctx, year: int, period: int) -> None:
                        * period * (1.0 - population / capacity))
         population *= rng.uniform(0.99, 1.015)
         settlement.population = max(0, int(population))
+        # Кривая людности: по ней потом видно рост, расцвет и убыль.
+        world.note_census(settlement, year)
+        # И ступень: выселок это, село или великий город. Вид поселения
+        # ставится при основании и говорит, что это такое; ступень говорит,
+        # насколько велико, и меняется всю его жизнь.
+        _restep(ctx, settlement, race, year, era_index, rng)
 
         if settlement.population < 60 or rng.chance(0.00009 * spec.turmoil * period * ctx.growth_scale):
             date = ctx.date_in(rng, year)

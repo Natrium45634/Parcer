@@ -294,6 +294,73 @@ def gift_lines(world) -> list:
     return rows
 
 
+CURVE_BARS = "▁▂▃▄▅▆▇█"
+
+
+def census_spark(settlement, width: int = 46) -> str:
+    """Кривая людности города одной строкой из столбиков.
+
+    Рисовать её нечем — окно у нас текстовое, — но и не нужно: восьми
+    высот хватает, чтобы с одного взгляда увидеть, был ли город всегда
+    таким или усох вчетверо после беды. Высота считается от его же
+    наибольшего числа, а не от общего для всех: речь о его судьбе, а не о
+    том, велик ли он рядом с чужой столицей.
+    """
+    rows = getattr(settlement, "census", None) or ()
+    if len(rows) < 2:
+        return ""
+    top = max(souls for _, souls in rows) or 1
+    # Точек бывает под пять сотен, а в строку влезает несколько десятков:
+    # берём их вразбивку по всей жизни города.
+    if len(rows) > width:
+        step = len(rows) / float(width)
+        rows = [rows[int(index * step)] for index in range(width)]
+    bars = []
+    for _, souls in rows:
+        level = int(round((len(CURVE_BARS) - 1) * souls / float(top)))
+        bars.append(CURVE_BARS[max(0, min(len(CURVE_BARS) - 1, level))])
+    return "".join(bars)
+
+
+def census_lines(settlement, indent: str = "      ") -> list:
+    """Людность города по годам: словами и столбиками.
+
+    Одного нынешнего числа мало. Город в три тысячи душ — это либо город,
+    который всю жизнь такой, либо остаток города на двадцать тысяч, и это
+    две совершенно разные истории.
+    """
+    rows = getattr(settlement, "census", None) or ()
+    if len(rows) < 2:
+        return []
+    first_year, first = rows[0]
+    last_year, last = rows[-1]
+    peak = int(getattr(settlement, "peak_population", 0) or 0)
+    peak_year = int(getattr(settlement, "peak_year", 0) or 0)
+    parts = ["%d душ в %d году" % (first, first_year)]
+    if peak and peak > max(first, last):
+        parts.append("наибольше %d в %d" % (peak, peak_year))
+    parts.append("%d в %d" % (last, last_year))
+    out = ["%sлюдность: %s" % (indent, " → ".join(parts))]
+    spark = census_spark(settlement)
+    if spark:
+        out.append("%s%d %s %d" % (indent, first_year, spark, last_year))
+    if peak and last and peak >= last * 2:
+        out.append("%sк концу от него осталась %s"
+                   % (indent, _share_word(peak, last)))
+    return out
+
+
+def _share_word(peak: int, last: int) -> str:
+    """Доля словом, а не дробью: «половина», «десятая часть»."""
+    times = peak / float(max(1, last))
+    names = ((2.5, "половина"), (3.5, "треть"), (4.5, "четверть"),
+             (6.5, "пятая часть"), (11.0, "десятая часть"))
+    for edge, name in names:
+        if times < edge:
+            return name
+    return "малая часть"
+
+
 def render_stats(world) -> str:
     rows = ["ИТОГИ", ""]
     rows.extend(fate_lines(world))
@@ -1630,6 +1697,9 @@ def _town_block(world, town, settlement, cat, texts) -> list:
     rows.append("        Людей: %d сейчас, %d в лучшую пору (%d год); %s."
                 % (settlement.population if settlement.status == ACTIVE else 0,
                    town.peak, town.peak_year, town.life))
+    # А вот и вся его людность по годам: рост, расцвет и убыль одной
+    # строкой. По одному нынешнему числу этого не видно.
+    rows.extend(census_lines(settlement, indent="        "))
     rows.append("")
 
     # --- хозяйство ------------------------------------------------------

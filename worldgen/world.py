@@ -13,6 +13,7 @@ import heapq
 from . import artifacts as artifacts_mod
 from . import history
 from . import races as races_mod
+from . import township
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Artifact, Battle, Bond, Cabal, Calamity, Camp, Codex,
                      Company,
@@ -904,9 +905,51 @@ class World:
 
     def add_settlement(self, **kwargs) -> Settlement:
         settlement = Settlement(id=self.next_id("C"), **kwargs)
+        # Ступень — из людности, с первого же дня: поселение на две сотни
+        # душ основано селом, а не городом.
+        settlement.rank = township.rank_of(settlement.population)
         self.settlements[settlement.id] = settlement
         self.active_settlements.append(settlement.id)
+        # Первая точка кривой — год основания: с чего он начал. Без неё
+        # кривая начинается там, где до города впервые дошла перепись, и
+        # начало его жизни пропадает.
+        self.note_census(settlement, settlement.founded.year, force=True)
         return settlement
+
+    def census_step(self) -> int:
+        """Через сколько лет записывать людность поселения.
+
+        Шаг подбирается под длину истории: полсотни точек хватает, чтобы
+        увидеть рост, расцвет и убыль, а больше — только вес в файле. На
+        десяти тысячах лет это раз в двести лет, на тысяче — раз в двадцать,
+        на четырёхстах — каждое десятилетие (чаще нельзя: людность и
+        пересчитывается раз в десять лет).
+        """
+        step = getattr(self, "_census_step", 0)
+        if not step:
+            step = max(10, (int(self.total_years) // 50 // 10) * 10)
+            self._census_step = step
+        return step
+
+    def note_census(self, settlement, year: int, force: bool = False) -> None:
+        """Отметить, сколько душ в поселении на этот год.
+
+        Заодно ведётся самый людный год за всю его жизнь: по нынешнему числу
+        не видно, что город был вдвое больше тысячу лет назад, а это и есть
+        самое интересное, что о нём можно сказать.
+        """
+        year = int(year)
+        souls = int(settlement.population)
+        if souls > settlement.peak_population:
+            settlement.peak_population = souls
+            settlement.peak_year = year
+        if not force and year % self.census_step():
+            return
+        rows = settlement.census
+        if rows and rows[-1][0] == year:
+            rows[-1][1] = souls
+            return
+        rows.append([year, souls])
 
     def add_polity(self, **kwargs) -> Polity:
         polity = Polity(id=self.next_id("P"), **kwargs)
@@ -1344,6 +1387,10 @@ class World:
         settlement.status = status
         settlement.ended = date
         settlement.end_reason = reason
+        # Последняя точка кривой — год конца: сколько в нём оставалось,
+        # когда он кончился. Без неё кривая обрывается на последней
+        # переписи, и по ней выходит, будто город погиб полным.
+        self.note_census(settlement, date.year, force=True)
         if settlement.id in self.active_settlements:
             self.active_settlements.remove(settlement.id)
         if self.map_link is not None:

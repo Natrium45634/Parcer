@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from . import township as cat
+from .timeline import plural
 
 
 def cap(line: str) -> str:
@@ -251,3 +252,81 @@ def event_title(kind: str, name: str) -> str:
 __all__ = ["cap", "mark_line", "district_born", "trouble_start",
            "trouble_end", "layer_line", "temper_lines", "event_title",
            "wall_work", "WALL_WORKS"]
+
+
+# ---------------------------------------------------------------------------
+# Поселение растёт и мельчает: ступень меняется, и летопись это замечает
+# ---------------------------------------------------------------------------
+
+GREW_LINES = (
+    "%(place_cap)s перерастает себя: теперь это %(rank)s, и в нём "
+    "%(souls)s.",
+    "Что было %(was_tv)s, то стало %(rank_tv)s: %(place_cap)s держит уже "
+    "%(souls)s.",
+    "Перепись этого десятилетия ставит своё: %(place_cap)s — %(rank)s, "
+    "в нём %(souls)s.",
+    "%(place_cap)s больше не %(was)s: это %(rank)s, и в нём %(souls)s.",
+    "%(place_cap)s разрастается: ступенью выше — %(rank)s, "
+    "в нём %(souls)s.",
+    "О поселении по имени %(name)s пишут иначе: не %(was)s, а %(rank)s — "
+    "%(souls)s.",
+)
+
+SHRANK_LINES = (
+    "%(place_cap)s мельчает: не %(was)s, а %(rank)s; в нём %(souls)s.",
+    "%(place_cap)s пустеет: что было %(was_tv)s, то оседает в %(rank)s — "
+    "%(souls)s.",
+    "Перепись этого десятилетия не находит прежних людей: %(place_cap)s — "
+    "уже %(rank)s, а не %(was)s; в нём %(souls)s.",
+    "%(place_cap)s теряет ступень: было %(was_tv)s, стало %(rank_tv)s — "
+    "%(souls)s.",
+    "Людей в поселении по имени %(name)s всё меньше: не %(was)s, а "
+    "%(rank)s — %(souls)s.",
+)
+
+# Когда малое поселение дорастает до города, оно перестаёт называться тем,
+# чем было: застава — это застава, а не город на сорок тысяч душ.
+RENAMED_LINES = (
+    "Поселение по имени %(name)s начиналось как %(was_kind)s — теперь в "
+    "своде это %(kind)s: в нём %(souls)s.",
+    "%(name)s перерастает своё имя: на %(souls)s это уже не %(was_kind)s, а "
+    "%(kind)s.",
+    "Старое слово к поселению по имени %(name)s больше не идёт: не "
+    "%(was_kind)s, а %(kind)s.",
+    "В своде поселение по имени %(name)s исправляют: не %(was_kind)s, а "
+    "%(kind)s — в нём %(souls)s.",
+)
+
+
+def _souls(count: int) -> str:
+    """«3072 души», а не «3072 душ»: число и слово должны сходиться."""
+    return "%d %s" % (int(count), plural(count, "душа", "души", "душ"))
+
+
+def _data(place: str, name: str, was: str, rank: str, souls: int) -> dict:
+    return {
+        "place": place,
+        "place_cap": cap(place),
+        "name": name,
+        "was": was,
+        "was_tv": cat.rank_tv(was),
+        "rank": rank,
+        "rank_tv": cat.rank_tv(rank),
+        "souls": _souls(souls),
+    }
+
+
+def grew_text(rng, place: str, name: str, was: str, rank: str,
+              souls: int) -> str:
+    return cap(rng.choice(GREW_LINES) % _data(place, name, was, rank, souls))
+
+
+def shrank_text(rng, place: str, name: str, was: str, rank: str,
+                souls: int) -> str:
+    return cap(rng.choice(SHRANK_LINES) % _data(place, name, was, rank, souls))
+
+
+def renamed_text(rng, name: str, was_kind: str, kind: str, souls: int) -> str:
+    return cap(rng.choice(RENAMED_LINES) % {
+        "name": name, "was_kind": was_kind.lower(), "kind": kind.lower(),
+        "souls": _souls(souls)})

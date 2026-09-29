@@ -430,10 +430,13 @@ class ChronicleApp(tk.Tk):
             filler=lambda: self._fill_polities())
         self.city_tree = self._add_tree_tab(
             "Города",
-            ("Название", "Тип", "Раса", "Основан", "Основатель", "Страна",
-             "Население", "Состояние"),
-            (200, 110, 120, 90, 210, 190, 90, 110), self._on_city_open,
-            filler=lambda: self._fill_cities())
+            # «Ступень» — не то же, что «Тип»: тип говорит, что это такое
+            # (чертог, гавань, рудник), ступень — насколько велико. Прежде
+            # в этом списке жила «Застава» на сто двадцать тысяч душ.
+            ("Название", "Тип", "Ступень", "Раса", "Основан", "Основатель",
+             "Страна", "Население", "Наибольше", "Состояние"),
+            (190, 105, 105, 110, 85, 190, 170, 90, 110, 105),
+            self._on_city_open, filler=lambda: self._fill_cities())
         self.group_tree = self._add_tree_tab(
             "Племена и лагеря",
             ("Название", "Тип", "Раса", "Основано", "Основатель", "Земля",
@@ -1147,10 +1150,16 @@ class ChronicleApp(tk.Tk):
             founder = world.figures.get(settlement.founder_id)
             polity = world.polities.get(settlement.polity_id)
             rows.append((settlement.id, (
-                settlement.name, settlement.kind, get_race(settlement.race_id).name,
+                settlement.name, settlement.kind, settlement.rank,
+                get_race(settlement.race_id).name,
                 settlement.founded.year, founder.name if founder else "—",
                 polity.full_name if polity else "—",
                 settlement.population,
+                # По нынешнему числу не видно, что город был вдвое больше
+                # тысячу лет назад, — а это про него самое интересное.
+                ("%d (%d г.)" % (settlement.peak_population,
+                                 settlement.peak_year))
+                if settlement.peak_population else "—",
                 settlement.status if settlement.status == ACTIVE
                 else "%s (%d)" % (settlement.status, settlement.ended.year))))
         self._fill_tree(self.city_tree, rows)
@@ -1447,6 +1456,8 @@ class ChronicleApp(tk.Tk):
         elif kind == "Settlement":
             fields = [
                 ("Тип", entity.kind),
+                ("Ступень", entity.rank),
+                ("Прежние имена", ", ".join(entity.old_names) or "—"),
                 ("Раса", get_race(entity.race_id).name),
                 ("Основан", entity.founded.long()),
                 ("Основатель", name_of(entity.founder_id)),
@@ -1454,6 +1465,15 @@ class ChronicleApp(tk.Tk):
                 ("Страна", name_of(entity.polity_id)),
                 ("Столица", "да" if entity.is_capital else "нет"),
                 ("Население", entity.population),
+                # Одного нынешнего числа мало: город в три тысячи душ — это
+                # либо город, который всю жизнь такой, либо остаток города
+                # на двадцать тысяч, и это две разные истории.
+                ("Самый людный год",
+                 ("%d душ в %d году" % (entity.peak_population,
+                                        entity.peak_year))
+                 if entity.peak_population else "—"),
+                ("Людность по годам",
+                 chronicle.census_spark(entity, width=52) or "—"),
                 ("Приметы города", ", ".join(entity.landmarks) or "—"),
                 ("Из племени", name_of(entity.origin_tribe_id)),
                 ("Состояние", entity.status),
