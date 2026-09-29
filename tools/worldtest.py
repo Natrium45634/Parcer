@@ -619,11 +619,16 @@ def _polity_lines(world, polity, out) -> None:
     founder = world.figures.get(polity.founder_id)
     out("      %s — %s, %s" % (polity.full_name, race_name(polity.race_id),
                                polity.form))
-    out("      %d–%s, %s; городов за всю жизнь %d, в лучшую пору %s" % (
-        polity.founded.year,
-        polity.ended.year if polity.ended else "стоит и поныне",
-        years_text(_polity_years(world, polity)),
-        len(polity.settlement_ids), _souls(polity.peak_population)))
+    # «За всю жизнь» — это held_ids: нынешний список чистят от погибших
+    # городов и от тех, что отошли победителю, и у павшей державы он
+    # пуст, хотя владела она половиной материка.
+    ever = len(polity.held_ids) or len(polity.settlement_ids)
+    out("      %d–%s, %s; городов за всю жизнь %d (сейчас %d), "
+        "в лучшую пору %s" % (
+            polity.founded.year,
+            polity.ended.year if polity.ended else "стоит и поныне",
+            years_text(_polity_years(world, polity)), ever,
+            len(polity.settlement_ids), _souls(polity.peak_population)))
     marks = []
     if capital is not None:
         marks.append("престол в городе по имени %s" % capital.name)

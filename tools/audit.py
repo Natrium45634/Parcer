@@ -511,6 +511,21 @@ def m_exodus(world):
                for note in calamity.notes if note.startswith("исход из земли"))
 
 
+def m_held_known(world):
+    """Доля павших держав, о которых записано, чем они владели."""
+    rows = [item for item in world.polities.values()
+            if not item.settlement_ids]
+    if not rows:
+        return None
+    return _share(sum(1 for item in rows if item.held_ids), len(rows))
+
+
+def m_thin_codices(world):
+    """Доля летописей, в которых нет и двух записей."""
+    rows = list(world.codices.values())
+    return _share(sum(1 for item in rows if len(item.entries) <= 1), len(rows))
+
+
 def m_old_enemies(world):
     """Держав, у которых после беды завёлся старый враг."""
     return sum(1 for polity in world.polities.values()
@@ -1040,6 +1055,12 @@ MEASURES = (
             "разорённая земля пустеет не только мёртвыми", min_years=3000),
     Measure("мир", "держав со старым врагом", m_old_enemies, 1, None, "штук",
             "после беды остаётся тот, кто не пришёл", min_years=3000),
+    Measure("мир", "павших держав, о которых известно, чем владели",
+            m_held_known, 0.95, None, "доля",
+            "держава остаётся тем, чем владела, даже когда не владеет ничем"),
+    Measure("мир", "летописей в одну запись", m_thin_codices, None, 0.2,
+            "доля", "свод начинают с того, что город ещё помнит",
+            min_years=3000),
 )
 
 
