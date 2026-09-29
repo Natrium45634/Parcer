@@ -239,6 +239,8 @@ class Atlas(ttk.Frame):
         self.show_lairs = tk.BooleanVar(value=False)
         self.show_tribes = tk.BooleanVar(value=False)
         self.note_var = tk.StringVar(value="")
+        self.hover_var = tk.StringVar(value="")
+        self._hover_at = -1
 
         self._build()
 
@@ -299,6 +301,9 @@ class Atlas(ttk.Frame):
         self.legend = tk.Canvas(self, height=20, bg=GRID_BG,
                                 highlightthickness=0)
         self.legend.pack(fill="x", pady=(0, 3))
+        # Строка под курсором: что там, пока по нему не щёлкнули.
+        ttk.Label(self, textvariable=self.hover_var, anchor="w").pack(
+            fill="x", pady=(0, 2))
 
         # Перегородку между картой и карточкой человек двигает сам.
         split = ttk.PanedWindow(self, orient="horizontal")
@@ -314,6 +319,8 @@ class Atlas(ttk.Frame):
         self.canvas.bind("<Button-1>", self._pressed)
         self.canvas.bind("<B1-Motion>", self._dragged)
         self.canvas.bind("<ButtonRelease-1>", self._released)
+        self.canvas.bind("<Motion>", self._hover)
+        self.canvas.bind("<Leave>", lambda _e: self.hover_var.set(""))
         self.canvas.bind("<MouseWheel>", self._wheel)
         self.canvas.bind("<Button-4>", self._wheel)
         self.canvas.bind("<Button-5>", self._wheel)
@@ -1477,6 +1484,42 @@ class Atlas(ttk.Frame):
             self._picked = index
             self.describe(index)
             self.redraw()
+
+    def _hover(self, event) -> None:
+        """Что под курсором — одной строкой, без щелчка.
+
+        Считается только при переходе на другой гекс: движений мыши
+        сотни в секунду, а гекс под ней меняется редко.
+        """
+        if self.wmap is None or self._drag is not None:
+            return
+        index = self._hex_at(event.x + self.off_x, event.y + self.off_y)
+        if index == self._hover_at:
+            return
+        self._hover_at = index
+        if index < 0:
+            self.hover_var.set("")
+            return
+        wmap, world = self.wmap, self.world
+        biome = wmap.layer(wm.L_BIOME)
+        value = int(biome[index]) if biome is not None else 0
+        parts = [BIOME_NAMES[value] if value < len(BIOME_NAMES) else "земля"]
+        parts.append("%d м" % round(wmap.elevation_m(index)))
+        link = getattr(world, "map_link", None) if world else None
+        region_id = (getattr(link, "region_of_hex", {}) or {}).get(index)
+        region = world.regions.get(region_id) if region_id and world else None
+        if region is not None:
+            parts.append("земля по имени %s" % region.name)
+        slots = self._frame_for_year()
+        if slots is not None and index < len(slots) and slots[index] >= 0:
+            parts.append(self._names.get(slots[index], "чья-то держава"))
+        year = self._year_now()
+        for item in (world.settlements.values() if world else ()):
+            if item.hex_index == index and _alive_at(item.founded, item.ended,
+                                                     year):
+                parts.append("%s — %d душ" % (item.full_name, item.population))
+                break
+        self.hover_var.set(" · ".join(parts))
 
     def _wheel(self, event) -> None:
         delta = getattr(event, "delta", 0)
