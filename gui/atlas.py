@@ -209,7 +209,10 @@ class Atlas(ttk.Frame):
         self._direct = None         # прямая отрисовка: (фото, ox, oy, w, h)
         self._direct_key = None
         self._photo = None          # что сейчас лежит на холсте
+        self._cut = None            # картинка под вырез окна из карты
         self._image_item = None
+        self._drawn = None          # из чего собрана нынешняя сцена
+        self._drawn_off = (0.0, 0.0)
 
         self._frames = []
         self._frame_slots = None
@@ -423,7 +426,9 @@ class Atlas(ttk.Frame):
         self._direct = None
         self._direct_key = None
         self._photo = None
+        self._cut = None
         self._image_item = None
+        self._drawn = None
 
     def _pick_native(self) -> None:
         """Свой размер гекса и лестница приближения — по величине карты.
@@ -905,20 +910,38 @@ class Atlas(ttk.Frame):
                 _line(buf, width, height, x0 - ox, y0 - oy, x1 - ox, y1 - oy,
                       ink, thick)
 
-    def _native_image(self):
-        """Вся карта разом на своём размере гекса — основа всех картинок."""
+    def _level_for(self, cell: int) -> int:
+        """На каком размере гекса держать картинку всей карты.
+
+        Не на самом крупном: рисовать всю карту в гексах по двадцать
+        четыре точки, когда человек смотрит на неё в восемь, — полторы
+        секунды работы ни за что. Берём ближайшую ступень не мельче
+        нужной, из тех, на которые свой размер делится нацело.
+        """
+        if cell >= self.native:
+            return self.native
+        best = self.native
+        for value in range(cell, self.native + 1):
+            if self.native % value == 0:
+                best = value
+                break
+        return best
+
+    def _native_image(self, level: int = 0):
+        """Вся карта разом на выбранной ступени — основа всех картинок."""
+        level = level or self.native
         mode = self._mode()
         key = (mode, self._year_now() if mode == "realm" else 0,
                bool(self.show_borders.get()), bool(self.show_rivers.get()),
-               self.native)
+               level)
         if self._native_key == key and self._native_photo is not None:
             return self._native_photo
-        width, height = self._map_size(self.native)
+        width, height = self._map_size(level)
         note = self.note_var.get()
         if width * height > 1_500_000:
             self.note_var.set("Рисую карту целиком — это разом и надолго…")
             self.update_idletasks()
-        photo = self._paint(0, 0, width, height, self.native,
+        photo = self._paint(0, 0, width, height, level,
                             borders=(mode == "realm"
                                      and self.show_borders.get()),
                             rivers=self.show_rivers.get())
@@ -939,7 +962,8 @@ class Atlas(ttk.Frame):
         native = self.native
         mode = self._mode()
         if cell <= native and native % cell == 0:
-            factor = native // cell
+            level = self._level_for(cell)
+            factor = level // cell
             key = ("вырез", mode, self._year_now() if mode == "realm" else 0,
                    cell, bool(self.show_borders.get()),
                    bool(self.show_rivers.get()))
@@ -950,12 +974,19 @@ class Atlas(ttk.Frame):
                         ox + has_w >= self.off_x + width and \
                         oy + has_h >= self.off_y + height:
                     return photo, ox, oy
-            native_photo = self._native_image()
+            native_photo = self._native_image(level)
             want_x = int(self.off_x) - DIRECT_MARGIN
             want_y = int(self.off_y) - DIRECT_MARGIN
             want_w = width + DIRECT_MARGIN * 2
             want_h = height + DIRECT_MARGIN * 2
-            photo = tk.PhotoImage(width=want_w, height=want_h)
+            # Картинку под вырез заводим один раз на размер окна: создать
+            # её заново — это две трети времени всей прокрутки.
+            photo = self._cut
+            if photo is None or photo.width() != want_w \
+                    or photo.height() != want_h:
+                photo = self._cut = tk.PhotoImage(width=want_w, height=want_h)
+            else:
+                photo.blank()
             src_x = max(0, want_x * factor)
             src_y = max(0, want_y * factor)
             src_x1 = min(native_photo.width(), (want_x + want_w) * factor)
@@ -969,6 +1000,7 @@ class Atlas(ttk.Frame):
             self._direct = (photo, want_x, want_y, want_w, want_h)
             self._direct_key = key
             return photo, float(want_x), float(want_y)
+
         # Крупный масштаб: гексов в окне мало, рисуем прямо — с запасом,
         # чтобы небольшая прокрутка обошлась без новой картинки.
         key = (mode, self._year_now() if mode == "realm" else 0, cell,
@@ -1009,10 +1041,28 @@ class Atlas(ttk.Frame):
         height = max(200, self.canvas.winfo_height())
         by_width = width / (self.wmap.width + 0.5)
         by_height = height / (self.wmap.height * ROW_STEP + 0.5)
-        self.cell = max(2, min(30, int(min(by_width, by_height))))
+        raw = max(2, min(30, int(min(by_width, by_height))))
+        self.cell = self._snap(raw)
         self.off_x = 0.0
         self.off_y = 0.0
         self.redraw()
+
+    def _snap(self, cell: int) -> int:
+        """Ближайший размер гекса, на котором карта собирается быстро.
+
+        Мельче своего размера карта получается уменьшением — но только
+        если свой размер делится на нужный нацело. Иначе её пришлось бы
+        рисовать заново целиком, а на большой карте это полсекунды за
+        каждый показ. Крупнее своего размера гексов в окне мало, и там
+        годится любой.
+        """
+        if cell >= self.native:
+            return cell
+        best = 2
+        for value in range(2, self.native + 1):
+            if self.native % value == 0 and value <= cell:
+                best = max(best, value)
+        return best
 
     def zoom(self, delta: int, focus=None) -> None:
         """Шаг по лестнице приближения — от того, где сейчас стоим."""
@@ -1064,6 +1114,26 @@ class Atlas(ttk.Frame):
                       max(-40.0, min(self.off_y, slack_y + 40)))
 
         photo, base_x, base_y = self._surface(width, height)
+        # Если переменилось только то, куда смотрим, а картинка та же —
+        # значки уже уехали вместе с ней при перетаскивании, и всю сцену
+        # собирать заново незачем: хватит поправить, где лежит картинка.
+        mark = (id(photo), self.cell, self._year_now(), self._mode(),
+                self._picked, self.show_cities.get(), self.show_labels.get(),
+                self.show_peaks.get(), self.show_routes.get(),
+                self.show_roads.get(), self.show_lairs.get(),
+                self.show_tribes.get(), self.show_borders.get(),
+                self.show_rivers.get(), width, height)
+        if mark == getattr(self, "_drawn", None) and self._image_item:
+            last_x, last_y = self._drawn_off
+            step_x, step_y = last_x - self.off_x, last_y - self.off_y
+            if step_x or step_y:
+                # Карту сдвинули не рукой (перешли по записи, например):
+                # значки сами не поедут, их надо подвинуть.
+                self.canvas.move("all", step_x, step_y)
+            self.canvas.coords(self._image_item,
+                               base_x - self.off_x, base_y - self.off_y)
+            self._drawn_off = (self.off_x, self.off_y)
+            return
         self._photo = photo
         self.canvas.delete("all")
         self._image_item = self.canvas.create_image(
@@ -1072,6 +1142,8 @@ class Atlas(ttk.Frame):
         self._update_year_label()
         self._draw_legend()
         self.zoom_var.set("гекс %d т." % self.cell)
+        self._drawn = mark
+        self._drawn_off = (self.off_x, self.off_y)
 
     # ------------------------------------------------------------------
     # Значки поверх картинки
@@ -1381,6 +1453,7 @@ class Atlas(ttk.Frame):
         self.off_x = ox - dx
         self.off_y = oy - dy
         self.canvas.move("all", -step_x, -step_y)
+        self._drawn_off = (self.off_x, self.off_y)
         self._schedule(90)
 
     def _released(self, event) -> None:
