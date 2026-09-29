@@ -1427,6 +1427,51 @@ class Atlas(ttk.Frame):
         self.year_label.config(text="%d год — %s"
                                % (year, era.name if era else "—"))
 
+    def look_at(self, year: int = 0, region_id: str = "",
+                hex_index: int = -1) -> None:
+        """Показать названное место в названный год.
+
+        Этим пользуется «История мира»: человек нашёл запись и хочет
+        увидеть, где это было и как тогда выглядел мир.
+        """
+        if self.wmap is None or self.world is None:
+            return
+        if year and self._frames:
+            # Кадры границ сняты не каждый год: берём ближайший к
+            # названному, но не позже него.
+            best = 0
+            for number, frame in enumerate(self._frames):
+                if frame["y"] <= year:
+                    best = number
+            self.year_var.set(best)
+            self.year_scale.set(best)
+            self._update_year_label()
+        if hex_index < 0 and region_id:
+            hex_index = self._region_hex(region_id)
+        if hex_index < 0:
+            self.redraw()
+            return
+        self._picked = hex_index
+        cell, hex_h, step = self._hex_size()
+        x, y = self._hex_center(hex_index)
+        self.off_x = x - max(50, self.canvas.winfo_width()) / 2.0
+        self.off_y = y - max(50, self.canvas.winfo_height()) / 2.0
+        self.describe(hex_index)
+        self.redraw()
+
+    def _region_hex(self, region_id: str) -> int:
+        """Какой-нибудь гекс этой земли — лучше тот, где стоит город."""
+        world = self.world
+        for item in world.settlements.values():
+            if item.region_id == region_id and item.hex_index >= 0:
+                return item.hex_index
+        link = getattr(world, "map_link", None)
+        owner = getattr(link, "region_of_hex", {}) if link else {}
+        for index, holder in owner.items():
+            if holder == region_id:
+                return index
+        return -1
+
     # ------------------------------------------------------------------
     # Карточка гекса
     # ------------------------------------------------------------------

@@ -641,7 +641,11 @@ def _make_children(ctx, figure, spouse, race, marriage_year: int, year: int,
 
     last_year = min(figure.death.year, spouse.death.year) - 1
     fertile_span = max(race.adulthood, int((race.lifespan[0] + race.lifespan[1]) * 0.15))
-    window_end = min(last_year, marriage_year + fertile_span)
+    # Люди, живые к последнему году, умирают уже за краем летописи — это
+    # верно. А вот рождаться за краем нельзя: мир на этом году кончается,
+    # и запись о таком ребёнке оказалась бы в будущем.
+    window_end = min(last_year, marriage_year + fertile_span,
+                     int(world.total_years))
     if window_end <= marriage_year:
         return
 

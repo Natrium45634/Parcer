@@ -1361,6 +1361,30 @@ def check_embassies(world, seed: str) -> list:
     return problems
 
 
+def check_after_end(world, seed: str) -> list:
+    """Записей позже последнего года истории быть не должно.
+
+    Люди, живые к концу, умирают уже за краем — это верно и нарочно. Но
+    само событие летописи за краем означает, что кто-то посчитал год не
+    от мира, а от своей мерки.
+    """
+    problems = []
+    total = int(world.total_years)
+    for event in world.events:
+        if event.date.year > total:
+            problems.append("сид «%s»: запись «%s» датирована %d годом, а "
+                            "история кончается на %d"
+                            % (seed, event.title, event.date.year, total))
+            break
+    for figure in world.figures.values():
+        if figure.birth is not None and figure.birth.year > total:
+            problems.append("сид «%s»: %s родился в %d году, а история "
+                            "кончается на %d"
+                            % (seed, figure.name, figure.birth.year, total))
+            break
+    return problems
+
+
 def check_calamities(world, seed: str) -> list:
     """Проверяет связность бедствий, их следов и сражений."""
     problems = []
@@ -2771,6 +2795,7 @@ def main() -> int:
         failures.extend(check_politics(first, seed))
         failures.extend(check_calamities(first, seed))
         failures.extend(check_disasters(first, seed))
+        failures.extend(check_after_end(first, seed))
         failures.extend(check_invasions(first, seed))
         failures.extend(check_subjects(first, seed))
         failures.extend(check_traces(first, seed))
@@ -2833,6 +2858,7 @@ def main() -> int:
             failures.extend(check_politics(first, "карта/" + seed))
             failures.extend(check_calamities(first, "карта/" + seed))
             failures.extend(check_disasters(first, "карта/" + seed))
+            failures.extend(check_after_end(first, "карта/" + seed))
             failures.extend(check_invasions(first, "карта/" + seed))
             failures.extend(check_subjects(first, "карта/" + seed))
             failures.extend(check_traces(first, "карта/" + seed))
@@ -2891,7 +2917,7 @@ def main() -> int:
             failures.append("своя карта, сид «%s»: мир изменился после "
                             "сохранения" % seed)
         for check in (check_nobility, check_wars, check_politics,
-                      check_calamities, check_disasters,
+                      check_calamities, check_disasters, check_after_end,
                       check_invasions, check_subjects,
                       check_traces, check_year_slices,
                       check_faiths, check_nations,

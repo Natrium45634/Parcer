@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from gui.atlas import Atlas
 from gui.errors import human_error
+from gui.history import HistoryTab
 from gui.sidetabs import SideTabs
 from gui import wizard as wizard_mod
 from gui.wizard import Wizard
@@ -372,6 +373,7 @@ class ChronicleApp(tk.Tk):
         self._build_chronicle_tab()
         self._build_map_tab()
         self._build_timeline_tab()
+        self._build_history_tab()
         self.eras_text = self._add_text_tab("Эпохи")
         self.polity_tree = self._add_tree_tab(
             "Страны",
@@ -539,6 +541,36 @@ class ChronicleApp(tk.Tk):
     def _fill_atlas(self) -> None:
         if self.world is not None:
             self.atlas.show(self.world)
+
+    def _build_history_tab(self) -> None:
+        """История мира: отбор по летописи вместо блуждания по разделам.
+
+        Разделы отвечают на вопрос «что было с верой». Эта вкладка
+        отвечает на вопрос «что было в таком-то году на такой-то земле и
+        отчего», а это другой вопрос и другой порядок работы.
+        """
+        self.history = HistoryTab(self.tabs,
+                                  fonts={"ui": self.ui_font,
+                                         "mono": self.mono},
+                                  on_map=self.show_on_map)
+        self.tabs.add(self.history, text="История мира")
+        self._fillers[str(self.history)] = self._fill_history
+
+    def _fill_history(self) -> None:
+        if self.world is not None:
+            self.history.set_world(self.world)
+
+    def show_on_map(self, year: int, region_id: str) -> None:
+        """Перейти на карту и показать на ней место и год записи."""
+        if self.world is None:
+            return
+        titles = list(self.tabs._titles)
+        if "Карта мира" not in titles:
+            return
+        self.tabs.select(titles.index("Карта мира"))
+        self.update_idletasks()
+        self._on_tab_changed()
+        self.atlas.look_at(year=year, region_id=region_id)
 
     def _build_timeline_tab(self) -> None:
         """Временная шкала: весь мир на один названный год.
@@ -886,6 +918,8 @@ class ChronicleApp(tk.Tk):
         self.year_var.set("")
         if self.atlas is not None:
             self.atlas.clear()     # чтобы не осталась карта прошлого мира
+        if getattr(self, "history", None) is not None:
+            self.history.world = None
         self.refresh_chronicle()
         self._set_text(self.eras_text, chronicle.render_eras(world))
         self._set_text(self.folks_text, chronicle.render_folks(world))
