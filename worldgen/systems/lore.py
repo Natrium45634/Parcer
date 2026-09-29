@@ -164,6 +164,11 @@ def _recall(ctx, codex, year: int, rng) -> None:
         window = [pair for pair in window if pair[0] is not event]
         codex.entries.append({"year": event.date.year, "event": event.id,
                               "kind": "по памяти"})
+    if codex.entries:
+        # Свод охватывает и то, что записано по памяти: он начинается не
+        # с того дня, когда его завели, а с того, докуда хватило памяти.
+        first = min(int(row.get("year", year)) for row in codex.entries)
+        codex.span = max(codex.span, year - first)
 
 
 def _scribe(ctx, city, race, year: int, rng):
