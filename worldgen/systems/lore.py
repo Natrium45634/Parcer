@@ -157,18 +157,23 @@ def _recall(ctx, codex, year: int, rng) -> None:
             break
     if not window:
         return
+    oldest = year
     for _ in range(rng.randint(*RECALL_COUNT)):
         if not window:
             break
         event = rng.weighted(window)
         window = [pair for pair in window if pair[0] is not event]
-        codex.entries.append({"year": event.date.year, "event": event.id,
-                              "kind": "по памяти"})
-    if codex.entries:
+        # Год записи — тот, когда её сделали: свод не может содержать
+        # строку, написанную до того, как его завели. О каком годе она,
+        # сказано отдельно.
+        codex.entries.append({"year": year, "event": event.id,
+                              "kind": "по памяти",
+                              "о годе": event.date.year})
+        oldest = min(oldest, event.date.year)
+    if oldest < year:
         # Свод охватывает и то, что записано по памяти: он начинается не
         # с того дня, когда его завели, а с того, докуда хватило памяти.
-        first = min(int(row.get("year", year)) for row in codex.entries)
-        codex.span = max(codex.span, year - first)
+        codex.span = max(codex.span, year - oldest)
 
 
 def _scribe(ctx, city, race, year: int, rng):
@@ -307,8 +312,13 @@ def _refind(ctx, codex, year: int, rng) -> None:
     city = world.settlements.get(codex.seat_id)
     if city is not None and city.status == ACTIVE \
             and codex.id not in world.active_codices:
+        # Свод не просто нашёлся — его снова ведут. Значит, он опять
+        # ведётся и у него больше нет года окончания: год, когда его
+        # потеряли, остался в записях и в летописи.
         world.active_codices.append(codex.id)
-        codex.notes.append("%d: свод продолжили" % year)
+        codex.status = lore.KEPT
+        codex.ended = None
+        codex.notes.append("%d: свод нашли и продолжили" % year)
     title, text = texts.codex_found(rng, codex, span)
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="codex_found",

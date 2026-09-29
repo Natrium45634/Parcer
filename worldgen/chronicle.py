@@ -1921,11 +1921,20 @@ def render_lore(world) -> str:
                                              item.get("to") or "…"))
             if names:
                 rows.append("      вели: %s" % "; ".join(names[:5]))
+            # «По памяти» — не ложь, а другое свидетельство: так записан
+            # тот век, который свод не застал. Считаем его отдельно.
+            recalled = [item for item in codex.entries
+                        if item.get("kind") == "по памяти"]
             wrong = [item for item in codex.entries
-                     if item.get("kind") not in ("верно", None)]
-            rows.append("      записей: %d, из них неверных: %d (точность "
-                        "%.0f%%)" % (len(codex.entries), len(wrong),
-                                     codex.accuracy * 100))
+                     if item.get("kind") not in ("верно", "по памяти", None)]
+            rows.append("      записей: %d, из них по памяти: %d, "
+                        "неверных: %d (точность %.0f%%)"
+                        % (len(codex.entries), len(recalled), len(wrong),
+                           codex.accuracy * 100))
+            for item in recalled[:2]:
+                rows.append("          о %d годе, записано по памяти: «%s»"
+                            % (item.get("о годе", item.get("year", 0)),
+                               titles.get(item.get("event"), "—")))
             for item in wrong[:3]:
                 rows.append("          %d — %s: «%s»"
                             % (item.get("year", 0), item.get("kind", ""),
