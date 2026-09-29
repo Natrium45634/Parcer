@@ -411,7 +411,12 @@ def _maybe_start(ctx, year: int) -> None:
     world = ctx.world
     rng = ctx.rng("calamity", "start", year)
     spec_era = ctx.era_spec(year)
-    chance = ctx.rate(CALAMITY_RATE) * (0.65 + spec_era.turmoil)
+    # Короткую историю мир проживает быстрее: иначе за пятьсот лет племена
+    # не дорастут до городов. Но беды разгонять так же сильно нельзя —
+    # на тысяче лет беда стояла бы в мире каждый год, и конец света
+    # обращался в погоду. Поэтому им достаётся половина ускорения.
+    chance = ctx.rate(CALAMITY_RATE) * (0.65 + spec_era.turmoil) \
+        / max(1.0, ctx.rate_scale ** 0.5)
     # Пока мир пуст, бедствиям некого изводить.
     if not world.active_settlements and not world.active_tribes:
         return
@@ -448,6 +453,11 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     severity = severity or spec.severity(rng)
     # Долгие перемены климата длятся ровно столько, сколько вписано в карту.
     duration = duration or spec.years(rng, severity)
+    # В короткой истории и беда короче: тридцатилетний мор занимает в
+    # тысячелетнем мире три сотых всей его истории, и тогда в летописи
+    # не остаётся спокойных лет вовсе.
+    if ctx.rate_scale > 1.0:
+        duration = max(1, int(round(duration / (ctx.rate_scale ** 0.5))))
     count = min(len(world.regions), spec.regions_count(rng, severity))
 
     victim = None
