@@ -77,6 +77,14 @@ def pick_font(candidates, size, weight="normal"):
 SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".хронист.json")
 MIN_SCALE, MAX_SCALE = -2, 10
 
+# Окна сообщений, выбор файла и выпадающие списки набраны не нашими
+# шрифтами, а собственными шрифтами Tk. Если не растить и их, при
+# крупном наборе в программе остаются мелкими именно те окошки, в
+# которых человек что-то выбирает.
+STOCK_FONTS = ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont",
+               "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont",
+               "TkTooltipFont", "TkFixedFont")
+
 
 def _read_scale() -> int:
     """Во сколько ступеней крупнее обычного человек просил набирать текст."""
@@ -130,6 +138,15 @@ class ChronicleApp(tk.Tk):
         # человека переживает закрытие программы — переставлять его при
         # каждом запуске никто не станет.
         self.scale_step = _read_scale()
+        # Размеры шрифтов Tk запоминаются такими, какими их поставила
+        # система: масштаб считается от них, а не от прошлого раза.
+        self._stock_sizes = {}
+        for name in STOCK_FONTS:
+            try:
+                self._stock_sizes[name] = int(
+                    tkfont.nametofont(name).cget("size"))
+            except tk.TclError:
+                pass
 
         self._set_icon()
         self._setup_style()
@@ -208,6 +225,10 @@ class ChronicleApp(tk.Tk):
         self.option_add("*TCombobox*Listbox.foreground", INK)
         self.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
         self.option_add("*TCombobox*Listbox.selectForeground", "#221d14")
+        # Шрифт задаётся именем: наш шрифт общий, и когда он подрастёт,
+        # подрастёт и список — без пересоздания окошка.
+        self.option_add("*TCombobox*Listbox.font", self.ui_font)
+        self.option_add("*Listbox.font", self.ui_font)
         style.configure("TProgressbar", background=ACCENT, troughcolor=PANEL)
 
     # ------------------------------------------------------------------
@@ -293,6 +314,18 @@ class ChronicleApp(tk.Tk):
         # Строки таблиц не растут за шрифтом сами — им надо сказать.
         ttk.Style(self).configure("Treeview",
                                   rowheight=max(18, 22 + step * 2))
+        # Свои шрифты Tk мерит то точками, то точками экрана: у вторых
+        # размер отрицательный, и расти им надо в другую сторону.
+        for name, base in self._stock_sizes.items():
+            try:
+                stock = tkfont.nametofont(name)
+            except tk.TclError:
+                continue
+            size = (min(-6, base - step) if base < 0 else max(6, base + step))
+            try:
+                stock.configure(size=size)
+            except tk.TclError:
+                pass
         for item in getattr(self, "_menus", ()):
             try:
                 item.configure(font=self.ui_font)
