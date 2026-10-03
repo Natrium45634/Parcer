@@ -441,6 +441,42 @@ def _nodes(ctx, year: int) -> list:
     return out
 
 
+# Какое поле праздника в каком реестре мира проверяется. Нужно потому,
+# что привязки приходят из чужих рук: `figure.home_id`, например, держит
+# то поселение, где человек жил, — а у основателя колонии дома ещё нет, и
+# там лежит номер земли (`systems/founding`). Слепо переложить это в
+# `settlement_id` значит привязать праздник к городу, которого нет; эту
+# дыру нашла собственная проверка на десятитысячелетнем мире.
+LINK_TABLES = {
+    "war_id": "wars", "calamity_id": "calamities",
+    "invasion_id": "invasions", "monster_id": "monsters",
+    "figure_id": "figures", "deity_id": "deities", "guild_id": "guilds",
+    "trace_id": "traces", "subject_id": "subjects", "polity_id": "polities",
+    "settlement_id": "settlements", "folk_id": "folks",
+    "faith_id": "faiths", "house_id": "houses", "race_id": "",
+}
+
+
+def _clean_links(world, links: dict) -> dict:
+    """Выбрасывает привязки к тому, чего в мире нет.
+
+    Чистится после жребия, а не до: порядок обращений к ГСЧ от этого не
+    меняется, и миры остаются теми же — меняется только то, что праздник
+    больше не ссылается в пустоту.
+    """
+    out = {}
+    for field, value in links.items():
+        if not value:
+            continue
+        table = LINK_TABLES.get(field)
+        if table is None:
+            continue            # такого поля у праздника нет
+        if table and value not in getattr(world, table, {}):
+            continue            # ссылка в пустоту
+        out[field] = value
+    return out
+
+
 def _already(world) -> set:
     """Что мир уже поминает: второй день на то же событие не заводят.
 
@@ -525,6 +561,11 @@ def _born(ctx, rng, year: int) -> None:
         name = texts.make_name(rng, origin, mood, taken)
         month, day, rule = _pick_date(rng, origin, node, world)
 
+    links = _clean_links(world, node.links)
+    if node.about and node.about in LINK_TABLES \
+            and not links.get(node.about):
+        return      # повода нет в мире: такого дня и быть не может
+
     holiday = world.add_holiday(
         name=name, origin=origin.key, group=origin.group,
         born=ctx.date_in(rng, year), step=cat.STEP_MEMORY, state=cat.ALIVE,
@@ -533,7 +574,9 @@ def _born(ctx, rng, year: int) -> None:
         event_year=node.year, month=month, day=day, rule=rule,
         days=1 if rng.chance(0.78) else rng.randint(2, 4),
         first_meaning=origin.meaning, now_meaning=origin.meaning,
-        about=node.about, region_id=node.region_id, **node.links)
+        about=node.about,
+        region_id=node.region_id if node.region_id in world.regions else "",
+        **links)
     holiday.top_reach = holiday.reach
     holiday.top_year = year
     holiday.last_seen = year
