@@ -502,6 +502,9 @@ class ChronicleApp(tk.Tk):
             ("Имя", "Раса", "Пол", "Годы жизни", "Род", "Титул", "Роли", "Событий"),
             (230, 120, 60, 110, 150, 150, 200, 70), self._on_figure_open,
             toolbar=self._figures_toolbar, filler=lambda: self._fill_figures())
+        self.origin_text = self._add_text_tab(
+            "Начало мира", lambda: self._set_text(
+                self.origin_text, chronicle.render_origin(self.world)))
         self.folks_text = self._add_text_tab("Народы")
         self.tongues_text = self._add_text_tab("Языки")
         self.peoples_text = self._add_text_tab("Державы и народы")

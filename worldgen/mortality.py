@@ -560,11 +560,16 @@ UNDEAD_REST = (
 )
 
 
-def end_how(rng, subject) -> tuple:
+def end_how(rng, subject, laws=()) -> tuple:
     """Как именно он кончил и держится ли это.
 
     Возвращает пару (строка, насовсем ли). Нежить с концом «умер своей
     смертью» получает не старость, а упокоение: лич не умирает от лет.
+
+    `laws` — космические законы этого мира (`systems/origin.py`). Они тут
+    не украшение: в мире, где положено «мёртвые не возвращаются», конец
+    держится насовсем чаще, а там, где душа переживает тело, — реже. Это
+    и значит, что законы начала мира работают, а не лежат в справке.
     """
     rows = END_HOW.get(subject.end)
     if subject.kind == "нежить" and subject.end in ("умер своей смертью",
@@ -572,6 +577,22 @@ def end_how(rng, subject) -> tuple:
         rows = UNDEAD_REST
     if not rows:
         return "", NOT_KNOWN
+    laws = set(laws or ())
+    if len(rows) > 1 and ("dead_stay" in laws or "soul_free" in laws
+                          or "no_soul" in laws):
+        # Сперва выбираем как обычно: порядок обращений к ГСЧ не меняется
+        # ни в одном мире, и миры без начала остаются теми же.
+        pair, holds = rng.choice(rows)
+        want_forever = "dead_stay" in laws or "no_soul" in laws
+        # Если закон мира говорит одно, а выпало другое, пробуем ещё раз
+        # — но ровно один раз: закон склоняет, а не решает.
+        fits = (holds == FOREVER) if want_forever else (holds != FOREVER)
+        if not fits:
+            other = [row for row in rows
+                     if (row[1] == FOREVER) is want_forever]
+            if other:
+                pair, holds = rng.choice(other)
+        return form(pair, subject.sex), holds
     pair, holds = rng.choice(rows)
     return form(pair, subject.sex), holds
 

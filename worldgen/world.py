@@ -22,6 +22,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Figure,
                      Folk, Fortress,
                      Guild, Holiday, House, Law, League, Legend, LifePath,
+                     WorldOrigin,
                      Memory,
                      Scar, LostLore, CrisisEra, Invasion, Subject, Trace,
                      Migration,
@@ -71,6 +72,7 @@ _ENTITY_TABLES = {
     "Y": ("deities", "tongues"), "Z": ("sites",),
     "BN": ("bonds",), "BY": ("stories",), "CB": ("cabals",),
     "FA": ("facts",), "GH": ("godheads",), "HL": ("holidays",),
+    "WO": ("origins",),
     "KE": ("crisis_eras",),
     "LF": ("lifepaths",), "LK": ("lost_lore",), "ME": ("memories",),
     "MG": ("migrations",), "NV": ("invasions",), "RN": ("renowns",),
@@ -119,6 +121,7 @@ class World:
         self.subjects = {}             # id -> Subject (субъекты истории)
         self.traces = {}               # id -> Trace (следы бед в мире)
         self.holidays = {}             # id -> Holiday (праздники и поминовения)
+        self.origins = {}              # id -> WorldOrigin (начало мира; он один)
         self.scars = {}                # id -> Scar (шрамы мира)
         self.lost_lore = {}            # id -> LostLore (что забылось)
         self.crisis_eras = {}          # id -> CrisisEra (эпохи кризиса)
@@ -438,6 +441,24 @@ class World:
         """Все следы одной беды — её отпечаток в мире."""
         return [item for item in self.traces.values()
                 if item.calamity_id == calamity_id]
+
+    def set_origin(self, **kwargs) -> WorldOrigin:
+        """Начало мира. Оно одно, и заводится один раз.
+
+        Лежит в реестре, а не отдельным полем, чтобы сохранение и чтение
+        шли тем же путём, что у всех прочих сущностей; наружу оно видно
+        свойством `origin`.
+        """
+        origin = WorldOrigin(id=self.next_id("WO"), **kwargs)
+        self.origins[origin.id] = origin
+        return origin
+
+    @property
+    def origin(self):
+        """То самое начало мира — или ничего, если мир о себе не знает."""
+        for key in sorted(self.origins):
+            return self.origins[key]
+        return None
 
     def add_holiday(self, **kwargs) -> Holiday:
         """Праздник: день, в который общество возвращается к прошлому."""

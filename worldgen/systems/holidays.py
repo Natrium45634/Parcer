@@ -143,6 +143,15 @@ def _nodes(ctx, year: int) -> list:
     world = ctx.world
     out = []
     taken = _already(world)
+    # Устройство мира тут не справка, а запрет. Если магии в мир не
+    # положили, то и чудес в нём не бывает — значит и праздника чуда
+    # завести нельзя, сколько бы богов ни было.
+    missing = set(world.origin.missing) if world.origin is not None else set()
+    barred = set()
+    if "магия" in missing:
+        barred.update(("чудо", "обретение святыни", "закрытие провала"))
+    if "душа" in missing:
+        barred.add("смерть праведника")
 
     # --- войны ---------------------------------------------------------
     for war in world.wars.values():
@@ -296,6 +305,8 @@ def _nodes(ctx, year: int) -> list:
                 or ("deity_id", deity.id) in taken:
             continue
         origin = "рождение бога" if deity.primordial else "явление бога"
+        if origin in barred:
+            continue
         out.append(Node(origin,
                         "божество по имени %s открылось людям"
                         % deity.given_name,
@@ -411,6 +422,8 @@ def _nodes(ctx, year: int) -> list:
     # Эти дни ни от какого события не растут: их заводит сам народ,
     # которому нужен хоть один день в году. Поэтому берутся они только у
     # тех, у кого такого дня ещё нет.
+    out = [node for node in out if node.origin not in barred]
+
     for folk in world.folks.values():
         if folk.status != ACTIVE or folk.population < 12000:
             continue

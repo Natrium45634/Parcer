@@ -32,6 +32,7 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       exploration, founding, geography, guilds,
                       holidays as holidays_sys,
                       houses,
+                      origin as origin_sys,
                       invasion as invasion_sys,
                       laws, legacy, lifepath, lives, localstory, lore,
                       memory, migration,
@@ -142,6 +143,11 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     # Мифический век идёт сразу за верой мира: первородные были прежде
     # всех богов, и следы их лежат в землях, которые уже построены.
     divinity.prepare(ctx)
+    # И только теперь — начало мира: ему нужны и земли, и уклад творения,
+    # и первородные, потому что слои мира кладут они, а шрамы творения
+    # ложатся в настоящую землю. Это не вступление к летописи, а первый
+    # слой её причин.
+    origin_sys.prepare(ctx)
 
     # По настоящей карте ведём ещё и политическую летопись: кто чем владел
     # в такой-то год. Её потом читает вкладка «Страны» картогенератора.
@@ -261,6 +267,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             raise GenerationCancelled()
 
     tongues.close(ctx, total)
+    # Версии начала мира складываются в самом конце: при творении народов
+    # ещё нет, а миф принадлежит тем, кто дожил.
+    origin_sys.close(ctx, total)
     # Время бед, которое так и не кончилось к последнему году, всё равно
     # получает имя: иначе последняя эпоха мира остаётся безымянной.
     disaster_sys.close_era(ctx, total, ctx.date_in(

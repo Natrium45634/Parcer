@@ -601,7 +601,7 @@ def close(ctx, total: int) -> None:
         _keep_span(subject, min(total, subject.spans[-1].get("по", total))
                    if subject.spans else total)
         _end_of(ctx, subject, rng, total)
-        _how_of(subject, rng)
+        _how_of(ctx, subject, rng)
         _fix_entry(subject)
         _ties_of(ctx, subject)
         _legacy_of(ctx, subject, rng)
@@ -623,7 +623,7 @@ def _outlived(subject) -> None:
         % ("пережила" if subject.sex == "f" else "пережил"))
 
 
-def _how_of(subject, rng) -> None:
+def _how_of(ctx, subject, rng) -> None:
     """Не только «чем кончил», но и как именно — и держится ли это.
 
     «Запечатан» ничего не говорит: под храмом или в собственном имени, на
@@ -634,7 +634,8 @@ def _how_of(subject, rng) -> None:
     """
     if not subject.end or subject.end == sub.END_GOING:
         return
-    subject.end_how, subject.end_holds = mortality.end_how(rng, subject)
+    subject.end_how, subject.end_holds = mortality.end_how(
+        rng, subject, getattr(ctx, "cosmic_laws", ()))
 
 
 def _end_of(ctx, subject, rng, total: int) -> None:

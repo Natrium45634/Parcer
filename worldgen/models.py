@@ -2484,3 +2484,91 @@ class Holiday:
         data["kept"] = self.kept
         data["meaning"] = self.meaning
         return data
+
+
+@dataclass
+class WorldOrigin:
+    """Начало мира: не вступление к летописи, а первый слой её причин.
+
+    Тут лежит то, **что было на самом деле**: каким укладом мир сделан,
+    зачем (`motif`), в каком порядке положены его слои (`layers`) и
+    каких слоёв в нём нет вовсе (`missing`), какие законы из этого вышли
+    (`laws`), чем кончился первый спор и что после него заперли, как
+    завелась жизнь и кем были первые, какие шрамы творение оставило на
+    настоящей земле (`scars`).
+
+    И отдельно — то, **что об этом знают**: `known` говорит, какая доля
+    правды вообще дошла до летописи, `versions` — как рассказывает об
+    этом каждый народ, `clashes` — где источники друг другу противоречат,
+    а `unknown` — что осталось без ответа. Генератор не обязан
+    разрешать противоречия: нерешённое — это и есть то, до чего потом
+    докапывается быль.
+    """
+
+    id: str
+    model: str                 # уклад творения (как в cosmogony.py)
+    motif: str                 # ключ мотива: зачем мир вообще есть
+    certainty: str             # ключ ступени достоверности
+    known: float = 0.5         # доля правды, дошедшей до летописи
+
+    # --- из чего мир сложен ---------------------------------------------
+    layers: list = field(default_factory=list)   # [{слой, черёд, спор, …}]
+    missing: list = field(default_factory=list)  # слои, которых тут нет
+    laws: list = field(default_factory=list)     # [{закон, отчего, известен}]
+
+    # --- первый спор -----------------------------------------------------
+    quarrel: str = ""          # о каком слое спорили крупнее всего
+    quarrel_how: str = ""      # чем кончилось
+    quarrel_cost: str = ""     # что при этом сломалось
+    winner_id: str = ""        # кто настоял (id божества)
+    loser_id: str = ""         # и кто уступил
+    sealed: str = ""           # что заперли, а не убили
+    sealed_how: str = ""
+
+    # --- жизнь и первые --------------------------------------------------
+    life_way: str = ""         # ключ из LIFE_WAYS
+    first_kind: str = ""       # ключ из FIRST_KINDS
+    one_root: bool = False     # все ли нынешние народы из одного корня
+    split: str = ""            # как они разошлись
+    split_how: str = ""
+
+    # --- что осталось в мире ---------------------------------------------
+    scars: list = field(default_factory=list)    # [{вид, земля, место, …}]
+
+    # --- что об этом знают -----------------------------------------------
+    versions: list = field(default_factory=list) # [{кто, как}]
+    clashes: list = field(default_factory=list)  # [{о чём, кто, против, решено}]
+    unknown: list = field(default_factory=list)  # что осталось без ответа
+    notes: list = field(default_factory=list)
+    event_ids: list = field(default_factory=list)
+
+    @property
+    def order(self) -> list:
+        """Слои по порядку творения — так, как их и кладут."""
+        return sorted(self.layers, key=lambda row: int(row.get("черёд", 0)))
+
+    @property
+    def law_texts(self) -> list:
+        """Законы одной строкой каждый — то, на что ссылается вера."""
+        return [row.get("закон", "") for row in self.laws]
+
+    @property
+    def open_clashes(self) -> list:
+        """Противоречия, которые так и не разрешили."""
+        return [row for row in self.clashes if not row.get("решено")]
+
+    @property
+    def full_name(self) -> str:
+        return self.motif
+
+    def layer_of(self, key: str) -> dict:
+        for row in self.layers:
+            if row.get("слой") == key:
+                return row
+        return {}
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["order"] = [row.get("слой", "") for row in self.order]
+        data["law_texts"] = self.law_texts
+        return data

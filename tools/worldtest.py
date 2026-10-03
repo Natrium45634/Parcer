@@ -2459,6 +2459,39 @@ def audit(world) -> list:
                 bad("субъект «%s» переменился после своего конца" % item.name)
                 break
 
+    # 38. Начало мира: первый слой причин, а не вступление.
+    origin = world.origin
+    if origin is not None:
+        from worldgen import origin as org_cat
+        named = sum(1 for row in origin.laws if row.get("известен"))
+        place = {row["слой"]: index
+                 for index, row in enumerate(origin.order)}
+        turned = 0
+        for key, index in place.items():
+            layer = org_cat.LAYERS.get(key)
+            if layer is None:
+                continue
+            turned += sum(1 for need in layer.needs
+                          if need in place and place[need] > index)
+        found.append(("=", "начало: уклад «%s», мотив «%s»; слоёв %d "
+                      "(нет %d, не на своём месте %d); законов названо %d "
+                      "из %d; шрамов %d; версий %d; споров не решено %d; "
+                      "без ответа %d"
+                      % (origin.model,
+                         org_cat.MOTIFS[origin.motif].name
+                         if origin.motif in org_cat.MOTIFS else origin.motif,
+                         len(origin.layers), len(origin.missing), turned,
+                         named, len(origin.laws), len(origin.scars),
+                         len(origin.versions), len(origin.open_clashes),
+                         len(origin.unknown))))
+        if origin.order and origin.order[0]["слой"] != org_cat.SPACE:
+            bad("первым слоем мира положено не пространство")
+        for row in origin.scars:
+            land = row.get("земля", "")
+            if land and land not in world.regions:
+                bad("шрам творения лежит в земле, которой нет")
+                break
+
     # 37. Праздники: память, у которой началась своя жизнь.
     holidays = list(world.holidays.values())
     if holidays:

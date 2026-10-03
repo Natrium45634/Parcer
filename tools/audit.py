@@ -996,6 +996,108 @@ def m_hol_stories(world):
                if item.node in feast_nodes)
 
 
+# --- начало мира ------------------------------------------------------------
+
+def m_or_layers(world):
+    """Сколько слоёв мира положено. Все двенадцать — скучно, пять — пусто."""
+    origin = world.origin
+    return len(origin.layers) if origin is not None else None
+
+
+def m_or_missing(world):
+    """Сколько слоёв в мире нет вовсе.
+
+    Мир без сна, без души или без магии — не обеднённый мир, а другой.
+    Если таких слоёв не бывает никогда, то и выбора никакого нет.
+    """
+    origin = world.origin
+    return len(origin.missing) if origin is not None else None
+
+
+def m_or_inverted(world):
+    """Встал ли хоть один слой прежде того, на чём держится.
+
+    Смерть прежде жизни, сознание прежде живого — самое заметное, что
+    может случиться с порядком. Мера считает такие случаи штуками.
+    """
+    from worldgen import origin as cat
+    origin = world.origin
+    if origin is None:
+        return None
+    place = {row["слой"]: index
+             for index, row in enumerate(origin.order)}
+    count = 0
+    for key, index in place.items():
+        layer = cat.LAYERS.get(key)
+        if layer is None:
+            continue
+        for need in layer.needs:
+            if need in place and place[need] > index:
+                count += 1
+    return count
+
+
+def m_or_named_laws(world):
+    """Сколько законов мир называет вслух."""
+    origin = world.origin
+    if origin is None:
+        return None
+    return sum(1 for row in origin.laws if row.get("известен"))
+
+
+def m_or_quiet_laws(world):
+    """И сколько действует молча.
+
+    Мир, который назвал все свои правила, знает о себе больше, чем
+    бывает. Непоименованные законы — не умолчание, а честность.
+    """
+    origin = world.origin
+    if origin is None:
+        return None
+    return sum(1 for row in origin.laws if not row.get("известен"))
+
+
+def m_or_scars(world):
+    """Шрамов творения на земле."""
+    origin = world.origin
+    return len(origin.scars) if origin is not None else None
+
+
+def m_or_scar_places(world):
+    """Доля шрамов, до которых можно дойти ногами.
+
+    Шрам, к которому нет места на карте, остаётся строкой в мифе; шрам
+    с местом однажды найдут, и это будет уже обычная быль.
+    """
+    origin = world.origin
+    if origin is None or not origin.scars:
+        return None
+    return _share(sum(1 for row in origin.scars if row.get("место")),
+                  len(origin.scars))
+
+
+def m_or_versions(world):
+    """Сколько народов рассказывают о начале по-своему."""
+    origin = world.origin
+    return len(origin.versions) if origin is not None else None
+
+
+def m_or_open_clash(world):
+    """Сколько противоречий о начале осталось нерешёнными.
+
+    Генератор не обязан их разрешать: нерешённое — это то, до чего потом
+    докапывается быль.
+    """
+    origin = world.origin
+    return len(origin.open_clashes) if origin is not None else None
+
+
+def m_or_unknown(world):
+    """Сколько вопросов о начале осталось без ответа."""
+    origin = world.origin
+    return len(origin.unknown) if origin is not None else None
+
+
 MEASURES = (
     Measure("были", "не про судьбу мира", m_story_small, 0.82, 0.98,
             "доля", "девять из десяти былей не спасают мир"),
@@ -1194,6 +1296,26 @@ MEASURES = (
             min_years=3000),
     Measure("следы", "спорят между собой", m_tr_quarrel, 0.01, None, "доля",
             "свидетельства не обязаны сходиться", min_years=3000),
+    Measure("начало", "слоёв положено", m_or_layers, 5, 12, "из 12",
+            "мир сложен по частям, и частей не две и не все"),
+    Measure("начало", "слоёв нет вовсе", m_or_missing, None, 5, "штук",
+            "мир без сна или без магии — не обеднённый, а другой"),
+    Measure("начало", "слоёв не на своём месте", m_or_inverted, None, 3,
+            "штук", "смерть прежде жизни — редкость, а не обычай"),
+    Measure("начало", "законов названо", m_or_named_laws, 1, 7, "штук",
+            "несколько правил говорят о мире больше, чем все"),
+    Measure("начало", "законов действует молча", m_or_quiet_laws, 1, None,
+            "штук", "мир не знает о себе всего"),
+    Measure("начало", "шрамов творения", m_or_scars, 1, 5, "штук",
+            "творение оставило следы, но мир не поле аномалий"),
+    Measure("начало", "шрамов с местом", m_or_scar_places, 0.2, None, "доля",
+            "до следа творения можно дойти ногами"),
+    Measure("начало", "версий начала", m_or_versions, 1, None, "штук",
+            "у каждого народа свой рассказ о том, как всё было"),
+    Measure("начало", "споров не решено", m_or_open_clash, 1, None, "штук",
+            "о начале спорят, и спор не всегда решается", min_years=1500),
+    Measure("начало", "вопросов без ответа", m_or_unknown, None, None,
+            "штук", "о начале известно ровно столько, сколько известно"),
     Measure("праздники", "доросли до праздника", m_hol_rose, 0.08, 0.6,
             "доля", "праздником становится не всякий день памяти"),
     Measure("праздники", "поводов в ходу", m_hol_origins, 12, None, "из 45",

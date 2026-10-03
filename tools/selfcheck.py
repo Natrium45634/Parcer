@@ -550,6 +550,211 @@ def check_gods(world, seed: str) -> list:
     return problems
 
 
+def check_origin(world, seed: str) -> list:
+    """Начало мира: сходится ли оно само с собой и с миром.
+
+    Тут ловится то, что ломается тихо и портит самую первую страницу.
+    Слой, положенный дважды или не положенный, но и не записанный в
+    отсутствующие. Черёд с дырой или с двумя одинаковыми номерами. Закон
+    с ключом, которого нет в каталоге, — такой закон в тексте встанет
+    пустой строкой. Шрам в земле, которой нет в мире, или в месте,
+    которого не создавали. Мотив, не подходящий укладу: мир-тюрьму не
+    строят там, где творца не было вовсе. Версия народа, которого в
+    мире не было. И противоречие без второй стороны — то есть не
+    противоречие.
+    """
+    from worldgen import origin as cat
+    from worldgen import narrative_origin as texts
+
+    problems = []
+    origin = world.origin
+    if origin is None:
+        # Мир без начала — это законно: он мог просто быть. Но тогда и
+        # ссылок на начало нигде быть не должно.
+        if world.notes.get("начало мира"):
+            problems.append("сид «%s»: начала мира нет, а запись о нём есть"
+                            % seed)
+        return problems
+
+    motif = cat.MOTIFS.get(origin.motif)
+    if motif is None:
+        problems.append("сид «%s»: у начала мира неведомый мотив «%s»"
+                        % (seed, origin.motif))
+        return problems
+    if motif.needs and origin.model not in motif.needs:
+        problems.append("сид «%s»: мотив «%s» не идёт укладу «%s»"
+                        % (seed, motif.name, origin.model))
+        return problems
+    if origin.certainty not in cat.CERTAINTY:
+        problems.append("сид «%s»: у начала мира неведомая достоверность "
+                        "«%s»" % (seed, origin.certainty))
+        return problems
+    if not 0.0 < origin.known <= 1.0:
+        problems.append("сид «%s»: у начала мира доля известного %s"
+                        % (seed, origin.known))
+        return problems
+
+    # --- слои ----------------------------------------------------------
+    laid = [row.get("слой") for row in origin.layers]
+    if len(laid) != len(set(laid)):
+        problems.append("сид «%s»: слой мира положен дважды" % seed)
+        return problems
+    for key in laid:
+        if key not in cat.LAYERS:
+            problems.append("сид «%s»: в мире положен неведомый слой «%s»"
+                            % (seed, key))
+            return problems
+    for key in origin.missing:
+        if key not in cat.LAYERS:
+            problems.append("сид «%s»: в мире не хватает неведомого слоя "
+                            "«%s»" % (seed, key))
+            return problems
+        if key in laid:
+            problems.append("сид «%s»: слой «%s» и положен, и не положен"
+                            % (seed, key))
+            return problems
+    for key in cat.MUST:
+        if key not in laid:
+            problems.append("сид «%s»: в мире нет слоя «%s», без которого "
+                            "мира не бывает" % (seed, key))
+            return problems
+    missed = set(cat.LAYERS) - set(laid) - set(origin.missing)
+    if missed:
+        problems.append("сид «%s»: о слое «%s» не сказано ни что он есть, "
+                        "ни что его нет" % (seed, sorted(missed)[0]))
+        return problems
+    order = sorted(int(row.get("черёд", 0)) for row in origin.layers)
+    if order != list(range(1, len(order) + 1)):
+        problems.append("сид «%s»: черёд слоёв мира идёт с дырой или с "
+                        "повтором" % seed)
+        return problems
+    # Пространство кладут первым всегда: материи, положенной прежде
+    # места, негде лежать.
+    first = origin.order[0]["слой"] if origin.order else ""
+    if first != cat.SPACE:
+        problems.append("сид «%s»: первым слоем мира положено «%s», а не "
+                        "пространство" % (seed, first))
+        return problems
+
+    # --- законы --------------------------------------------------------
+    keys = [row.get("ключ") for row in origin.laws]
+    if len(keys) != len(set(keys)):
+        problems.append("сид «%s»: один закон мира назван дважды" % seed)
+        return problems
+    for row in origin.laws:
+        law = cat.LAWS.get(row.get("ключ"))
+        if law is None:
+            problems.append("сид «%s»: у мира закон с неведомым ключом «%s»"
+                            % (seed, row.get("ключ")))
+            return problems
+        if row.get("закон") != law.text:
+            problems.append("сид «%s»: закон «%s» записан не тем словом, "
+                            "что в каталоге" % (seed, law.key))
+            return problems
+    if not any(row.get("известен") for row in origin.laws) \
+            and origin.known > 0.5:
+        problems.append("сид «%s»: мир знает о себе много, а ни одного "
+                        "закона назвать не может" % seed)
+        return problems
+
+    # --- спор ----------------------------------------------------------
+    if origin.quarrel:
+        if origin.quarrel not in laid:
+            problems.append("сид «%s»: спорили о слое «%s», которого в мире "
+                            "не положили" % (seed, origin.quarrel))
+            return problems
+        for field in ("winner_id", "loser_id"):
+            value = getattr(origin, field, "")
+            if value and value not in world.deities:
+                problems.append("сид «%s»: в первом споре участвовал тот, "
+                                "кого в мире нет" % seed)
+                return problems
+    if origin.sealed and not origin.sealed_how:
+        problems.append("сид «%s»: что-то заперто, а как — не сказано"
+                        % seed)
+        return problems
+
+    # --- жизнь ---------------------------------------------------------
+    if origin.life_way not in cat.LIFE_WAYS:
+        problems.append("сид «%s»: жизнь завелась неведомым путём «%s»"
+                        % (seed, origin.life_way))
+        return problems
+    way = cat.LIFE_WAYS[origin.life_way]
+    for need in way.needs:
+        if need in origin.missing:
+            problems.append("сид «%s»: жизнь вышла из слоя «%s», которого "
+                            "в мире нет" % (seed, need))
+            return problems
+    if origin.first_kind not in cat.FIRST_KINDS:
+        problems.append("сид «%s»: первыми были неведомо кто «%s»"
+                        % (seed, origin.first_kind))
+        return problems
+    if origin.split and not origin.one_root:
+        problems.append("сид «%s»: народы разошлись, не имея общего корня"
+                        % seed)
+        return problems
+
+    # --- шрамы ---------------------------------------------------------
+    for row in origin.scars:
+        if row.get("вид") not in cat.SCARS:
+            problems.append("сид «%s»: шрам творения неведомого вида «%s»"
+                            % (seed, row.get("вид")))
+            return problems
+        land = row.get("земля", "")
+        if land and land not in world.regions:
+            problems.append("сид «%s»: шрам творения лежит в земле, "
+                            "которой нет" % seed)
+            return problems
+        place = row.get("место", "")
+        if place and place not in world.sites:
+            problems.append("сид «%s»: шрам творения привязан к месту, "
+                            "которого не создавали" % seed)
+            return problems
+
+    # --- что об этом знают ---------------------------------------------
+    for row in origin.versions:
+        whose = row.get("чей", "")
+        if whose and whose not in world.folks and whose not in world.faiths:
+            problems.append("сид «%s»: о начале мира рассказывает тот, "
+                            "кого в мире не было" % seed)
+            return problems
+        if not row.get("как"):
+            problems.append("сид «%s»: у версии начала нет самой версии"
+                            % seed)
+            return problems
+    for row in origin.clashes:
+        if not row.get("кто") or not row.get("против"):
+            problems.append("сид «%s»: у противоречия о начале нет второй "
+                            "стороны" % seed)
+            return problems
+        if row.get("кто") == row.get("против"):
+            problems.append("сид «%s»: источник о начале спорит сам с "
+                            "собой" % seed)
+            return problems
+        # То, о чём спорят, должно уметь встать в падеж: иначе в тексте
+        # выйдет «о время».
+        about = row.get("о чём", "")
+        if about and texts.about_prep(about) == about \
+                and about in cat.LAYERS:
+            problems.append("сид «%s»: о слое «%s» нельзя сказать «о ...» — "
+                            "нет падежа" % (seed, about))
+            return problems
+
+    # --- событие о начале есть и стоит первым года --------------------
+    marks = [event for event in world.events
+             if event.kind in ("world_origin", "world_laws")]
+    if not marks:
+        problems.append("сид «%s»: начало мира есть, а записи о нём в "
+                        "летописи нет" % seed)
+        return problems
+    for event in marks:
+        if event.date.year != 1:
+            problems.append("сид «%s»: запись о начале мира стоит в %d году"
+                            % (seed, event.date.year))
+            return problems
+    return problems
+
+
 def check_holidays(world, seed: str) -> list:
     """Праздники: день памяти не спорит ни с миром, ни с собой.
 
@@ -3276,6 +3481,7 @@ def main(only: str = "") -> int:
         failures.extend(check_stories(first, seed))
         failures.extend(check_towns(first, seed))
         failures.extend(check_holidays(first, seed))
+        failures.extend(check_origin(first, seed))
         failures.extend(check_gods(first, seed))
         failures.extend(check_renown(first, seed))
 
@@ -3346,6 +3552,7 @@ def main(only: str = "") -> int:
             failures.extend(check_stories(first, "карта/" + seed))
             failures.extend(check_towns(first, "карта/" + seed))
             failures.extend(check_holidays(first, "карта/" + seed))
+            failures.extend(check_origin(first, "карта/" + seed))
             failures.extend(check_gods(first, "карта/" + seed))
             failures.extend(check_renown(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
@@ -3396,7 +3603,7 @@ def main(only: str = "") -> int:
                       check_tribes, check_capitals, check_souls,
                       check_tales,
                       check_lives, check_stories, check_towns,
-                      check_holidays,
+                      check_holidays, check_origin,
                       check_gods, check_renown):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
