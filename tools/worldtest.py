@@ -884,15 +884,61 @@ def _land_verdict(mean_t: float, mean_w: float, land_share: float,
     return ", ".join(marks)
 
 
+def longest_feast(world, out) -> None:
+    """Портрет дня, который держался дольше всех.
+
+    Числа говорят, не сломалось ли; портрет — стоит ли это читать. У
+    праздника читать стоит одно: разницу между тем, с чего он начался, и
+    тем, чем стал. Поэтому берётся не самый громкий день, а самый
+    долгий — у него этой разницы больше всего.
+    """
+    from worldgen import holidays as cat
+    from worldgen import narrative_holiday as texts
+
+    out("=" * 78)
+    out("ДЕНЬ, КОТОРЫЙ ДЕРЖАЛСЯ ДОЛЬШЕ ВСЕХ")
+    out("=" * 78)
+    if not world.holidays:
+        out("  Этот мир не завёл ни одного дня, к которому стоило бы "
+            "возвращаться.")
+        out("")
+        return
+
+    def span(item):
+        end = item.last_seen or item.born.year
+        return end - item.born.year
+
+    rows = sorted(world.holidays.values(),
+                  key=lambda item: (-span(item), item.id))
+    holiday = rows[0]
+    out("  Держался %d лет: с %d года и до %d."
+        % (span(holiday), holiday.born.year,
+           holiday.last_seen or holiday.born.year))
+    for line in texts.portrait(world, holiday):
+        out("  " + line)
+    if holiday.lost_why:
+        live = holiday.live_rites
+        if live:
+            rite = cat.RITES.get(live[0].get("обряд", ""))
+            if rite is not None:
+                out("")
+                out("  Отчего так делали: %s." % rite.why)
+                out("  Что делают теперь: %s." % (rite.form or rite.what))
+                out("  Чем это объясняют: %s." % rite.lost)
+    out("")
+
+
 def portraits(world, out) -> None:
-    """Семь портретов мира: имена, ушедшие народы, старый город, злое
-    время, тот, кто людям не ровня, самое громкое за всю историю и —
-    если мир стоит на гексовой карте — сама эта земля."""
+    """Восемь портретов мира: имена, ушедшие народы, старый город, злое
+    время, тот, кто людям не ровня, самый долгий праздник, самое громкое
+    за всю историю и — если мир стоит на гексовой карте — сама эта
+    земля."""
     great_names(world, out)
     peoples_gone(world, out)
     oldest_town(world, out)
     worst_time(world, out)
     nonhuman(world, out)
+    longest_feast(world, out)
     loudest(world, out)
     land_portrait(world, out)
 

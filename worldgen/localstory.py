@@ -73,12 +73,19 @@ FALSE_HERO = "славят не того"      # настоящий был др�
 # которого не осталось объяснения, и умение, от которого остались обрывки.
 SCAR = "шрам на земле"             # тут что-то было, а что — не помнят
 LOST_SKILL = "утраченное умение"   # обрывки есть, целого нет
+# И три, которые даёт праздник. Он держится дольше, чем память о его
+# поводе, и потому именно он чаще всего и оказывается тем забытым узлом:
+# город каждый год делает одно и то же и не может сказать зачем.
+BLIND_RITE = "обряд без причины"   # делают каждый год, а зачем — не знают
+HID_FEAST = "запрещённый день"     # держат втайне, и за это берут
+FEAST_MARK = "след праздника"      # площадь есть, праздника нет
 
 NODES = (RUIN, PLACE, THING, TRACE, WAR_END, CALAMITY, DEAD, HOUSE_FALL,
          TONGUE, ROUTE, GRUDGE, MIGRATION, LAW, BEAST, HOLY, CRAFT,
          TOWN_ACHE, TOWN_SECRET, UNDERCITY,
          DIVINE_BAN, LOST_GOD, PROPHECY, FIRST_TRACE,
-         LOST_NAME, UNDONE, FALSE_HERO, SCAR, LOST_SKILL)
+         LOST_NAME, UNDONE, FALSE_HERO, SCAR, LOST_SKILL,
+         BLIND_RITE, HID_FEAST, FEAST_MARK)
 
 # Насколько охотно мир рассказывает о каждом узле. Быт и последствия
 # войн — самое частое; древнее зло — редкость.
@@ -90,6 +97,7 @@ NODE_WEIGHT = {
     DIVINE_BAN: 1.1, LOST_GOD: 0.7, PROPHECY: 0.9, FIRST_TRACE: 0.5,
     LOST_NAME: 0.9, UNDONE: 1.0, FALSE_HERO: 0.8,
     SCAR: 1.0, LOST_SKILL: 0.9,
+    BLIND_RITE: 1.2, HID_FEAST: 1.0, FEAST_MARK: 0.8,
 }
 
 
@@ -135,7 +143,7 @@ SHAPES = (
     # --- бытовое: этого должно быть больше всего -----------------------
     Shape("mezha", "спор о меже",
           (GRUDGE, LAW, MIGRATION, WAR_END, DEAD, HOUSE_FALL, RUIN, TOWN_ACHE,
-           DIVINE_BAN, SCAR),
+           DIVINE_BAN, SCAR, FEAST_MARK),
           acts=(3, 6), epicity=0, weight=2.0,
           genres=("бытовой", "тяжбенный"), fight=0.12),
     Shape("theft", "пропажа снасти",
@@ -166,25 +174,26 @@ SHAPES = (
           acts=(3, 6), epicity=0, weight=1.0,
           genres=("камерный", "горький"), fight=0.03),
     Shape("scribe", "ошибка в своде", (LAW, HOLY, RUIN, DEAD, TOWN_SECRET, UNDERCITY, LOST_GOD, PROPHECY,
-           LOST_NAME, FALSE_HERO, LOST_SKILL),
+           LOST_NAME, FALSE_HERO, LOST_SKILL, BLIND_RITE, HID_FEAST),
           acts=(4, 8), epicity=1, weight=1.1,
           genres=("книжный", "таинственный"), fight=0.05),
     Shape("missing", "пропал человек", (ROUTE, WAR_END, BEAST, CALAMITY, UNDERCITY, TOWN_ACHE, DIVINE_BAN,
-           PROPHECY, UNDONE, SCAR),
+           PROPHECY, UNDONE, SCAR, HID_FEAST),
           acts=(4, 9), epicity=1, weight=1.6,
           genres=("розыскной", "тревожный"), fight=0.22),
 
     # --- местное: одно поселение или округа ----------------------------
     Shape("strange", "странность", (TRACE, PLACE, RUIN, CALAMITY, UNDERCITY, TOWN_SECRET, DIVINE_BAN,
-           LOST_GOD, PROPHECY, FIRST_TRACE, LOST_NAME, SCAR),
+           LOST_GOD, PROPHECY, FIRST_TRACE, LOST_NAME, SCAR, BLIND_RITE,
+           FEAST_MARK),
           acts=(5, 10), epicity=1, weight=1.4,
           genres=("таинственный", "мрачный"), fight=0.18),
     Shape("blamed", "того, кого сочли виновным", (GRUDGE, DEAD, CALAMITY, TOWN_ACHE, TOWN_SECRET, DIVINE_BAN, PROPHECY,
-           FALSE_HERO, SCAR),
+           FALSE_HERO, SCAR, BLIND_RITE, HID_FEAST),
           acts=(5, 10), epicity=1, weight=1.3,
           genres=("тяжбенный", "мрачный"), fight=0.2),
     Shape("two_sides", "две правды", (GRUDGE, LAW, HOLY, MIGRATION, RUIN, TOWN_ACHE, TOWN_SECRET, DIVINE_BAN,
-           FALSE_HERO, UNDONE, SCAR),
+           FALSE_HERO, UNDONE, SCAR, BLIND_RITE, HID_FEAST),
           acts=(5, 11), epicity=2, weight=1.4,
           genres=("тяжбенный", "политический"), fight=0.22),
     Shape("after_war", "что осталось после войны",
@@ -201,16 +210,20 @@ SHAPES = (
     Shape("beast_near", "зверь переменил повадку", (BEAST, TRACE, CALAMITY, UNDERCITY, FIRST_TRACE, SCAR),
           acts=(4, 9), epicity=2, weight=0.9,
           genres=("тревожный", "охотничий"), fight=0.45),
-    Shape("faith_split", "трещина в вере", (HOLY, LAW, MIGRATION, TOWN_ACHE, UNDERCITY, DIVINE_BAN, LOST_GOD, PROPHECY),
+    Shape("faith_split", "трещина в вере",
+          (HOLY, LAW, MIGRATION, TOWN_ACHE, UNDERCITY, DIVINE_BAN, LOST_GOD,
+           PROPHECY, BLIND_RITE, HID_FEAST),
           acts=(5, 10), epicity=2, weight=0.9,
           genres=("духовный", "политический"), fight=0.18),
-    Shape("thing_found", "вещь нашлась", (THING, RUIN, PLACE, DEAD, UNDERCITY, FIRST_TRACE, LOST_NAME, LOST_SKILL),
+    Shape("thing_found", "вещь нашлась",
+          (THING, RUIN, PLACE, DEAD, UNDERCITY, FIRST_TRACE, LOST_NAME,
+           LOST_SKILL, FEAST_MARK),
           acts=(5, 11), epicity=2, weight=1.1,
           genres=("розыскной", "таинственный"), fight=0.25),
 
     # --- редкое: то, что и должно быть редким ---------------------------
     Shape("old_door", "открылось запертое", (PLACE, RUIN, TRACE, UNDERCITY, TOWN_SECRET, LOST_GOD, FIRST_TRACE,
-           LOST_NAME, UNDONE, SCAR),
+           LOST_NAME, UNDONE, SCAR, FEAST_MARK),
           acts=(7, 15), epicity=3, weight=0.55,
           genres=("исследовательский", "мрачный"), fight=0.35),
     Shape("echo", "старое зло подало голос", (TRACE, CALAMITY, PLACE, UNDERCITY, LOST_GOD, FIRST_TRACE, UNDONE, SCAR),

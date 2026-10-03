@@ -22,6 +22,7 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Polity,
                      LifePath,
                      Region, Reign, Relic, Scar, LostLore, CrisisEra,
+                     Holiday,
                      Invasion, Subject, Trace,
                      Seed, Settlement, Site, Story,
                      Strife, Township, Godhead, Renown,
@@ -118,6 +119,8 @@ def world_to_dict(world: World) -> dict:
                      for item in world.subjects.values()],
         "traces": [_compact(Trace, item.to_dict())
                    for item in world.traces.values()],
+        "holidays": [_compact(Holiday, item.to_dict())
+                     for item in world.holidays.values()],
         "scars": [_compact(Scar, item.to_dict()) for item in world.scars.values()],
         "lost_lore": [_compact(LostLore, item.to_dict())
                       for item in world.lost_lore.values()],
@@ -264,6 +267,10 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("traces", ()):
         trace = Trace(**_clean(Trace, item))
         world.traces[trace.id] = trace
+
+    for item in data.get("holidays", ()):
+        holiday = Holiday(**_clean(Holiday, item))
+        world.holidays[holiday.id] = holiday
     for item in data.get("invasions", ()):
         invasion = Invasion(**_clean(Invasion, item))
         world.invasions[invasion.id] = invasion

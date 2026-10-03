@@ -873,6 +873,129 @@ def m_tr_clear(world):
     return _share(clear, len(heavy))
 
 
+# --- праздники --------------------------------------------------------------
+
+def _feasts(world) -> list:
+    return list(world.holidays.values())
+
+
+def m_hol_rose(world):
+    """Доля дней памяти, доросших до праздника.
+
+    Праздником не становится всякий день: девять поминовений из десяти
+    тают вместе с теми, кто помнил. Если доля велика, лестница ступеней
+    ничего не значит; если мала — мир не умеет ничего запомнить.
+    """
+    from worldgen import holidays as cat
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return _share(sum(1 for item in rows if cat.is_feast(item.step)),
+                  len(rows))
+
+
+def m_hol_origins(world):
+    """Сколько поводов в ходу: мир возвращается к разному."""
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return len({item.origin for item in rows})
+
+
+def m_hol_top_origin(world):
+    """Крупнейший повод: ни один не должен забивать остальные."""
+    rows = _feasts(world)
+    if not rows:
+        return None
+    counts = {}
+    for item in rows:
+        counts[item.origin] = counts.get(item.origin, 0) + 1
+    return _share(max(counts.values()), len(rows))
+
+
+def m_hol_lost(world):
+    """Доля дней, у которых повод забыт.
+
+    Это главная мера модуля: обряд обязан переживать свой смысл. Ноль
+    значит, что мир помнит всё, — а так не бывает.
+    """
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return _share(sum(1 for item in rows if item.lost_why), len(rows))
+
+
+def m_hol_retold(world):
+    """Доля дней, у которых сменился смысл: день о другом, чем был."""
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return _share(sum(1 for item in rows
+                      if item.now_meaning
+                      and item.now_meaning != item.first_meaning), len(rows))
+
+
+def m_hol_banned(world):
+    """Сколько дней запрещали: власть вмешивается в календарь."""
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return sum(1 for item in rows if item.bans)
+
+
+def m_hol_back(world):
+    """Сколько вернулось после запрета: запрет не всегда конец."""
+    from worldgen import holidays as cat
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return sum(1 for item in rows
+               if item.state == cat.REVIVED
+               or any(row.get("по") for row in item.bans))
+
+
+def m_hol_doings(world):
+    """Случаи на самом празднике: он не декорация, на нём случается."""
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return sum(len(item.doings) for item in rows)
+
+
+def m_hol_variants(world):
+    """Доля дней, которые кто-то держит на свой лад: одно число — разные
+    смыслы. Без этого праздник одинаков у всех, чего не бывает."""
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return _share(sum(1 for item in rows if item.variants), len(rows))
+
+
+def m_hol_holders(world):
+    """Сколько разных держателей в ходу: день держит не одна держава."""
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return len({item.holder for item in rows})
+
+
+def m_hol_marks(world):
+    """Сколько дней оставили по себе постройку: площадь переживает праздник."""
+    rows = _feasts(world)
+    if not rows:
+        return None
+    return sum(1 for item in rows if item.marks)
+
+
+def m_hol_stories(world):
+    """Сколько былей выросло из праздников: обряд без причины — готовый
+    исторический узел, и мир обязан его замечать."""
+    from worldgen import localstory as cat
+    feast_nodes = (cat.BLIND_RITE, cat.HID_FEAST, cat.FEAST_MARK)
+    return sum(1 for item in world.stories.values()
+               if item.node in feast_nodes)
+
+
 MEASURES = (
     Measure("были", "не про судьбу мира", m_story_small, 0.82, 0.98,
             "доля", "девять из десяти былей не спасают мир"),
@@ -1071,6 +1194,32 @@ MEASURES = (
             min_years=3000),
     Measure("следы", "спорят между собой", m_tr_quarrel, 0.01, None, "доля",
             "свидетельства не обязаны сходиться", min_years=3000),
+    Measure("праздники", "доросли до праздника", m_hol_rose, 0.08, 0.6,
+            "доля", "праздником становится не всякий день памяти"),
+    Measure("праздники", "поводов в ходу", m_hol_origins, 12, None, "из 45",
+            "мир возвращается к разному, а не к одному"),
+    Measure("праздники", "крупнейший повод", m_hol_top_origin, None, 0.3,
+            "доля", "ни один повод не забивает остальные"),
+    Measure("праздники", "повод забыт", m_hol_lost, 0.12, 0.85, "доля",
+            "обряд переживает свой смысл", min_years=3000),
+    Measure("праздники", "смысл сменился", m_hol_retold, 0.1, None, "доля",
+            "день со временем становится днём о другом", min_years=1500),
+    Measure("праздники", "запрещали дней", m_hol_banned, 1, None, "штук",
+            "власть вмешивается в календарь", min_years=3000),
+    Measure("праздники", "вернулось после запрета", m_hol_back, None, None,
+            "штук", "запрет не всегда конец", min_years=3000),
+    Measure("праздники", "случаев на празднике", m_hol_doings, 1, None,
+            "штук", "праздник не декорация: в тесноте что-то случается",
+            min_years=1500),
+    Measure("праздники", "держат на свой лад", m_hol_variants, 0.04, None,
+            "доля", "одно число — разные смыслы", min_years=1500),
+    Measure("праздники", "держателей в ходу", m_hol_holders, 3, None, "из 9",
+            "день держит не одна держава"),
+    Measure("праздники", "оставили постройку", m_hol_marks, 1, None, "штук",
+            "площадь переживает праздник", min_years=3000),
+    Measure("праздники", "былей из праздников", m_hol_stories, 1, None,
+            "штук", "обряд без причины — готовый узел для были",
+            min_years=3000),
     Measure("следы", "бед, о которых ничего не восстановить", m_tr_dark,
             0.1, 0.96, "доля", "прошлое темнеет, но не до черноты",
             min_years=3000),

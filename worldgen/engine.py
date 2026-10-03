@@ -29,7 +29,9 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       crafts, culture,
                       diplomacy, divinity, embassy,
                       era_events,
-                      exploration, founding, geography, guilds, houses,
+                      exploration, founding, geography, guilds,
+                      holidays as holidays_sys,
+                      houses,
                       invasion as invasion_sys,
                       laws, legacy, lifepath, lives, localstory, lore,
                       memory, migration,
@@ -221,6 +223,11 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             # Жизнь городов идёт до былей: быль может вырасти из тяготы
             # или тайны города, и к этому часу они уже должны быть.
             township.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Праздники — следом за городами и до былей. Им нужен уже
+            # сложившийся мир (кончившаяся война, отступившая беда,
+            # поставленный храм), а быль из них растёт сразу: обряд, у
+            # которого отняли причину, — готовый исторический узел.
+            holidays_sys.upkeep(ctx, year, UPKEEP_PERIOD)
             # Были идут последними из историй: им нужен готовый мир со
             # всеми его руинами, вдовами, тяжбами и закрывшимися трактами.
             localstory.upkeep(ctx, year, UPKEEP_PERIOD)

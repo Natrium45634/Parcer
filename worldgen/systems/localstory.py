@@ -41,6 +41,7 @@ from .. import narrative_lore as lore_texts
 from .. import races as races_mod
 from .. import sites as sites_mod
 from .. import township as town_cat
+from . import holidays as holidays_sys
 from ..models import ACTIVE, RUINED
 
 STORY_RATE = 0.55          # шанс, что за десятилетний такт найдётся быль
@@ -414,6 +415,25 @@ def _nodes(ctx, year: int) -> list:
         out.append(Node(
             cat.CRAFT, "завелось ремесло: %s" % discovery.name,
             discovery.made.year, ref=discovery.id, weight=0.9))
+
+    # --- то, что осталось от праздников --------------------------------
+    # Праздник держится дольше, чем память о его поводе, и потому он —
+    # готовый исторический узел: город каждый год делает одно и то же и
+    # не может сказать зачем. Узлы собирает сама система праздников, тут
+    # они только переводятся в то, из чего растёт быль.
+    for kind, line, holiday, weight in holidays_sys.story_nodes(world, year):
+        node_kind = {"обряд без причины": cat.BLIND_RITE,
+                     "запрещённый день": cat.HID_FEAST,
+                     "след праздника": cat.FEAST_MARK}.get(kind)
+        if node_kind is None:
+            continue
+        when = holiday.forgot_year or holiday.born.year
+        if year - when < ECHO_MIN_AGE:
+            continue
+        out.append(Node(
+            node_kind, line, when, ref=holiday.id,
+            region_id=holiday.region_id,
+            settlement_id=holiday.settlement_id, weight=weight))
 
     return out
 

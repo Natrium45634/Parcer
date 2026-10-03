@@ -528,6 +528,9 @@ class ChronicleApp(tk.Tk):
         self.towns_text = self._add_text_tab(
             "Жизнь городов", lambda: self._set_text(
                 self.towns_text, chronicle.render_towns(self.world)))
+        self.holidays_text = self._add_text_tab(
+            "Праздники", lambda: self._set_text(
+                self.holidays_text, chronicle.render_holidays(self.world)))
         self.gods_text = self._add_text_tab(
             "Боги и их дела", lambda: self._set_text(
                 self.gods_text, chronicle.render_gods(self.world)))

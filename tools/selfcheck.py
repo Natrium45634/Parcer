@@ -550,6 +550,210 @@ def check_gods(world, seed: str) -> list:
     return problems
 
 
+def check_holidays(world, seed: str) -> list:
+    """Праздники: день памяти не спорит ни с миром, ни с собой.
+
+    Тут ловится то, что ломается тихо. Праздник, заведённый раньше
+    события, которое он поминает. Поворот судьбы, случившийся до его
+    рождения или после конца летописи. Забытый повод без года забвения —
+    то есть забытый неизвестно когда. Имя, у которого головное слово не
+    склоняется, — такое имя в тексте встанет в именительном посреди
+    предложения. Запрет без причины: запрет без причины — это произвол
+    движка, а не истории. Обряд без объяснения: каждый обряд обязан
+    знать, отчего он такой, иначе вся система теряет смысл. И два
+    праздника на одно и то же событие — мир не поминает одну войну
+    дважды.
+    """
+    from worldgen import holidays as cat
+    from worldgen import narrative_holiday as texts
+
+    problems = []
+    total = world.total_years
+    seen_links = {}
+    link_fields = ("war_id", "calamity_id", "invasion_id", "monster_id",
+                   "figure_id", "deity_id", "guild_id", "trace_id",
+                   "subject_id")
+    tables = {"war_id": world.wars, "calamity_id": world.calamities,
+              "invasion_id": world.invasions, "monster_id": world.monsters,
+              "figure_id": world.figures, "deity_id": world.deities,
+              "guild_id": world.guilds, "trace_id": world.traces,
+              "subject_id": world.subjects, "polity_id": world.polities,
+              "settlement_id": world.settlements, "folk_id": world.folks,
+              "faith_id": world.faiths, "house_id": world.houses,
+              "region_id": world.regions}
+
+    for holiday in world.holidays.values():
+        name = holiday.name or holiday.id
+        origin = cat.ORIGINS.get(holiday.origin)
+        if origin is None:
+            problems.append("сид «%s»: праздник «%s» неведомого повода «%s»"
+                            % (seed, name, holiday.origin))
+            break
+        if holiday.group != origin.group:
+            problems.append("сид «%s»: у праздника «%s» группа не та, что в "
+                            "каталоге" % (seed, name))
+            break
+        if holiday.step not in cat.STEPS:
+            problems.append("сид «%s»: у праздника «%s» неведомая ступень "
+                            "«%s»" % (seed, name, holiday.step))
+            break
+        if holiday.state not in cat.STATES:
+            problems.append("сид «%s»: у праздника «%s» неведомое состояние "
+                            "«%s»" % (seed, name, holiday.state))
+            break
+        if holiday.holder not in cat.HOLDERS:
+            problems.append("сид «%s»: праздник «%s» держит неведомо кто "
+                            "«%s»" % (seed, name, holiday.holder))
+            break
+        if holiday.reach not in cat.REACH:
+            problems.append("сид «%s»: у праздника «%s» неведомый охват «%s»"
+                            % (seed, name, holiday.reach))
+            break
+        if not holiday.first_meaning:
+            problems.append("сид «%s»: у праздника «%s» не названо, отчего "
+                            "он есть" % (seed, name))
+            break
+
+        # --- даты ------------------------------------------------------
+        if holiday.born is None or not 1 <= holiday.born.year <= total:
+            problems.append("сид «%s»: праздник «%s» заведён вне летописи"
+                            % (seed, name))
+            break
+        if holiday.month and not 1 <= holiday.month <= 12:
+            problems.append("сид «%s»: у праздника «%s» месяц %d"
+                            % (seed, name, holiday.month))
+            break
+        if holiday.day and not 1 <= holiday.day <= 30:
+            problems.append("сид «%s»: у праздника «%s» число %d"
+                            % (seed, name, holiday.day))
+            break
+        if not holiday.month and holiday.rule not in cat.MOVING_RULES:
+            problems.append("сид «%s»: у праздника «%s» нет числа, а счёт "
+                            "твёрдый" % (seed, name))
+            break
+        if holiday.event_year and holiday.event_year > holiday.born.year:
+            problems.append("сид «%s»: праздник «%s» заведён раньше того, "
+                            "что поминает" % (seed, name))
+            break
+        for turn in holiday.turns:
+            when = int(turn.get("год", 0))
+            if not holiday.born.year <= when <= total:
+                problems.append("сид «%s»: у праздника «%s» поворот «%s» в "
+                                "%d году, а сам он с %d"
+                                % (seed, name, turn.get("поворот", ""), when,
+                                   holiday.born.year))
+                break
+            if turn.get("поворот") not in cat.TURNS:
+                problems.append("сид «%s»: у праздника «%s» неведомый "
+                                "поворот «%s»"
+                                % (seed, name, turn.get("поворот", "")))
+                break
+        if problems:
+            break
+
+        # --- забытый повод ---------------------------------------------
+        if holiday.lost_why:
+            if not holiday.forgot_year:
+                problems.append("сид «%s»: у праздника «%s» повод забыт, а "
+                                "когда — не сказано" % (seed, name))
+                break
+            if not holiday.born.year <= holiday.forgot_year <= total:
+                problems.append("сид «%s»: праздник «%s» забыл повод в %d "
+                                "году" % (seed, name, holiday.forgot_year))
+                break
+            if not holiday.forgot_why:
+                problems.append("сид «%s»: у праздника «%s» повод забыт без "
+                                "причины" % (seed, name))
+                break
+
+        # --- имя склоняется --------------------------------------------
+        head = texts.head_of(holiday.name)
+        if head not in texts.HEAD_FORMS and not holiday.deity_id:
+            problems.append("сид «%s»: имя праздника «%s» не склоняется — "
+                            "головное слово «%s» не в таблице падежей"
+                            % (seed, name, head))
+            break
+        for row in holiday.names:
+            if not row.get("имя") or not row.get("по"):
+                problems.append("сид «%s»: у праздника «%s» прежнее имя без "
+                                "имени или без года" % (seed, name))
+                break
+        if problems:
+            break
+
+        # --- запреты и обряды ------------------------------------------
+        for ban in holiday.bans:
+            if not ban.get("отчего"):
+                problems.append("сид «%s»: праздник «%s» запретили без "
+                                "причины" % (seed, name))
+                break
+            begun, over = int(ban.get("с", 0)), int(ban.get("по", 0))
+            if over and over < begun:
+                problems.append("сид «%s»: у праздника «%s» запрет снят "
+                                "раньше, чем наложен" % (seed, name))
+                break
+        if problems:
+            break
+        for rite in holiday.rites:
+            if rite.get("обряд") not in cat.RITES:
+                problems.append("сид «%s»: у праздника «%s» неведомый обряд "
+                                "«%s»" % (seed, name, rite.get("обряд", "")))
+                break
+            if not rite.get("зачем"):
+                problems.append("сид «%s»: у праздника «%s» обряд «%s» без "
+                                "объяснения" % (seed, name,
+                                                rite.get("обряд", "")))
+                break
+            if int(rite.get("с", 0)) < holiday.born.year:
+                problems.append("сид «%s»: у праздника «%s» обряд завёлся "
+                                "раньше самого дня" % (seed, name))
+                break
+        if problems:
+            break
+
+        # --- привязки существуют ---------------------------------------
+        bad = ""
+        for field, table in tables.items():
+            value = getattr(holiday, field, "")
+            if value and value not in table:
+                bad = field
+                break
+        if bad:
+            problems.append("сид «%s»: праздник «%s» привязан к тому, чего в "
+                            "мире нет (%s)" % (seed, name, bad))
+            break
+
+        # --- одно событие — один праздник ------------------------------
+        # Сверяется только повод (`about`): остальные привязки — родня.
+        # День находки знает и беду, от которой след остался, но поминает
+        # он находку, а это другое событие.
+        if holiday.about and holiday.about in link_fields:
+            value = getattr(holiday, holiday.about, "")
+            key = (holiday.about, value)
+            if value and key in seen_links:
+                problems.append("сид «%s»: одно и то же поминают дважды — "
+                                "«%s» и «%s»"
+                                % (seed, seen_links[key], name))
+                break
+            if value:
+                seen_links[key] = name
+
+        # --- следы и ступень -------------------------------------------
+        if holiday.marks and not cat.is_feast(holiday.step):
+            problems.append("сид «%s»: «%s» ещё не праздник, а уже оставил "
+                            "по себе постройку" % (seed, name))
+            break
+        for row in holiday.variants:
+            if not row.get("кто") or not row.get("чем"):
+                problems.append("сид «%s»: у праздника «%s» пустой чужой "
+                                "вариант" % (seed, name))
+                break
+        if problems:
+            break
+
+    return problems
+
+
 def check_towns(world, seed: str) -> list:
     """Города: биография не спорит сама с собой и с миром.
 
@@ -3063,6 +3267,7 @@ def main(only: str = "") -> int:
         failures.extend(check_lives(first, seed))
         failures.extend(check_stories(first, seed))
         failures.extend(check_towns(first, seed))
+        failures.extend(check_holidays(first, seed))
         failures.extend(check_gods(first, seed))
         failures.extend(check_renown(first, seed))
 
@@ -3132,6 +3337,7 @@ def main(only: str = "") -> int:
             failures.extend(check_lives(first, "карта/" + seed))
             failures.extend(check_stories(first, "карта/" + seed))
             failures.extend(check_towns(first, "карта/" + seed))
+            failures.extend(check_holidays(first, "карта/" + seed))
             failures.extend(check_gods(first, "карта/" + seed))
             failures.extend(check_renown(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
@@ -3182,6 +3388,7 @@ def main(only: str = "") -> int:
                       check_tribes, check_capitals, check_souls,
                       check_tales,
                       check_lives, check_stories, check_towns,
+                      check_holidays,
                       check_gods, check_renown):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge

@@ -238,6 +238,11 @@ SECTION_LEADS = {
         "она тянется через всю его жизнь. Когда причина исчезает — жила",
         "иссякла, брод занесло, — город или находит новую, или начинает",
         "умирать."),
+    "ПРАЗДНИКИ И ПАМЯТНЫЕ ДНИ": (
+        "Праздник — это событие прошлого, которое общество решило вспоминать",
+        "каждый год. Дальше у дня начинается своя жизнь: его присваивают,",
+        "запрещают, возрождают — а повод теряется раньше обряда. Костёр жгут",
+        "и через тысячу лет; зачем — уже не говорят."),
     "БЫЛИ": (
         "Малые истории, найденные в том, что мир оставил и забыл. Девять из",
         "десяти не спасают мир — и это условие, а не недоработка. Поворот тут",
@@ -1843,6 +1848,102 @@ def _god_block(world, head, deity, cat, texts, pan) -> list:
             rows.append("      %s" % texts.cap(note))
     rows.append("")
     return rows
+
+
+def render_holidays(world) -> str:
+    """Праздники и памятные дни: чем они были и чем стали.
+
+    Раздел отвечает на три вопроса, и в этом порядке. Сколько дней мир
+    завёл и сколько из них дожило — потому что девять поминовений из
+    десяти тают вместе с теми, кто помнил. Что с ними было — потому что
+    праздник не стоит на месте: его забирает власть, запрещает храм,
+    возвращает новая власть, и каждый раз он возвращается другим. И
+    наконец, о скольких из них уже не знают, отчего они, — потому что
+    это и есть самое главное: обряд переживает свой смысл.
+    """
+    from . import holidays as cat
+    from . import narrative_holiday as texts
+
+    rows = ["ПРАЗДНИКИ И ПАМЯТНЫЕ ДНИ", ""]
+    if not world.holidays:
+        rows.append("  Мир не завёл ни одного дня, к которому стоило бы "
+                    "возвращаться.")
+        return "\n".join(rows)
+
+    days = sorted(world.holidays.values(),
+                  key=lambda item: (-cat.step_index(item.step),
+                                    -len(item.turns), item.id))
+    kept = [item for item in days if item.kept]
+    feasts = [item for item in kept if cat.is_feast(item.step)]
+    lost = [item for item in days if item.lost_why]
+    banned = [item for item in days if item.bans]
+    hidden = [item for item in days if item.state == cat.HIDDEN]
+    back = [item for item in days if item.state == cat.REVIVED]
+
+    steps, groups, holders, moods = {}, {}, {}, {}
+    for item in days:
+        steps[item.step] = steps.get(item.step, 0) + 1
+        groups[item.group] = groups.get(item.group, 0) + 1
+        holders[item.holder] = holders.get(item.holder, 0) + 1
+        moods[item.mood] = moods.get(item.mood, 0) + 1
+
+    rose = [item for item in days if cat.is_feast(item.step)]
+    rows.append("  Дней памяти заведено: %d, из них отмечают к концу "
+                "истории: %d." % (len(days), len(kept)))
+    rows.append("  Дорасти до праздника успели %d, из них держатся к концу"
+                % len(rose))
+    rows.append("  истории %d. Остальные так и остались поминовением или"
+                % len(feasts))
+    rows.append("  обычаем и растаяли вместе с теми, кто помнил.")
+    rows.append("  По ступеням: %s."
+                % ", ".join("%s — %d" % (step, steps[step])
+                            for step in cat.STEPS if steps.get(step)))
+    rows.append("  Отчего завелись: %s."
+                % ", ".join("%s — %d" % (group, groups[group])
+                            for group in cat.ORIGIN_GROUPS
+                            if groups.get(group)))
+    rows.append("  Кто держит: %s."
+                % ", ".join("%s — %d" % (holder, holders[holder])
+                            for holder in cat.HOLDERS if holders.get(holder)))
+    if lost:
+        rows.append("  Повод забыт у %d из %d: обряд остался, причину "
+                    "объясняют уже по-своему." % (len(lost), len(days)))
+    if banned:
+        rows.append("  Запрещали %d; из них ушли в подполье %d, вернулись %d."
+                    % (len(banned), len(hidden), len(back)))
+    marks = sum(1 for item in days if item.marks)
+    if marks:
+        rows.append("  Оставили по себе площадь, арку или дорогу: %d." % marks)
+    doings = sum(len(item.doings) for item in days)
+    if doings:
+        rows.append("  Случаев, которыми запомнился сам праздник: %d."
+                    % doings)
+    rows.append("")
+
+    # --- те, о которых есть что рассказать ------------------------------
+    told = [item for item in days
+            if cat.is_feast(item.step) or item.turns or item.lost_why]
+    told.sort(key=lambda item: (-(len(item.turns) + len(item.doings)
+                                  + len(item.variants)),
+                                item.id))
+    rows.append("  ДНИ, У КОТОРЫХ СВОЯ ИСТОРИЯ")
+    rows.append("")
+    for item in told[:28]:
+        rows.extend("  " + line for line in texts.portrait(world, item))
+        rows.append("")
+
+    # --- те, что просто есть --------------------------------------------
+    rest = [item for item in days if item not in told]
+    if rest:
+        rows.append("  ПРОЧИЕ ДНИ ПАМЯТИ")
+        rows.append("")
+        for item in rest[:40]:
+            rows.append("    %s — %s, %s (%s)"
+                        % (texts.in_case(item.name, "им"), item.step,
+                           item.state, texts.date_line(item, short=True)))
+    while rows and rows[-1] == "":
+        rows.pop()
+    return "\n".join(rows)
 
 
 def render_towns(world) -> str:
@@ -4948,6 +5049,7 @@ def full_text(world) -> str:
         render_lifepaths(world),
         render_stories(world),
         render_towns(world),
+        render_holidays(world),
         render_gods(world),
         render_renown(world),
         render_guilds(world),

@@ -2350,3 +2350,137 @@ class EraSpan:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass
+class Holiday:
+    """Праздник: день, в который общество возвращается к своему прошлому.
+
+    Это не запись в календаре державы, а историческая сущность со своей
+    биографией. Он начинается не праздником: сперва к месту просто
+    приходят и вспоминают (`step` = поминовение), и девять таких
+    поминовений из десяти тают вместе с теми, кто помнил. Дошедший до
+    конца лестницы день вписывают в календарь — и с этого часа он живёт
+    уже своей жизнью, отдельной от события.
+
+    Главное здесь — расхождение двух смыслов. `first_meaning` — то, с
+    чего день начался; `now_meaning` — то, чем он считается теперь. Когда
+    `knows_why` становится ложью, повод потерян: обряды держатся, а
+    объяснение подменяется — и отсюда растут и загадки для былей, и
+    спор о том, что этот день вообще значит.
+
+    Третье — одна дата, разные правды (`sides`). Победители празднуют,
+    побеждённые оплакивают, у соседей это чужой день, а потомки через
+    тысячу лет отмечают начало лета. Все четверо помнят верно.
+    """
+
+    id: str
+    name: str
+    origin: str                # ключ повода из каталога holidays.ORIGINS
+    group: str                 # группа повода: божественное, державное…
+    born: Date                 # когда это отметили впервые
+    step: str = "поминовение"
+    state: str = "идёт"
+    holder: str = "народный"   # кто устраивает его сейчас
+    reach: str = "в городе"    # насколько далеко разошёлся
+    mood: str = ""
+    also_mood: str = ""        # у дня после беды бывает два разом
+
+    # --- что именно он помнит -------------------------------------------
+    event_id: str = ""         # событие, из которого он вырос
+    event_year: int = 0        # год того события
+    # Какое из полей ниже и есть повод. Остальные — только родня: день,
+    # заведённый на находку, знает и беду, от которой след остался, но
+    # поминает он находку, а не беду. Без этой графы выходило, что беду
+    # поминают дважды.
+    about: str = ""
+    calamity_id: str = ""
+    war_id: str = ""
+    invasion_id: str = ""
+    figure_id: str = ""
+    deity_id: str = ""
+    monster_id: str = ""
+    subject_id: str = ""
+    trace_id: str = ""
+    settlement_id: str = ""
+    polity_id: str = ""
+    region_id: str = ""
+    folk_id: str = ""
+    faith_id: str = ""
+    guild_id: str = ""
+    house_id: str = ""
+    race_id: str = ""
+
+    # --- календарь -------------------------------------------------------
+    month: int = 0
+    day: int = 0
+    rule: str = "твёрдый день"
+    days: int = 1              # сколько суток длится
+
+    # --- смыслы ----------------------------------------------------------
+    first_meaning: str = ""    # с чего начался
+    now_meaning: str = ""      # чем считается теперь
+    said_meaning: str = ""     # что говорит о нём власть или храм
+    folk_meaning: str = ""     # и что говорят сами люди
+    knows_why: bool = True     # помнят ли ещё, отчего он
+    forgot_year: int = 0
+    forgot_why: str = ""
+
+    # --- чем он наполнен -------------------------------------------------
+    rites: list = field(default_factory=list)    # [{обряд, с, по, зачем}]
+    games: list = field(default_factory=list)
+    treats: list = field(default_factory=list)
+    wears: list = field(default_factory=list)
+    tokens: list = field(default_factory=list)
+    songs: list = field(default_factory=list)
+
+    # --- история ---------------------------------------------------------
+    turns: list = field(default_factory=list)    # [{год, поворот, отчего}]
+    names: list = field(default_factory=list)    # прежние имена
+    variants: list = field(default_factory=list) # [{у кого, где, чем считают}]
+    sides: list = field(default_factory=list)    # [{кто, как помнит}]
+    bans: list = field(default_factory=list)     # [{с, по, отчего, кем}]
+    marks: list = field(default_factory=list)    # что оставил в мире
+    gains: list = field(default_factory=list)    # чем отзывается в хозяйстве
+    costs: list = field(default_factory=list)    # и чего стоит
+    doings: list = field(default_factory=list)   # [{год, что}] — что на нём было
+
+    souls: int = 0             # сколько людей его держит
+    top_reach: str = ""        # самый широкий охват за всю жизнь
+    top_year: int = 0
+    last_seen: int = 0         # когда его отмечали в последний раз
+    notes: list = field(default_factory=list)
+    event_ids: list = field(default_factory=list)
+
+    @property
+    def kept(self) -> bool:
+        """Отмечают ли его ещё — хоть открыто, хоть украдкой."""
+        return self.state in ("идёт", "угасает", "возрождён", "тайный",
+                              "преображён", "расколот")
+
+    @property
+    def lost_why(self) -> bool:
+        """Потерян ли повод: день держится, а отчего — уже не знают."""
+        return not self.knows_why
+
+    @property
+    def meaning(self) -> str:
+        """Чем он считается теперь — или чем был, если нового смысла нет."""
+        return self.now_meaning or self.first_meaning
+
+    @property
+    def live_rites(self) -> list:
+        """Обряды, которые на нём делают сейчас."""
+        return [item for item in self.rites if not item.get("по")]
+
+    @property
+    def full_name(self) -> str:
+        return self.name
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["born"] = _date_out(self.born)
+        data["full_name"] = self.full_name
+        data["kept"] = self.kept
+        data["meaning"] = self.meaning
+        return data

@@ -21,7 +21,8 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Discovery, Embassy, Event, Expedition, Fact, Faith, Feud,
                      Figure,
                      Folk, Fortress,
-                     Guild, House, Law, League, Legend, LifePath, Memory,
+                     Guild, Holiday, House, Law, League, Legend, LifePath,
+                     Memory,
                      Scar, LostLore, CrisisEra, Invasion, Subject, Trace,
                      Migration,
                      Monster, Pact,
@@ -69,7 +70,8 @@ _ENTITY_TABLES = {
     "W": ("faiths", "wars"), "X": ("expeditions", "laws"),
     "Y": ("deities", "tongues"), "Z": ("sites",),
     "BN": ("bonds",), "BY": ("stories",), "CB": ("cabals",),
-    "FA": ("facts",), "GH": ("godheads",), "KE": ("crisis_eras",),
+    "FA": ("facts",), "GH": ("godheads",), "HL": ("holidays",),
+    "KE": ("crisis_eras",),
     "LF": ("lifepaths",), "LK": ("lost_lore",), "ME": ("memories",),
     "MG": ("migrations",), "NV": ("invasions",), "RN": ("renowns",),
     "SB": ("subjects",), "SC": ("scars",), "SF": ("strifes",),
@@ -116,6 +118,7 @@ class World:
         self.invasions = {}            # id -> Invasion (нашествия как события)
         self.subjects = {}             # id -> Subject (субъекты истории)
         self.traces = {}               # id -> Trace (следы бед в мире)
+        self.holidays = {}             # id -> Holiday (праздники и поминовения)
         self.scars = {}                # id -> Scar (шрамы мира)
         self.lost_lore = {}            # id -> LostLore (что забылось)
         self.crisis_eras = {}          # id -> CrisisEra (эпохи кризиса)
@@ -435,6 +438,39 @@ class World:
         """Все следы одной беды — её отпечаток в мире."""
         return [item for item in self.traces.values()
                 if item.calamity_id == calamity_id]
+
+    def add_holiday(self, **kwargs) -> Holiday:
+        """Праздник: день, в который общество возвращается к прошлому."""
+        holiday = Holiday(id=self.next_id("HL"), **kwargs)
+        self.holidays[holiday.id] = holiday
+        return holiday
+
+    def holidays_kept(self) -> list:
+        """Те, которые ещё отмечают — хоть открыто, хоть украдкой."""
+        return [item for item in self.holidays.values() if item.kept]
+
+    def holidays_on(self, month: int, day: int = 0) -> list:
+        """Кто празднует в этот день. Отсюда берутся споры о календаре:
+        два праздника на одно число — повод для ссоры, а не совпадение."""
+        rows = []
+        for item in self.holidays.values():
+            if item.month != int(month):
+                continue
+            if day and item.day != int(day):
+                continue
+            rows.append(item)
+        rows.sort(key=lambda item: item.id)
+        return rows
+
+    def holidays_of(self, **keys) -> list:
+        """Праздники, привязанные к названной сущности: беде, войне, богу."""
+        rows = []
+        for item in self.holidays.values():
+            if all(getattr(item, name, "") == value
+                   for name, value in keys.items() if value):
+                rows.append(item)
+        rows.sort(key=lambda item: item.id)
+        return rows
 
     def add_subject(self, **kwargs) -> Subject:
         """Субъект истории: тот, чьи дела оставили след, кем бы он ни был."""
@@ -1791,6 +1827,8 @@ class World:
             "Сказаний": len(self.tales),
             "Былей": len(self.stories),
             "Городских биографий": len(self.townships),
+            "Праздников (всего)": len(self.holidays),
+            "Праздников (отмечают)": len(self.holidays_kept()),
             "Божественных биографий": len(self.godheads),
             "Взвешенных имён": len(self.renowns),
             "Открытых земель": sum(1 for r in self.regions.values()
