@@ -731,7 +731,15 @@ def check_tribes(world, seed: str) -> list:
                else world.total_years)
         limit = race.lifespan[1] * 2
         if gifts.get(figure.race_id) == mortality.UNAGING:
-            limit = int(race.lifespan[1] * stretch * 1.3)
+            limit = int(race.lifespan[1] * stretch)
+        # Дар богов — это годы: благословлённому смерть отодвигают на долю
+        # его остатка (religion.py), и для него предел законно выше. Это и
+        # поймала проверка в первый свой прогон: высшая эльфийка прожила
+        # 10 942 года при собственном пределе расы в 7200 — потому что была
+        # благословлена. Теперь годы такому не прибавляются вовсе, но у
+        # благословлённых прежних миров запас оставлен.
+        if figure.divine_mark == "благословение":
+            limit = int(limit * 2.2)
         if end - figure.birth.year > limit:
             problems.append("сид «%s»: %s (%s) прожил%s %d лет при пределе "
                             "расы %d"

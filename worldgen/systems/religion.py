@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from . import calamity as calamity_mod
+from .. import mortality
 from .. import narrative
 from .. import narrative_faith as texts
 from .. import pantheon as pan
@@ -1014,14 +1015,28 @@ def _maybe_blessing(ctx, year: int) -> None:
         if not figure.epithet or rng.chance(0.6):
             figure.epithet = "Благословенный" if figure.sex != "f" \
                 else "Благословенная"
-        # Дар богов — это годы: смерть отодвигается.
+        # Дар богов — это годы: смерть отодвигается. Но годы — не дар тому,
+        # у кого их и так нет счёта: в мирах, где высшие эльфы не умирают от
+        # старости, прибавка к их и без того нескончаемому веку давала
+        # пятнадцатитысячелетнего эльфа в десятитысячелетнем мире. Такому
+        # богиня даёт то, что в её руках и кроме лет: сам дар (gift) при нём
+        # остаётся, а годы не прибавляются.
+        #
+        # Жребий при этом бросается всё равно, и это нарочно: убери броски —
+        # сдвинется весь поток, и поменяются все миры до последнего имени.
+        # Здесь меняется исход, а не порядок случайностей.
         if figure.death is not None:
             extra = int(max(5, (figure.death.year - year) * rng.uniform(0.4, 1.2)))
             from ..timeline import Date
-            world.schedule_death(figure, Date.random_in_year(
-                rng, figure.death.year + extra),
-                narrative.fate(("прожил дольше положенного",
-                                "прожила дольше положенного"), figure.sex))
+            later = Date.random_in_year(rng, figure.death.year + extra)
+            if world.race_gifts.get(figure.race_id) == mortality.UNAGING:
+                figure.notes.append(
+                    "%d: дар богов — не годы: век %s и без того не отмерен"
+                    % (year, "её" if figure.sex == "f" else "его"))
+            else:
+                world.schedule_death(figure, later,
+                    narrative.fate(("прожил дольше положенного",
+                                    "прожила дольше положенного"), figure.sex))
         title, text = texts.blessing(rng, figure, deity, gift, effect, reason)
         kind = "blessing"
     else:
