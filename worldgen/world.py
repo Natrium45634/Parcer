@@ -77,6 +77,22 @@ _ENTITY_TABLES = {
 }
 
 
+def _number(value) -> str:
+    """425803 -> «425 803» неразрывными пробелами.
+
+    Та же мера, что в chronicle.number, но живёт тут своей копией: world.py
+    ничего из текстового слоя не тянет и тянуть не должен — иначе выйдет
+    круг в ссылках. Копия в шесть строк дешевле такого круга.
+    """
+    text = "%d" % int(value)
+    groups = []
+    while len(text) > 3:
+        groups.insert(0, text[-3:])
+        text = text[:-3]
+    groups.insert(0, text)
+    return "\u00a0".join(groups)
+
+
 class World:
     """Состояние мира и вся накопленная летопись."""
 
@@ -1769,9 +1785,11 @@ class World:
             "Вер (всего)": len(self.faiths),
             "Вер (живых)": len(self.living_faiths),
             "Храмов": len(self.temples),
-            "Население мира": "%d" % self.world_population(),
-            "Погибло от бедствий": "%d" % sum(
-                c.deaths for c in self.calamities.values()),
+            # Разряды: шестизначное число без них не читается, а считается
+            # по цифрам.
+            "Население мира": _number(self.world_population()),
+            "Погибло от бедствий": _number(sum(
+                c.deaths for c in self.calamities.values())),
         }
 
     def race_summary(self) -> list:

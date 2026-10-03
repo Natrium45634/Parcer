@@ -1031,9 +1031,17 @@ class ChronicleApp(tk.Tk):
     # ------------------------------------------------------------------
 
     def _set_text(self, widget: tk.Text, text: str) -> None:
+        """Положить текст в раздел — и дать разделу его зачин.
+
+        Зачин ставится здесь, одним местом на все текстовые вкладки: иначе
+        пришлось бы править каждый из сорока семи разделов, и половина
+        осталась бы без него. Раздел узнаётся по своему заголовку, так что
+        тексту без заголовка (приветствие, летопись, срез года) ничего не
+        добавляется.
+        """
         widget.config(state="normal")
         widget.delete("1.0", "end")
-        widget.insert("1.0", text)
+        widget.insert("1.0", chronicle.decorate(text))
         widget.config(state="disabled")
 
     def _show_welcome(self) -> None:
