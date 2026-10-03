@@ -457,18 +457,28 @@ def _restep(ctx, settlement, race, year: int, era_index: int, rng) -> None:
     was = settlement.rank
     souls = settlement.population
     now = town_cat.rank_of(souls)
-    if now == was:
-        return
     step_up = town_cat.rank_index(now) > town_cat.rank_index(was)
-    # Гистерезис. Без него поселение, стоящее у самого порога, каждые
-    # десять лет прыгает туда и обратно: «Рунная Жила — город», через
-    # двадцать лет «уже городок», через десять снова город. Летопись от
-    # этого превращается в перепись скота, поэтому ступень меняется
-    # только тогда, когда порог перешагнут заметно.
-    edge = town_cat.rank_edge(now if step_up else was)
-    if edge and abs(souls - edge) < edge * RANK_MARGIN:
+    if now != was:
+        # Гистерезис. Без него поселение, стоящее у самого порога, каждые
+        # десять лет прыгает туда и обратно: «Рунная Жила — город», через
+        # двадцать лет «уже городок», через десять снова город. Летопись от
+        # этого превращается в перепись скота, поэтому ступень меняется
+        # только тогда, когда порог перешагнут заметно.
+        edge = town_cat.rank_edge(now if step_up else was)
+        if edge and abs(souls - edge) < edge * RANK_MARGIN:
+            now = was
+            step_up = False
+        else:
+            settlement.rank = now
+    # Проверка имени идёт дальше даже тогда, когда ступень не менялась, и
+    # это не лишняя работа. Поселение бывает основано уже крупным — племя
+    # садится на землю всем числом, — и тогда ступень у него городская с
+    # первого дня и не меняется ни разу. Такая «Застава» на сорок тысяч
+    # душ прежде оставалась заставой навсегда: самопроверка её и нашла.
+    outgrown = (town_cat.is_city(settlement.rank)
+                and settlement.kind in town_cat.OUTGROWN)
+    if now == was and not outgrown:
         return
-    settlement.rank = now
     top = max(town_cat.rank_index(now), town_cat.rank_index(was))
     # Как называть это место в записи. Если вид поселения — общее слово
     # «Город», называть его видом нельзя: выйдет «город такой-то стал
@@ -481,7 +491,7 @@ def _restep(ctx, settlement, race, year: int, era_index: int, rng) -> None:
     # Переросло своё имя: то, что ставили заставой, городом зваться заставой
     # уже не может.
     renamed = ""
-    if step_up and town_cat.is_city(now) and settlement.kind in town_cat.OUTGROWN:
+    if outgrown:
         words = race.settlement_words or ("Город",)
         renamed = settlement.kind
         settlement.kind = words[0]
@@ -489,7 +499,7 @@ def _restep(ctx, settlement, race, year: int, era_index: int, rng) -> None:
             "%d: перестало быть %s — выросло в %s"
             % (year, renamed.lower(), settlement.kind.lower()))
 
-    if top < RANK_NEWS_FROM:
+    if top < RANK_NEWS_FROM and not renamed:
         return          # выселок, ставший селом, — не новость для летописи
     date = ctx.date_in(rng, year)
     if renamed:

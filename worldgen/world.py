@@ -924,6 +924,21 @@ class World:
         # Ступень — из людности, с первого же дня: поселение на две сотни
         # душ основано селом, а не городом.
         settlement.rank = township.rank_of(settlement.population)
+        # И вид по той же мерке. Племя, садящееся на землю всем числом,
+        # основывает сразу город на четыре тысячи душ, а слово ему могло
+        # достаться «застава» или «стойбище» — и оставалось навсегда, если
+        # поселение погибало до первой переписи. Такое нашла самопроверка:
+        # «Стойбище» на 3879 душ, основано в 344-м, погибло в 349-м.
+        if township.is_city(settlement.rank) \
+                and settlement.kind in township.OUTGROWN:
+            race = races_mod.get_race(settlement.race_id)
+            words = (race.settlement_words if race is not None else ()) \
+                or ("Город",)
+            settlement.notes.append(
+                "%d: поставлено сразу крупным, и потому не %s, а %s"
+                % (settlement.founded.year, settlement.kind.lower(),
+                   words[0].lower()))
+            settlement.kind = words[0]
         self.settlements[settlement.id] = settlement
         self.active_settlements.append(settlement.id)
         # Первая точка кривой — год основания: с чего он начал. Без неё

@@ -1375,6 +1375,204 @@ def check_embassies(world, seed: str) -> list:
     return problems
 
 
+def check_mortality(world, seed: str) -> list:
+    """Отчего они умерли: причина названа, согласована и не противоречит веку.
+
+    Четыре вещи, каждая из которых однажды была сломана.
+
+    Первая: причина должна быть у тех, кого летопись заметила. Прежде она
+    стояла только у казнённых — у одного умершего из девяти.
+
+    Вторая: «умерла в родах» не бывает у мужчины. Формы хранятся парами, и
+    перепутать их проще всего там, где пара вырожденная.
+
+    Третья: от старости не умирают молодыми. Доля отмеренного расе срока —
+    та самая мера, по которой причина и выбирается, и она не должна
+    расходиться с написанным.
+
+    Четвёртая: раса, которой в этом мире век не отмерен, от старости не
+    умирает вовсе — она уходит. Если в таком мире нашлась смерть «в
+    глубокой старости», значит особенность мира до свода причин не дошла.
+    """
+    from worldgen import mortality
+
+    problems = []
+    gifts = getattr(world, "race_gifts", None) or {}
+    old_set = set()
+    for pair in mortality.OLD_AGE:
+        old_set.update(pair)
+    birth_set = set()
+    for pair in mortality.CHILDBIRTH:
+        birth_set.add(pair[1])
+    departure = set()
+    for pair in mortality.DEPARTURE:
+        departure.update(pair)
+
+    seen = named = 0
+    for figure in world.figures.values():
+        if figure.death is None or figure.birth is None:
+            continue
+        if not (figure.deeds or figure.titles or figure.posthumous):
+            continue
+        seen += 1
+        cause = figure.death_cause
+        if not cause:
+            continue
+        named += 1
+        if cause in birth_set and figure.sex != "f":
+            problems.append("сид «%s»: %s — мужчина, а умер в родах"
+                            % (seed, figure.name))
+            break
+        race = get_race(figure.race_id)
+        if race is None:
+            continue
+        share = (figure.death.year - figure.birth.year) / float(
+            max(1, race.lifespan[1]))
+        if cause in old_set:
+            if share < mortality.PRIME_FROM:
+                problems.append("сид «%s»: %s умер от старости, прожив %d%% "
+                                "своего века"
+                                % (seed, figure.name, round(share * 100)))
+                break
+            if gifts.get(figure.race_id) == mortality.UNAGING:
+                problems.append("сид «%s»: %s умер от старости, хотя его "
+                                "расе век в этом мире не отмерен"
+                                % (seed, figure.name))
+                break
+        if cause in departure \
+                and gifts.get(figure.race_id) != mortality.UNAGING:
+            problems.append("сид «%s»: %s ушёл, как не умирающий от "
+                            "старости, — а его раса в этом мире стареет"
+                            % (seed, figure.name))
+            break
+    # Треть — заведомо достижимый порог: на пробах выходит около девяти
+    # десятых. Проверка ловит обрыв связи, а не калибровку.
+    if seen >= 50 and named < seen * 0.33:
+        problems.append("сид «%s»: причина смерти названа лишь у %d из %d "
+                        "замеченных летописью" % (seed, named, seen))
+    return problems
+
+
+def check_ranks(world, seed: str) -> list:
+    """Ступень поселения: она считается из людности и не врёт о нём.
+
+    Беда, которую это сторожит: вид поселения ставился при основании и не
+    менялся никогда, и в мире жила «Застава» на сто двадцать тысяч душ.
+    Теперь вид и ступень — разные вещи, и проверяется обе стороны:
+    малый по виду не бывает городским по ступени, а ступень сходится с
+    людностью (с запасом на гистерезис, без которого поселение у порога
+    прыгало туда-обратно каждые десять лет).
+
+    Заодно кривая людности: годы в ней идут вперёд, а наибольшее число не
+    меньше нынешнего.
+    """
+    from worldgen import township as cat
+
+    problems = []
+    for settlement in world.settlements.values():
+        if settlement.kind in cat.OUTGROWN and cat.is_city(settlement.rank):
+            problems.append("сид «%s»: %s — %s по виду, но %s по ступени"
+                            % (seed, settlement.name,
+                               settlement.kind.lower(), settlement.rank))
+            break
+    for settlement in world.settlements.values():
+        if settlement.status != ACTIVE:
+            continue
+        proper = cat.rank_of(settlement.population)
+        if abs(cat.rank_index(proper)
+               - cat.rank_index(settlement.rank)) > 1:
+            problems.append("сид «%s»: у %s ступень «%s» при %d душах "
+                            "(по людности — «%s»)"
+                            % (seed, settlement.name, settlement.rank,
+                               settlement.population, proper))
+            break
+    for settlement in world.settlements.values():
+        rows = settlement.census or []
+        for index in range(len(rows) - 1):
+            if rows[index][0] > rows[index + 1][0]:
+                problems.append("сид «%s»: у %s кривая людности идёт вспять: "
+                                "%d после %d"
+                                % (seed, settlement.name, rows[index + 1][0],
+                                   rows[index][0]))
+                break
+        if problems:
+            break
+        if rows and settlement.peak_population < max(row[1] for row in rows):
+            problems.append("сид «%s»: у %s наибольшая людность меньше той, "
+                            "что стоит в кривой" % (seed, settlement.name))
+            break
+    return problems
+
+
+def check_war_cost(world, seed: str) -> list:
+    """Цена войны: ратные и мирные считаются врозь и складываются верно.
+
+    Прежде убитые при взятии города шли в потери державы, а разорение
+    округи не считалось вовсе — война двух княжеств выходила в сто
+    двадцать человек. Проверяется, что числа сходятся, что размах лежит в
+    своих пределах и что у распри позднее имя появляется только тогда,
+    когда первое и правда разошлось со сроком.
+    """
+    from worldgen import narrative_war as war_texts
+
+    problems = []
+    for war in world.wars.values():
+        if war.civil_losses < 0 or war.attacker_losses < 0 \
+                or war.defender_losses < 0:
+            problems.append("сид «%s»: у войны «%s» потери ниже нуля"
+                            % (seed, war.name))
+            break
+        if war.deaths != war.soldiers + war.civil_losses:
+            problems.append("сид «%s»: у войны «%s» итог потерь не сходится "
+                            "со слагаемыми" % (seed, war.name))
+            break
+        if not 1 <= war.scale <= 5:
+            problems.append("сид «%s»: у войны «%s» размах %d вне 1…5"
+                            % (seed, war.name, war.scale))
+            break
+    for feud in world.feuds.values():
+        if not feud.late_name:
+            continue
+        word = war_texts.feud_span_word(feud.years)
+        if word.lower() in (feud.first_name or "").lower():
+            problems.append("сид «%s»: распрю «%s» переименовали, хотя срок "
+                            "в первом имени назван верно"
+                            % (seed, feud.first_name))
+            break
+    return problems
+
+
+def check_world_code(world, seed: str) -> list:
+    """Код мира: он собирается и разбирается обратно без потерь.
+
+    Код — это обещание: вставил — получил тот самый мир. Если он не
+    разбирается или теряет настройки, обещание нарушено молча, и человек
+    узнает об этом, только построив другой мир.
+    """
+    from worldgen import worldcode
+
+    settings = world.settings or {}
+    if not settings:
+        return []
+    problems = []
+    try:
+        code = worldcode.encode(settings)
+        got = worldcode.decode(code)
+    except Exception as error:
+        return ["сид «%s»: код мира не собрался или не разобрался: %s"
+                % (seed, error)]
+    if got.get("seed") != settings.get("seed"):
+        problems.append("сид «%s»: код мира потерял сид: «%s» вместо «%s»"
+                        % (seed, got.get("seed"), settings.get("seed")))
+    if int(got.get("years", 10000)) != int(settings.get("years", 10000)):
+        problems.append("сид «%s»: код мира потерял длительность" % seed)
+    if dict(got.get("map_make") or {}) != dict(settings.get("map_make") or {}):
+        problems.append("сид «%s»: код мира потерял настройки карты" % seed)
+    if dict(got.get("tuning") or {}) != dict(settings.get("tuning") or {}):
+        problems.append("сид «%s»: код мира потерял шкалы движка" % seed)
+    return problems
+
+
 def check_after_end(world, seed: str) -> list:
     """Записей позже последнего года истории быть не должно.
 
@@ -2810,6 +3008,10 @@ def main() -> int:
         failures.extend(check_calamities(first, seed))
         failures.extend(check_disasters(first, seed))
         failures.extend(check_after_end(first, seed))
+        failures.extend(check_mortality(first, seed))
+        failures.extend(check_ranks(first, seed))
+        failures.extend(check_war_cost(first, seed))
+        failures.extend(check_world_code(first, seed))
         failures.extend(check_invasions(first, seed))
         failures.extend(check_subjects(first, seed))
         failures.extend(check_traces(first, seed))
@@ -2873,6 +3075,10 @@ def main() -> int:
             failures.extend(check_calamities(first, "карта/" + seed))
             failures.extend(check_disasters(first, "карта/" + seed))
             failures.extend(check_after_end(first, "карта/" + seed))
+            failures.extend(check_mortality(first, "карта/" + seed))
+            failures.extend(check_ranks(first, "карта/" + seed))
+            failures.extend(check_war_cost(first, "карта/" + seed))
+            failures.extend(check_world_code(first, "карта/" + seed))
             failures.extend(check_invasions(first, "карта/" + seed))
             failures.extend(check_subjects(first, "карта/" + seed))
             failures.extend(check_traces(first, "карта/" + seed))
@@ -2932,6 +3138,8 @@ def main() -> int:
                             "сохранения" % seed)
         for check in (check_nobility, check_wars, check_politics,
                       check_calamities, check_disasters, check_after_end,
+                      check_mortality, check_ranks, check_war_cost,
+                      check_world_code,
                       check_invasions, check_subjects,
                       check_traces, check_year_slices,
                       check_faiths, check_nations,
