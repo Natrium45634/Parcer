@@ -667,12 +667,20 @@ def check_holidays(world, seed: str) -> list:
                 break
 
         # --- имя склоняется --------------------------------------------
+        # Послабление ровно одно: божественный день берёт себе готовое
+        # имя праздника божества, а те имена лежат в `pantheon.py` и
+        # бывают одним словом («Солнцеворот»). Но послабление именно на
+        # это имя, а не на всякое имя дня, у которого есть бог: иначе
+        # через ту же щель пройдёт и настоящая поломка.
         head = texts.head_of(holiday.name)
-        if head not in texts.HEAD_FORMS and not holiday.deity_id:
-            problems.append("сид «%s»: имя праздника «%s» не склоняется — "
-                            "головное слово «%s» не в таблице падежей"
-                            % (seed, name, head))
-            break
+        if head not in texts.HEAD_FORMS:
+            deity = world.deities.get(holiday.deity_id)
+            feast = deity.festival_name if deity is not None else ""
+            if holiday.name != feast:
+                problems.append("сид «%s»: имя праздника «%s» не "
+                                "склоняется — головное слово «%s» не в "
+                                "таблице падежей" % (seed, name, head))
+                break
         for row in holiday.names:
             if not row.get("имя") or not row.get("по"):
                 problems.append("сид «%s»: у праздника «%s» прежнее имя без "
