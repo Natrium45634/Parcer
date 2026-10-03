@@ -2459,6 +2459,34 @@ def audit(world) -> list:
                 bad("субъект «%s» переменился после своего конца" % item.name)
                 break
 
+    # 37. Праздники: память, у которой началась своя жизнь.
+    holidays = list(world.holidays.values())
+    if holidays:
+        from worldgen import holidays as hol_cat
+        steps = Counter(item.step for item in holidays)
+        holders = Counter(item.holder for item in holidays)
+        lost = sum(1 for item in holidays if item.lost_why)
+        banned = sum(1 for item in holidays if item.bans)
+        back = sum(1 for item in holidays if item.state == hol_cat.REVIVED)
+        marks = sum(1 for item in holidays if item.marks)
+        cases = sum(len(item.doings) for item in holidays)
+        found.append(("=", "праздников: %d (отмечают %d); ступени: %s; "
+                      "держат: %s; повод забыт у %d, запрещали %d, "
+                      "вернулось %d, оставили постройку %d, случаев на них %d"
+                      % (len(holidays), len(world.holidays_kept()),
+                         ", ".join("%s — %d" % pair
+                                   for pair in steps.most_common(3)),
+                         ", ".join("%s — %d" % pair
+                                   for pair in holders.most_common(3)),
+                         lost, banned, back, marks, cases)))
+        if world.total_years >= 3000 and not lost:
+            note("ни один праздник за всю историю не потерял своего повода")
+        for item in holidays:
+            if item.forgot_year and item.forgot_year < item.born.year:
+                bad("праздник «%s» забыл повод раньше, чем завёлся"
+                    % item.name)
+                break
+
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:
         biggest = max((world.polities[p].population

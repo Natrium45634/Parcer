@@ -386,7 +386,7 @@ def born_text(rng, holiday, what: str) -> tuple:
         if doing:
             rows.append("Делают вот что: %s." % "; ".join(doing))
     rows.append("Держит день %s — ему надо %s."
-                % (_holder_word(holiday.holder),
+                % (holder_word(holiday.holder),
                    cat.HOLDER_WANT.get(holiday.holder, "своё")))
     return BORN_TITLE % in_case(holiday.name, "им"), " ".join(rows)
 
@@ -404,7 +404,8 @@ HOLDER_WORDS = {
 }
 
 
-def _holder_word(holder: str) -> str:
+def holder_word(holder: str) -> str:
+    """«держава», «храм», «сам народ» — кто его устраивает."""
     return HOLDER_WORDS.get(holder, holder)
 
 
@@ -441,7 +442,7 @@ def step_text(rng, holiday, was: str) -> tuple:
     lines = STEP_LINES.get(holiday.step) or ("День поднялся ступенью выше.",)
     rows = [rng.choice(lines)]
     rows.append("Держит его %s, отмечают %s."
-                % (_holder_word(holiday.holder), holiday.reach))
+                % (holder_word(holiday.holder), holiday.reach))
     if holiday.step == cat.STEP_SET:
         rows.append("Что в нём вспоминают теперь: %s." % holiday.meaning)
     title = STEP_TITLE % {"name": in_case(holiday.name, "им"),
@@ -552,8 +553,8 @@ def turn_text(rng, holiday, turn: str, what: str = "") -> tuple:
         "what": what,
         "name": in_case(holiday.name, "им"),
         "reach": holiday.reach,
-        "holder": _holder_word(holiday.holder),
-        "holder_gen": _holder_gen(holiday.holder),
+        "holder": holder_word(holiday.holder),
+        "holder_gen": holder_gen(holiday.holder),
     }
     rows = [rng.choice(lines) % data]
     if turn in (cat.MEANING_CHANGED, cat.RENAMED) and holiday.first_meaning:
@@ -576,7 +577,8 @@ HOLDER_GEN = {
 }
 
 
-def _holder_gen(holder: str) -> str:
+def holder_gen(holder: str) -> str:
+    """То же в родительном: «делом державы», «делом храма»."""
     return HOLDER_GEN.get(holder, holder)
 
 
@@ -706,7 +708,7 @@ def portrait(world, holiday) -> list:
         rows.append("    Повод забыт%s" % (
             " (%s)" % holiday.forgot_why if holiday.forgot_why else ""))
     rows.append("    Держит: %s; разошёлся: %s"
-                % (_holder_word(holiday.holder), holiday.reach))
+                % (holder_word(holiday.holder), holiday.reach))
     if holiday.mood:
         mood = holiday.mood
         if holiday.also_mood:
@@ -756,6 +758,7 @@ def _why(text: str) -> str:
 
 
 __all__ = ["cap", "in_case", "agree", "gender_of", "head_of", "make_name",
+           "holder_word", "holder_gen",
            "drift_name", "date_line", "born_text", "step_text", "turn_text",
            "lost_text", "form_line", "sides_text", "variant_line",
            "doing_text", "mark_line", "portrait", "HEAD_FORMS",

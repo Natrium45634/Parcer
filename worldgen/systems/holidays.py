@@ -931,7 +931,7 @@ def _turn(ctx, rng, holiday, year: int) -> None:
     elif turn == cat.TAKEN:
         was = holiday.holder
         holiday.holder = cat.BY_STATE if holiday.polity_id else cat.BY_TEMPLE
-        what = "было делом %s" % texts._holder_gen(was)
+        what = "было делом %s" % texts.holder_gen(was)
         if rng.chance(0.5):
             _retell(ctx, rng, holiday, year)
     elif turn == cat.REFORMED:
@@ -960,8 +960,12 @@ def _turn(ctx, rng, holiday, year: int) -> None:
         what = _change_rite(ctx, rng, holiday, year)
     elif turn == cat.MEANING_CHANGED:
         what = _retell(ctx, rng, holiday, year)
+        if not what:
+            return      # смысл не переменился — и писать, что переменился, незачем
     elif turn == cat.SPLIT_UP:
         what = _split(ctx, rng, holiday, year)
+        if holiday.state != cat.SPLIT:
+            return
     elif turn == cat.FORBIDDEN:
         _forbid(ctx, rng, holiday, year)
         return
@@ -1079,11 +1083,15 @@ def _swallow(ctx, rng, holiday, year: int) -> None:
     holiday.state = cat.ABSORBED
     holiday.notes.append("%d: слился с другим днём того же числа" % year)
     # Обряды не пропадают: их забирает тот, кто поглотил.
+    had = {row.get("обряд") for row in rival.rites}
     for item in holiday.live_rites:
         if len(rival.rites) >= 6:
             break
-        rival.rites.append({"обряд": item.get("обряд", ""), "с": int(year),
-                            "по": 0,
+        key = item.get("обряд", "")
+        if key in had:
+            continue        # этот обряд у него и так есть
+        had.add(key)
+        rival.rites.append({"обряд": key, "с": int(year), "по": 0,
                             "зачем": "пришло от другого дня, который сошёлся"
                                      " с этим"})
     rival.notes.append("%d: забрал себе обряды дня, что стоял на том же"
@@ -1144,7 +1152,7 @@ def _forbid(ctx, rng, holiday, year: int) -> None:
     by = cat.BY_STATE if holiday.polity_id else cat.BY_TEMPLE
     holiday.state = cat.BANNED
     holiday.bans.append({"с": int(year), "по": 0, "отчего": why,
-                         "кем": texts._holder_word(by)})
+                         "кем": texts.holder_word(by)})
     _note_turn(holiday, year, cat.FORBIDDEN, why)
     title, text = texts.turn_text(ctx.rng("holiday-ban", holiday.id, year),
                                   holiday, cat.FORBIDDEN, why)
@@ -1201,7 +1209,7 @@ def _orphan(ctx, rng, holiday, year: int) -> None:
     _narrow(holiday)
     holiday.state = cat.FADING
     holiday.notes.append("%d: держать стало некому — %s больше нет"
-                         % (year, texts._holder_gen(was)))
+                         % (year, texts.holder_gen(was)))
     _note_turn(holiday, year, cat.SHRANK,
                "того, кто его держал, больше нет")
     title, text = texts.turn_text(rng, holiday, cat.SHRANK,

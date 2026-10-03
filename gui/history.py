@@ -58,7 +58,10 @@ GROUPS = (
         "guild", "discovery", "expedition_", "artifact_", "craft")),
     ("слово и память", (
         "codex_", "lore_", "legend_", "tale", "local_story", "script_found",
-        "tongue_", "court_tongue")),
+        "tongue_", "court_tongue",
+        # Праздник — это и есть способ держать память, и в отборе он
+        # должен стоять рядом с легендами, а не в «прочем».
+        "holiday_")),
     ("эпохи мира", ("era_", "world_begin")),
 )
 
