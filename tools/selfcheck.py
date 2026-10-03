@@ -2955,12 +2955,33 @@ def check_catalogues() -> list:
     return problems
 
 
-def main() -> int:
+def parts() -> list:
+    """Из каких частей состоит полная самопроверка.
+
+    Разбивка нужна не для красоты. Проверка целиком идёт около полутора
+    часов, а окружение, в котором её гоняют, перезапускается — и тогда
+    полтора часа работы пропадают до последнего мира. Разбитая на части,
+    она переживает перезапуск: сделанные миры отмечены, и следующий запуск
+    начинает с того, где оборвалось.
+    """
+    rows = ["catalogues"]
+    rows.extend("seed:%s" % seed for seed in SEEDS)
+    rows.extend("map:%s" % seed for seed in MAP_SEEDS)
+    rows.extend("own:%s" % seed for seed in FORGE_SEEDS)
+    return rows
+
+
+def main(only: str = "") -> int:
     failures = []
 
-    failures.extend(check_catalogues())
+    if not only or only == "catalogues":
+        failures.extend(check_catalogues())
+    if only == "catalogues":
+        return _report(failures)
 
     for seed in SEEDS:
+        if only and only != "seed:%s" % seed:
+            continue
         started = time.time()
         first = generate(Settings(seed=seed, years=10000))
         second = generate(Settings(seed=seed, years=10000))
@@ -3050,6 +3071,8 @@ def main() -> int:
         sample = wm_mod.load(SAMPLE_MAP)
         print()
         for seed in MAP_SEEDS:
+            if only and only != "map:%s" % seed:
+                continue
             started = time.time()
             settings = Settings(seed=seed, years=10000, map_path=SAMPLE_MAP)
             first = generate(settings)
@@ -3116,6 +3139,8 @@ def main() -> int:
     # держать те же проверки, что и карта из файла.
     print()
     for seed in FORGE_SEEDS:
+        if only and only != "own:%s" % seed:
+            continue
         started = time.time()
         settings = Settings(seed=seed, years=4000,
                             map_make={"seed": seed, "size": "small"})
@@ -3159,6 +3184,10 @@ def main() -> int:
               % (seed, len(first.regions), len(first.settlements),
                  len(first.polities), first.world_population(), spent))
 
+    return _report(failures)
+
+
+def _report(failures) -> int:
     if failures:
         print("\nОШИБКИ:")
         for line in failures:
@@ -3168,5 +3197,38 @@ def main() -> int:
     return 0
 
 
+def _usage() -> int:
+    print("Самопроверка целиком:")
+    print("    python3 tools/selfcheck.py")
+    print()
+    print("Или по частям — тогда перезапуск теряет одну часть, а не всё:")
+    print("    python3 tools/selfcheck.py --only <часть>")
+    print()
+    print("Части:")
+    for name in parts():
+        print("    %s" % name)
+    print()
+    print("    python3 tools/selfcheck.py --parts   — только их перечень")
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    argv = sys.argv[1:]
+    if "--help" in argv or "-h" in argv:
+        sys.exit(_usage())
+    if "--parts" in argv:
+        for name in parts():
+            print(name)
+        sys.exit(0)
+    chosen = ""
+    if "--only" in argv:
+        index = argv.index("--only")
+        if index + 1 >= len(argv):
+            print("После --only нужна часть. Их перечень: --parts")
+            sys.exit(2)
+        chosen = argv[index + 1]
+        if chosen not in parts():
+            print("Нет такой части: %s" % chosen)
+            print("Перечень: %s" % ", ".join(parts()))
+            sys.exit(2)
+    sys.exit(main(chosen))
