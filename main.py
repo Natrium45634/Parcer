@@ -7,6 +7,10 @@
     python main.py --cli           — генерация без окна, летопись в файл
 
 Ключи консольного режима:
+    --code КОД        код мира: одна строка вида HR1-…, в которой лежит
+                      всё — сид, длительность, густота, карта и все шкалы.
+                      Прочие ключи после него можно не писать; что
+                      написано, то его перебивает
     --seed СИД        сид генерации: код вида KR7M-93XD или любое
                       слово (по умолчанию «Начало»)
     --years N         сколько лет истории (по умолчанию 10000)
@@ -48,7 +52,8 @@ def run_cli(argv) -> int:
                "--density": "1.0", "--out": "", "--importance": "3",
                "--map": "", "--map-interval": "50", "--chronicle": "",
                "--map-random": "", "--map-seed": "", "--save-map": "",
-               "--map-cont": "4", "--map-knobs": "", "--tune": ""}
+               "--map-cont": "4", "--map-knobs": "", "--tune": "",
+               "--code": ""}
     index = 0
     while index < len(argv):
         key = argv[index]
@@ -57,6 +62,28 @@ def run_cli(argv) -> int:
             index += 2
         else:
             index += 1
+
+    # Код мира разбирается первым: он задаёт всё сразу, а ключи, писанные
+    # руками рядом с ним, его перебивают — так удобнее подправить одну
+    # вещь в чужом мире, не разбирая код по частям.
+    from_code = {}
+    if options["--code"]:
+        from worldgen import worldcode
+        try:
+            from_code = worldcode.decode(options["--code"])
+        except worldcode.BadCode as error:
+            print("Код мира не читается: %s" % error)
+            return 2
+        print("По коду: %s" % worldcode.describe(options["--code"]))
+        written = set(argv)
+        if "--seed" not in written:
+            options["--seed"] = str(from_code.get("seed", options["--seed"]))
+        if "--years" not in written and "years" in from_code:
+            options["--years"] = str(from_code["years"])
+        if "--regions" not in written and "regions" in from_code:
+            options["--regions"] = str(from_code["regions"])
+        if "--density" not in written and "density" in from_code:
+            options["--density"] = str(from_code["density"])
 
     map_path = options["--map"]
     if map_path and not os.path.exists(map_path):
@@ -107,13 +134,17 @@ def run_cli(argv) -> int:
             return 2
         make = {"size": size, "continents": continents, "k": map_knobs,
                 "seed": options["--map-seed"] or options["--seed"]}
+    elif from_code.get("map_make"):
+        # Карта из кода — целиком, вместе с её сидом и всеми ползунками.
+        make = dict(from_code["map_make"])
 
     settings = Settings(seed=options["--seed"], years=int(float(options["--years"])),
                         regions=int(float(options["--regions"])),
                         density=float(options["--density"]),
                         map_path=map_path,
                         map_interval=int(float(options["--map-interval"])),
-                        tuning=knobs, map_make=make)
+                        tuning=knobs or dict(from_code.get("tuning") or {}),
+                        map_make=make)
 
     if options["--save-map"] and make:
         from worldgen import worldforge

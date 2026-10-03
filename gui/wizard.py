@@ -29,7 +29,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from gui.errors import human_error
-from worldgen import tuning, worldforge
+from worldgen import tuning, worldcode, worldforge
 from worldgen import worldmap
 from worldgen.engine import Settings
 from worldgen.rng import Rng, random_seed_text, seed_to_int
@@ -67,7 +67,12 @@ class Wizard(ttk.Frame):
         self.knob_labels = {}
 
         self.map_mode = tk.StringVar(value=MAP_RANDOM)
-        self.map_seed_var = tk.StringVar(value=random_seed_text())
+        self.map_seed_var = tk.StringVar(value=self.seed_var.get())
+        # По умолчанию карта берёт сид мира. Прежде у мира было два сида,
+        # и одно слово не давало ни того же мира, ни той же карты: назвать
+        # сид другому человеку было недостаточно.
+        self.map_same_seed = tk.BooleanVar(value=True)
+        self.seed_var.trace_add("write", self._seed_changed)
         self.map_size_var = tk.StringVar(
             value=worldforge.SIZE_NAMES[worldforge.DEFAULT_SIZE])
         self.map_cont_var = tk.StringVar(value="4")
@@ -122,6 +127,23 @@ class Wizard(ttk.Frame):
                     textvariable=self.regions_var).grid(row=1, column=4,
                                                         sticky="w",
                                                         pady=(8, 0))
+
+        code = ttk.Frame(page)
+        code.pack(fill="x", pady=(10, 0))
+        ttk.Label(code, text="Код мира:").grid(row=0, column=0, sticky="e",
+                                               padx=(0, 6))
+        self.code_var = tk.StringVar(value="")
+        ttk.Entry(code, textvariable=self.code_var, width=46).grid(
+            row=0, column=1, sticky="w")
+        ttk.Button(code, text="Скопировать", command=self.copy_code).grid(
+            row=0, column=2, padx=6)
+        ttk.Button(code, text="Вставить", command=self.paste_code).grid(
+            row=0, column=3)
+        ttk.Label(code, text=(
+            "В коде лежит всё: сид, длительность, густота, карта и все "
+            "шкалы.\nВставьте чужой код — и получится тот самый мир на той "
+            "самой карте."), justify="left").grid(
+            row=1, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
         ttk.Label(page, text=(
             "Этого хватит: нажмите «3. Создание» — и мир будет готов.\n"
@@ -297,6 +319,11 @@ class Wizard(ttk.Frame):
             row=0, column=1, sticky="w")
         ttk.Button(self.map_box, text="Случайный",
                    command=self.roll_map_seed).grid(row=0, column=2, padx=6)
+        same = ttk.Checkbutton(self.map_box, text="та же, что у мира",
+                               variable=self.map_same_seed,
+                               command=self._seed_changed)
+        same.grid(row=0, column=5, padx=(14, 0), sticky="w")
+        self._map_widgets.append((same, "normal"))
         ttk.Label(self.map_box, text="Размер:").grid(row=0, column=3,
                                                      sticky="e", padx=(14, 6))
         size_box = ttk.Combobox(self.map_box, textvariable=self.map_size_var,
@@ -435,7 +462,94 @@ class Wizard(ttk.Frame):
     # --- ползунки карты ---
 
     def roll_map_seed(self) -> None:
+        # Раз сид карты бросили отдельно, значит он больше не следует за
+        # сидом мира: человек сказал, чего хочет.
+        self.map_same_seed.set(False)
         self.map_seed_var.set(random_seed_text())
+
+    def _seed_changed(self, *_args) -> None:
+        """Сид карты следует за сидом мира, пока это не отменили."""
+        if self.map_same_seed.get():
+            self.map_seed_var.set(self.seed_var.get())
+
+    def world_code(self) -> str:
+        """Код нынешних настроек — всё, из чего этот мир будет собран."""
+        return worldcode.encode(self.settings())
+
+    def copy_code(self) -> None:
+        """Положить код мира в буфер обмена — и показать его же в поле."""
+        code = self.world_code()
+        self.code_var.set(code)
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(code)
+        except tk.TclError:
+            pass        # без буфера обмена код всё равно виден в поле
+        messagebox.showinfo(
+            "Код мира скопирован",
+            "Код этого мира:\n\n%s\n\nВ нём лежит всё: сид, длительность, "
+            "густота, карта и все шкалы. Вставьте его в другом окне — "
+            "получится тот же мир." % code)
+
+    def paste_code(self) -> None:
+        """Прочитать код из поля (или из буфера) и расставить по нему всё."""
+        text = (self.code_var.get() or "").strip()
+        if not text:
+            try:
+                text = self.clipboard_get()
+            except tk.TclError:
+                text = ""
+        try:
+            got = worldcode.decode(text)
+        except worldcode.BadCode as error:
+            messagebox.showwarning("Код не читается", str(error))
+            return
+        self.apply_code(got)
+        self.code_var.set(text)
+        self.refresh_summary()
+        messagebox.showinfo("Код принят", "Настройки расставлены по коду:\n\n%s"
+                            % worldcode.describe(text))
+
+    def apply_code(self, got: dict) -> None:
+        """Расставить настройки по разобранному коду.
+
+        Чего в коде нет, то ставится обычным: код короток именно потому,
+        что об обычном молчит, — и вернуть надо тоже обычное, а не то, что
+        осталось от прошлого мира в этом окне.
+        """
+        self.seed_var.set(str(got.get("seed", "")))
+        self.years_var.set(str(int(got.get("years", 10000))))
+        self.regions_var.set(str(int(got.get("regions", 18))))
+        density = float(got.get("density", 1.0))
+        for name, value in DENSITY_CHOICES:
+            if abs(value - density) < 0.01:
+                self.density_var.set(name)
+                break
+        # Шкалы движка: сперва все на место, потом те, что в коде.
+        self.reset_knobs()
+        for key, value in (got.get("tuning") or {}).items():
+            var = self.knob_vars.get(key)
+            if var is not None:
+                var.set(int(value))
+        make = got.get("map_make") or {}
+        if make:
+            self.map_mode.set(MAP_RANDOM)
+            self.map_same_seed.set(bool(make.get("seed")
+                                        == got.get("seed")))
+            self.map_seed_var.set(str(make.get("seed")
+                                      or got.get("seed", "")))
+            size = str(make.get("size") or worldforge.DEFAULT_SIZE)
+            self.map_size_var.set(worldforge.SIZE_NAMES.get(
+                size, worldforge.SIZE_NAMES[worldforge.DEFAULT_SIZE]))
+            self.map_cont_var.set(str(int(make.get("continents", 4))))
+            self.map_wrap.set(bool(make.get("wrap", True)))
+            self.reset_map_knobs()
+            for key, value in (make.get("k") or {}).items():
+                var = self.map_knob_vars.get(key)
+                if var is not None:
+                    var.set(int(value))
+            self._preview_key = None        # предпросмотр устарел
+        self._map_mode_changed()
 
     def roll_map_knobs(self) -> None:
         """Кости карты: новый сид и раскрутка ползунков этим же сидом.
@@ -724,6 +838,23 @@ class Wizard(ttk.Frame):
         if locked:
             lines.append("")
             lines.append("  ЗАКРЕПЛЕНО: %s" % ", ".join(locked))
+        lines.append("")
+        # Код мира — последним: это то, что человек заберёт с собой, чтобы
+        # вернуться к этому же миру или отдать его другому. Он же
+        # обновляется в поле на первом шаге, чтобы не искать его дважды.
+        try:
+            code = self.world_code()
+        except Exception:
+            code = ""
+        if code:
+            self.code_var.set(code)
+            lines.append("  КОД ЭТОГО МИРА (в нём лежит всё, что выше)")
+            # Одной строкой: разорванный на строки код ломается при
+            # вставке, а в поле на первом шаге он и так целиком.
+            lines.append("    %s" % code)
+            if self.map_mode.get() == MAP_FILE:
+                lines.append("    Но карта взята файлом: её кодом не "
+                             "передать — нужен тот же файл .world.")
         lines.append("")
         lines.append("  Десять тысяч лет истории считаются одну-две минуты.")
 

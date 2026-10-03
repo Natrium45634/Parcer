@@ -701,6 +701,10 @@ def check_tribes(world, seed: str) -> list:
     Племя стоит тысячи лет, а вождь смертен. Прежде вождь ставился раз
     при основании и числился живым до конца истории — в летописи выходили
     главари гоблинов по две тысячи лет от рождения.
+
+    Предел века считается с оглядкой на особенности мира: в части миров
+    высшим эльфам век не отмерен вовсе, и пятитысячелетний эльф там не
+    поломка, а задуманное свойство, названное в «Итогах» вслух.
     """
     problems = []
     for tribe_id in world.active_tribes:
@@ -712,18 +716,28 @@ def check_tribes(world, seed: str) -> list:
             problems.append("сид «%s»: племя %s ведёт мёртвый вождь %s"
                             % (seed, tribe.full_name, chief.name))
             break
+    # Раса, которой в этом мире век не отмерен, живёт дольше своего же
+    # предела — на то и особенность. Предел для неё считается по тому, что
+    # обещано в mortality.UNAGING_SPAN, иначе проверка ловит не ошибку, а
+    # задуманное свойство мира.
+    from worldgen import mortality
+    gifts = getattr(world, "race_gifts", None) or {}
+    stretch = mortality.UNAGING_SPAN[1]
     for figure in world.figures.values():
         race = get_race(figure.race_id)
         if race is None or figure.birth is None:
             continue
         end = (figure.death.year if figure.death is not None
                else world.total_years)
-        if end - figure.birth.year > race.lifespan[1] * 2:
+        limit = race.lifespan[1] * 2
+        if gifts.get(figure.race_id) == mortality.UNAGING:
+            limit = int(race.lifespan[1] * stretch * 1.3)
+        if end - figure.birth.year > limit:
             problems.append("сид «%s»: %s (%s) прожил%s %d лет при пределе "
                             "расы %d"
                             % (seed, figure.name, race.name,
                                "а" if figure.sex == "f" else "",
-                               end - figure.birth.year, race.lifespan[1]))
+                               end - figure.birth.year, limit))
             break
     return problems
 

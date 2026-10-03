@@ -114,9 +114,18 @@ def format_event(event, width: int = 100, indent: str = "   ") -> str:
 
 
 def render_header(world) -> str:
+    """Шапка летописи — и код мира в ней.
+
+    Сида мало, чтобы вернуться к этому же миру: длительность, густота,
+    карта и семьдесят шкал в сид не входят. Поэтому в шапке стоит код
+    мира — одна строка, в которой лежит всё. Вставил в мастер — получил тот
+    же мир на той же карте.
+    """
+    from . import worldcode
+
     line = "=" * 78
     settings = world.settings or {}
-    return "\n".join((
+    rows = [
         line,
         "  ЛЕТОПИСЬ МИРА",
         "  Сид: %s" % world.seed_text,
@@ -124,8 +133,22 @@ def render_header(world) -> str:
             years_text(world.total_years), len(world.regions),
             settings.get("density", 1.0)),
         "  Год делится на 12 месяцев по 30 дней.",
-        line,
-    ))
+    ]
+    if settings:
+        try:
+            code = worldcode.encode(settings)
+        except Exception:
+            code = ""
+        if code:
+            # Одной строкой, не в столбик: код копируют целиком, и
+            # разорванный на строки он ломается при вставке.
+            rows.append("  Код мира (вставьте в мастер — выйдет этот же мир):")
+            rows.append("    %s" % code)
+            if settings.get("map_path"):
+                rows.append("    Карта взята файлом: кодом её не передать — "
+                            "нужен тот же файл .world.")
+    rows.append(line)
+    return "\n".join(rows)
 
 
 def render_chronicle(world, min_importance: int = 1, kinds=None,
