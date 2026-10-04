@@ -777,7 +777,8 @@ def check_holidays(world, seed: str) -> list:
     seen_links = {}
     link_fields = ("war_id", "calamity_id", "invasion_id", "monster_id",
                    "figure_id", "deity_id", "guild_id", "trace_id",
-                   "subject_id")
+                   "subject_id", "temple_id", "law_id", "settlement_id",
+                   "polity_id")
     tables = {"war_id": world.wars, "calamity_id": world.calamities,
               "invasion_id": world.invasions, "monster_id": world.monsters,
               "figure_id": world.figures, "deity_id": world.deities,
@@ -785,6 +786,7 @@ def check_holidays(world, seed: str) -> list:
               "subject_id": world.subjects, "polity_id": world.polities,
               "settlement_id": world.settlements, "folk_id": world.folks,
               "faith_id": world.faiths, "house_id": world.houses,
+              "temple_id": world.temples, "law_id": world.laws,
               "region_id": world.regions}
 
     for holiday in world.holidays.values():
@@ -939,10 +941,12 @@ def check_holidays(world, seed: str) -> list:
         # --- одно событие — один праздник ------------------------------
         # Сверяется только повод (`about`): остальные привязки — родня.
         # День находки знает и беду, от которой след остался, но поминает
-        # он находку, а это другое событие.
+        # он находку, а это другое событие. Событием считается пара
+        # «привязка + повод»: венчание государя и его смерть — два разных
+        # дня об одном человеке, и мир вправе держать оба.
         if holiday.about and holiday.about in link_fields:
             value = getattr(holiday, holiday.about, "")
-            key = (holiday.about, value)
+            key = (holiday.about, value, holiday.origin)
             if value and key in seen_links:
                 problems.append("сид «%s»: одно и то же поминают дважды — "
                                 "«%s» и «%s»"

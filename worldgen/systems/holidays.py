@@ -157,8 +157,6 @@ def _nodes(ctx, year: int) -> list:
     for war in world.wars.values():
         if war.status == ONGOING or not _fresh(war.end, year):
             continue
-        if ("war_id", war.id) in taken:
-            continue
         won = war.outcome in ("победа нападавших", "победа оборонявшихся")
         winner = war.attacker_id if war.outcome == "победа нападавших" \
             else war.defender_id
@@ -189,8 +187,6 @@ def _nodes(ctx, year: int) -> list:
     for woe in world.calamities.values():
         if woe.end is None or not _fresh(woe.end, year):
             continue
-        if ("calamity_id", woe.id) in taken:
-            continue
         links = {"calamity_id": woe.id}
         region = _first(woe.region_ids)
         heavy = 1.0 + 0.5 * max(0, woe.severity - 3)
@@ -220,8 +216,6 @@ def _nodes(ctx, year: int) -> list:
     for raid in world.invasions.values():
         if raid.ended is None or not _fresh(raid.ended, year):
             continue
-        if ("invasion_id", raid.id) in taken:
-            continue
         if raid.outcome not in ("истреблены", "разбиты", "отбиты", "заперты",
                                 "изгнаны"):
             continue
@@ -236,8 +230,7 @@ def _nodes(ctx, year: int) -> list:
 
     # --- державы и государи ---------------------------------------------
     for polity in world.polities.values():
-        if _fresh(polity.founded, year) \
-                and ("polity_id", polity.id) not in taken:
+        if _fresh(polity.founded, year):
             out.append(Node("основание державы",
                             "держава по имени %s стала державой" % polity.name,
                             polity.founded.year, {"polity_id": polity.id},
@@ -249,7 +242,7 @@ def _nodes(ctx, year: int) -> list:
         # Законность — слово, а не число: праздник венчания заводят
         # только там, где венец взяли по праву. На узурпации праздника
         # не бывает — бывает запрет чужого.
-        if _fresh(reign.start, year) and ("reign", reign.id) not in taken \
+        if _fresh(reign.start, year) \
                 and reign.legitimacy in ("законное", "избрание",
                                          "основание", "по брачному праву"):
             out.append(Node("венчание государя",
@@ -259,8 +252,7 @@ def _nodes(ctx, year: int) -> list:
                             {"polity_id": polity.id,
                              "figure_id": reign.ruler_id},
                             about="figure_id", weight=0.5))
-        if reign.end is not None and _fresh(reign.end, year) \
-                and ("reign-end", reign.id) not in taken:
+        if reign.end is not None and _fresh(reign.end, year):
             # Слова взяты те же, какими правление закрывают на деле:
             # «свергнут восставшими», «заговор», «смута», «междоусобица».
             if reign.end_reason in ("свергнут восставшими", "заговор",
@@ -286,8 +278,7 @@ def _nodes(ctx, year: int) -> list:
         settlement = world.settlements[settlement_id]
         if not _fresh(settlement.founded, year):
             continue
-        if ("settlement_id", settlement.id) in taken \
-                or settlement.population < 900:
+        if settlement.population < 900:
             continue
         out.append(Node("основание города",
                         "на этом месте встал город по имени %s"
@@ -301,8 +292,7 @@ def _nodes(ctx, year: int) -> list:
 
     # --- боги и храмы ---------------------------------------------------
     for deity in world.deities.values():
-        if not _fresh(deity.revealed, year) \
-                or ("deity_id", deity.id) in taken:
+        if not _fresh(deity.revealed, year):
             continue
         origin = "рождение бога" if deity.primordial else "явление бога"
         if origin in barred:
@@ -314,8 +304,7 @@ def _nodes(ctx, year: int) -> list:
                         {"deity_id": deity.id, "faith_id": deity.faith_id},
                         about="deity_id", weight=1.1))
     for temple in world.temples.values():
-        if not _fresh(temple.founded, year) \
-                or ("temple", temple.id) in taken:
+        if not _fresh(temple.founded, year):
             continue
         if temple.grandeur < 2:
             continue
@@ -323,17 +312,19 @@ def _nodes(ctx, year: int) -> list:
                         "храм по имени %s поставили на этом месте"
                         % temple.name,
                         temple.founded.year,
-                        {"faith_id": temple.faith_id,
+                        {"temple_id": temple.id,
+                         "faith_id": temple.faith_id,
                          "deity_id": temple.deity_id,
                          "settlement_id": temple.settlement_id},
-                        about="faith_id",
+                        # Повод тут — сам храм, а не вера: иначе второй
+                        # храм той же веры поминался бы как первый, и
+                        # выходило, что одно событие помнят дважды.
+                        about="temple_id",
                         region_id=temple.region_id, weight=0.5))
 
     # --- чудовища -------------------------------------------------------
     for beast in world.monsters.values():
         if beast.status != monsters_mod.SLAIN or not _fresh(beast.ended, year):
-            continue
-        if ("monster_id", beast.id) in taken:
             continue
         origin = "победа над чудовищем" if beast.power >= 3 \
             else "чудовище у села"
@@ -350,7 +341,7 @@ def _nodes(ctx, year: int) -> list:
     for subject in world.subjects.values():
         if subject.kind in ("человек", "народ мира"):
             continue
-        if not subject.end or ("subject_id", subject.id) in taken:
+        if not subject.end:
             continue
         if not _fresh(subject.ended, year):
             continue
@@ -364,8 +355,7 @@ def _nodes(ctx, year: int) -> list:
         figure = world.figures.get(renown.figure_id)
         if figure is None or figure.death is None:
             continue
-        if not _fresh(figure.death, year) \
-                or ("figure_id", figure.id) in taken:
+        if not _fresh(figure.death, year):
             continue
         if renown.level < 6:
             continue
@@ -382,8 +372,7 @@ def _nodes(ctx, year: int) -> list:
 
     # --- цеха -----------------------------------------------------------
     for guild in world.guilds.values():
-        if not _fresh(guild.founded, year) \
-                or ("guild_id", guild.id) in taken:
+        if not _fresh(guild.founded, year):
             continue
         out.append(Node("основание цеха",
                         "ремесло собралось в цех по имени %s" % guild.name,
@@ -394,21 +383,22 @@ def _nodes(ctx, year: int) -> list:
 
     # --- законы ---------------------------------------------------------
     for law in world.laws.values():
-        if not _fresh(law.made, year) or ("law", law.id) in taken:
+        if not _fresh(law.made, year):
             continue
         if not law.famous:
             continue        # праздник заводят не на всякую приписку
         out.append(Node("великая перемена закона",
                         "закон по имени %s переменил то, как тут живут"
                         % law.name,
-                        law.made.year, {"polity_id": law.polity_id},
-                        about="law", weight=0.3))
+                        law.made.year, {"law_id": law.id,
+                                        "polity_id": law.polity_id},
+                        # И тут повод — сам закон: «law» именем поля не
+                        # было, и сторож на него не срабатывал вовсе.
+                        about="law_id", weight=0.3))
 
     # --- старые находки -------------------------------------------------
     for trace in world.traces.values():
         if trace.found is None or not _fresh(trace.found, year):
-            continue
-        if ("trace_id", trace.id) in taken:
             continue
         out.append(Node("старая находка",
                         "из земли достали %s" % trace.name,
@@ -422,8 +412,6 @@ def _nodes(ctx, year: int) -> list:
     # Эти дни ни от какого события не растут: их заводит сам народ,
     # которому нужен хоть один день в году. Поэтому берутся они только у
     # тех, у кого такого дня ещё нет.
-    out = [node for node in out if node.origin not in barred]
-
     for folk in world.folks.values():
         if folk.status != ACTIVE or folk.population < 12000:
             continue
@@ -438,7 +426,14 @@ def _nodes(ctx, year: int) -> list:
                             % folk.name, max(1, year - 10),
                             {"folk_id": folk.id, "race_id": folk.race_id},
                             region_id=folk.cradle_region, weight=0.26))
-    return out
+
+    # Отсев один и в самом конце — так его не забыть добавить к новому
+    # поводу. Отсеивается то, чего в этом мире быть не может, и то, что
+    # уже заведено на то же самое событие.
+    return [node for node in out
+            if node.origin not in barred
+            and (node.about, node.links.get(node.about, ""), node.origin)
+            not in taken]
 
 
 # Какое поле праздника в каком реестре мира проверяется. Нужно потому,
@@ -454,6 +449,7 @@ LINK_TABLES = {
     "trace_id": "traces", "subject_id": "subjects", "polity_id": "polities",
     "settlement_id": "settlements", "folk_id": "folks",
     "faith_id": "faiths", "house_id": "houses", "race_id": "",
+    "temple_id": "temples", "law_id": "laws",
 }
 
 
@@ -480,7 +476,13 @@ def _clean_links(world, links: dict) -> dict:
 def _already(world) -> set:
     """Что мир уже поминает: второй день на то же событие не заводят.
 
-    Считается только повод (`about`), а не вся родня: иначе праздник
+    Событие — это не лицо и не повод врознь, а их пара. Одного лица мало:
+    венчание государя и его смерть — два разных дня об одном человеке, и
+    мир вправе держать оба. Одного повода мало тоже: храмов у одной веры
+    много, и день каждого — свой. Поэтому ключ тройной: к чему привязан
+    день, что это за привязка и из какого повода он вырос.
+
+    В счёт идёт только повод (`about`), а не вся родня: иначе праздник
     находки закрывал бы дорогу празднику той беды, от которой след
     остался, — а это два разных дня о двух разных вещах.
     """
@@ -490,7 +492,7 @@ def _already(world) -> set:
             continue
         value = getattr(holiday, holiday.about, "")
         if value:
-            out.add((holiday.about, value))
+            out.add((holiday.about, value, holiday.origin))
     return out
 
 

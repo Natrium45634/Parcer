@@ -2410,6 +2410,8 @@ class Holiday:
     guild_id: str = ""
     house_id: str = ""
     race_id: str = ""
+    temple_id: str = ""
+    law_id: str = ""
 
     # --- календарь -------------------------------------------------------
     month: int = 0
