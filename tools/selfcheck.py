@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import sys
 import tempfile
 import time
@@ -626,8 +627,16 @@ def check_land(world, seed: str) -> list:
     water = next((i for i in range(size) if wmap.is_ocean(i)), -1)
     look = [index for index in (busy, empty, water, 0, size - 1) if index >= 0]
 
-    latin = set("abcdefghijklmnopqrstuvwxyz"
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    # Римское число в имени государя — это по-русски: «Пётр I»,
+    # «Людовик XIV». Поэтому латиница ищется не по буквам, а по словам:
+    # слово из одних только IVXLCDM — число, всё прочее — чужой язык.
+    roman = set("IVXLCDM")
+
+    def alien(text: str) -> str:
+        for word in re.findall("[A-Za-z]+", text):
+            if not set(word) <= roman:
+                return word
+        return ""
     for index in look:
         try:
             page = landlore.blocks(world, index, total)
@@ -640,11 +649,10 @@ def check_land(world, seed: str) -> list:
             problems.append("сид «%s»: у страницы гекса %d метка не из "
                             "списка: %s" % (seed, index, sorted(tags)))
             break
-        text = " ".join(line for _tag, line in page)
-        wrong = sorted(set(text) & latin)
+        wrong = alien(" ".join(line for _tag, line in page))
         if wrong:
-            problems.append("сид «%s»: в странице гекса %d латиница: %s"
-                            % (seed, index, "".join(wrong)))
+            problems.append("сид «%s»: в странице гекса %d чужое слово: "
+                            "«%s»" % (seed, index, wrong))
             break
 
         # Летопись места: по порядку, в пределах истории, без повторов.

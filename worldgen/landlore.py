@@ -549,11 +549,14 @@ def standing(world, index: int, year: int = 0) -> list:
 
 # Потолок каждого вида следа. Без потолков вес на долгой истории
 # рассыпается: за десять тысяч лет на одном гексе сменяется восемь
-# городов, и одни их годы дают сотню. Мерено на Ясене-7: без потолков
-# самое весомое место весило 496, а «мест, повернувших историю» выходило
-# сорок шесть из ста двадцати — то есть приговор ничего уже не значил.
-# С потолками больше сорока восьми не выходит ни у кого, и верхний
-# приговор означает «почти все виды следа разом».
+# городов, и одни их годы дают сотню. Мерено на двух мирах по десять
+# тысяч лет: без потолков самое весомое место весило 496 на Ясене-7 и
+# 371 на Первом мире, а «мест, повернувших историю» выходило сорок шесть
+# и пятьдесят одно из ста двадцати — то есть верхний приговор не означал
+# уже ничего.
+# С потолками самое весомое место того же мира весит 31.6, а верхнего
+# приговора удостаиваются семь мест из шестисот сорока трёх занятых —
+# то есть единицы, как и задумано.
 #
 # Потолок не делает долгую историю равной короткой: место, где восемь
 # веков стоял город, досчитывает свой потолок и останавливается, а место
@@ -570,6 +573,21 @@ CAP_WOES = 2.0             # беды, прошедшие по этой земл
 CAP_STORIES = 4.0          # были, выросшие отсюда
 CAP_MARKS = 3.0            # то, что отметила сама карта: логово, вулкан
 WEIGHT_SCAR = 7.0          # шрам творения — самое тяжёлое, и он один
+
+
+def _soft(value: float, cap: float) -> float:
+    """Подход к потолку, а не упор в него.
+
+    Простое `min(cap, value)` рубит слишком грубо: на десятитысячелетнем
+    мире в потолок упирается сразу десяток мест, они становятся
+    неразличимы, и «самое весомое место мира» выбирается уже не по делам,
+    а по номеру гекса. Эта же дробь растёт всегда — лишняя битва и
+    лишний век прибавляют, но всё меньше и меньше, — и потолка не
+    переходит никогда.
+    """
+    if value <= 0:
+        return 0.0
+    return cap * value / (value + cap)
 
 # Девять мест из десяти — это место, где не случилось ничего. Если
 # значимым объявить каждый камень, значимого в мире не останется.
@@ -616,7 +634,9 @@ def weight(world, index: int) -> tuple:
         if item.peak_population >= 20000:
             crowd += CAP_CROWD
             why.append("в лучшие годы тут жило %d душ" % item.peak_population)
-    score += min(CAP_TOWN_YEARS, town_years)
+    score += _soft(town_years, CAP_TOWN_YEARS)
+    # Столичность и людность — не счёт, а признак: одна столица или три,
+    # дело одно. Поэтому тут не подход к потолку, а сам потолок.
     score += min(CAP_CAPITAL, capital)
     score += min(CAP_CROWD, crowd)
 
@@ -625,7 +645,7 @@ def weight(world, index: int) -> tuple:
     battles = sum(1 for row in world.battles.values()
                   if row.settlement_id in here)
     if battles:
-        score += min(CAP_BATTLES, 1.6 * battles)
+        score += _soft(1.6 * battles, CAP_BATTLES)
         why.append("тут билось войско, и не раз: битв %d" % battles)
 
     # --- места истории и крепости --------------------------------------
@@ -633,9 +653,9 @@ def weight(world, index: int) -> tuple:
     for item in found["sites"]:
         sites_add += 2.2 if getattr(item, "riches", 0) else 1.4
         why.append("%s по имени %s" % (item.kind, item.name))
-    score += min(CAP_SITES, sites_add)
+    score += _soft(sites_add, CAP_SITES)
     if found["fortresses"]:
-        score += min(CAP_FORTS, 1.2 * len(found["fortresses"]))
+        score += _soft(1.2 * len(found["fortresses"]), CAP_FORTS)
         why.append("тут держали крепость")
 
     # Шрам творения — самое тяжёлое, что может лежать в гексе: он старше
@@ -660,7 +680,7 @@ def weight(world, index: int) -> tuple:
         hits = sum(1 for row in world.calamities.values()
                    if region.id in (row.region_ids or ()))
         if hits:
-            score += min(CAP_WOES, 0.25 * hits)
+            score += _soft(0.25 * hits, CAP_WOES)
             why.append("по этой земле прошло %s"
                        % plural(hits, "%d бедствие" % hits,
                                 "%d бедствия" % hits,
@@ -670,7 +690,7 @@ def weight(world, index: int) -> tuple:
     for item in found["settlements"] + found["sites"]:
         told += len(world.stories_at(item.id))
     if told:
-        score += min(CAP_STORIES, 1.3 * told)
+        score += _soft(1.3 * told, CAP_STORIES)
         why.append("былей отсюда выросло: %d" % told)
 
     marks = 0.0
@@ -683,7 +703,7 @@ def weight(world, index: int) -> tuple:
             why.append(line)
         elif line.startswith("вершина"):
             marks += 0.8
-    score += min(CAP_MARKS, marks)
+    score += _soft(marks, CAP_MARKS)
 
     return round(score, 1), _pick(WEIGHT_WORDS, score), why
 
