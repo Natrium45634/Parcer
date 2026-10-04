@@ -22,12 +22,17 @@
 
 **Летопись места.** Всё, что в этом гексе случилось, по годам: от
 основания города до того, как его оставили, от битвы до раскопанной
-могилы.
+могилы. Летопись мира и реестры мира знают об одном и том же, и строка
+тут не повторяется: где о факте сказала летопись, реестр молчит.
 
 Текст собирается по сиду мира и номеру гекса: один и тот же гекс читается
 одинаково, сколько бы раз его ни открывали, — но два похожих гекса
 описаны разными словами. Своего ГСЧ у мира это не трогает: поток тут
-отдельный и к порядку мировых броском отношения не имеет.
+отдельный и к порядку мировых бросков отношения не имеет.
+
+Считается всё на лету и только по запросу. Держать страницу в памяти
+незачем: гексов на большой карте полтораста тысяч, и открывают из них по
+одному.
 """
 
 from __future__ import annotations
@@ -542,6 +547,30 @@ def standing(world, index: int, year: int = 0) -> list:
 # Вес места в истории
 # ---------------------------------------------------------------------------
 
+# Потолок каждого вида следа. Без потолков вес на долгой истории
+# рассыпается: за десять тысяч лет на одном гексе сменяется восемь
+# городов, и одни их годы дают сотню. Мерено на Ясене-7: без потолков
+# самое весомое место весило 496, а «мест, повернувших историю» выходило
+# сорок шесть из ста двадцати — то есть приговор ничего уже не значил.
+# С потолками больше сорока восьми не выходит ни у кого, и верхний
+# приговор означает «почти все виды следа разом».
+#
+# Потолок не делает долгую историю равной короткой: место, где восемь
+# веков стоял город, досчитывает свой потолок и останавливается, а место
+# с одним хутором не досчитывает. Разница между ними остаётся; исчезает
+# только разница между «очень много» и «ещё больше», которой человек
+# всё равно не чувствует.
+CAP_TOWN_YEARS = 12.0      # сколько весят годы всех городов этого места
+CAP_CAPITAL = 4.0          # столичность, сколько бы столиц тут ни было
+CAP_CROWD = 2.0            # людность в лучшие годы
+CAP_BATTLES = 6.0          # битвы
+CAP_SITES = 5.0            # места истории
+CAP_FORTS = 3.0            # крепости
+CAP_WOES = 2.0             # беды, прошедшие по этой земле
+CAP_STORIES = 4.0          # были, выросшие отсюда
+CAP_MARKS = 3.0            # то, что отметила сама карта: логово, вулкан
+WEIGHT_SCAR = 7.0          # шрам творения — самое тяжёлое, и он один
+
 # Девять мест из десяти — это место, где не случилось ничего. Если
 # значимым объявить каждый камень, значимого в мире не останется.
 WEIGHT_WORDS = (
@@ -567,14 +596,17 @@ def weight(world, index: int) -> tuple:
     found = _anchors(world, index)
     total = max(1, getattr(world, "total_years", 1))
 
+    # --- годы городов, столичность, людность ---------------------------
+    town_years = 0.0
+    capital = 0.0
+    crowd = 0.0
     for item in found["settlements"]:
         begin = item.founded.year if item.founded else 1
         end = item.ended.year if item.ended else total
         years = max(0, end - begin)
-        add = min(9.0, years / 400.0)
-        score += add
+        town_years += years / 400.0
         if item.is_capital:
-            score += 4.0
+            capital += CAP_CAPITAL
             why.append("тут стояла столица — %s" % item.full_name)
         elif years:
             why.append("город по имени %s стоял тут %s"
@@ -582,22 +614,28 @@ def weight(world, index: int) -> tuple:
                                             "%d года" % years,
                                             "%d лет" % years)))
         if item.peak_population >= 20000:
-            score += 2.0
+            crowd += CAP_CROWD
             why.append("в лучшие годы тут жило %d душ" % item.peak_population)
+    score += min(CAP_TOWN_YEARS, town_years)
+    score += min(CAP_CAPITAL, capital)
+    score += min(CAP_CROWD, crowd)
 
-    battles = [row for row in world.battles.values()
-               if row.settlement_id and any(
-                   row.settlement_id == item.id
-                   for item in found["settlements"])]
+    # --- битвы ---------------------------------------------------------
+    here = {item.id for item in found["settlements"]}
+    battles = sum(1 for row in world.battles.values()
+                  if row.settlement_id in here)
     if battles:
-        score += min(6.0, 1.6 * len(battles))
-        why.append("тут билось войско, и не раз: битв %d" % len(battles))
+        score += min(CAP_BATTLES, 1.6 * battles)
+        why.append("тут билось войско, и не раз: битв %d" % battles)
 
+    # --- места истории и крепости --------------------------------------
+    sites_add = 0.0
     for item in found["sites"]:
-        score += 2.2 if getattr(item, "riches", 0) else 1.4
+        sites_add += 2.2 if getattr(item, "riches", 0) else 1.4
         why.append("%s по имени %s" % (item.kind, item.name))
-    score += 1.2 * len(found["fortresses"])
+    score += min(CAP_SITES, sites_add)
     if found["fortresses"]:
+        score += min(CAP_FORTS, 1.2 * len(found["fortresses"]))
         why.append("тут держали крепость")
 
     # Шрам творения — самое тяжёлое, что может лежать в гексе: он старше
@@ -607,7 +645,7 @@ def weight(world, index: int) -> tuple:
         site_ids = {item.id for item in found["sites"]}
         for row in origin.scars:
             if row.get("место") and row["место"] in site_ids:
-                score += 7.0
+                score += WEIGHT_SCAR
                 why.append("тут лежит шрам самого творения: %s"
                            % row.get("имя", ""))
 
@@ -622,7 +660,7 @@ def weight(world, index: int) -> tuple:
         hits = sum(1 for row in world.calamities.values()
                    if region.id in (row.region_ids or ()))
         if hits:
-            score += min(2.0, 0.25 * hits)
+            score += min(CAP_WOES, 0.25 * hits)
             why.append("по этой земле прошло %s"
                        % plural(hits, "%d бедствие" % hits,
                                 "%d бедствия" % hits,
@@ -632,18 +670,20 @@ def weight(world, index: int) -> tuple:
     for item in found["settlements"] + found["sites"]:
         told += len(world.stories_at(item.id))
     if told:
-        score += min(4.0, 1.3 * told)
+        score += min(CAP_STORIES, 1.3 * told)
         why.append("былей отсюда выросло: %d" % told)
 
+    marks = 0.0
     for line in features(world, index):
         if line.startswith("логово"):
-            score += 2.0
+            marks += 2.0
             why.append(line)
         elif line.startswith("вулкан"):
-            score += 1.4
+            marks += 1.4
             why.append(line)
         elif line.startswith("вершина"):
-            score += 0.8
+            marks += 0.8
+    score += min(CAP_MARKS, marks)
 
     return round(score, 1), _pick(WEIGHT_WORDS, score), why
 
@@ -949,7 +989,18 @@ def blocks(world, index: int, year: int = 0) -> list:
     if not told:
         out.append(("line", "  Ничего, о чём осталась бы запись."))
     else:
+        # Века названы вехами. У места с долгой историей записей бывает
+        # две тысячи, и без вех это стена строк, по которой не найти, где
+        # кончилось одно время и началось другое.
+        era = None
         for year_of, _kind, line in told:
+            now = (year_of - 1) // 100
+            if now != era:
+                era = now
+                if out[-1][1] != "":
+                    out.append(("line", ""))
+                out.append(("dim", "  %d–%d годы"
+                            % (now * 100 + 1, now * 100 + 100)))
             out.append(("dated", "  %6d  %s" % (year_of, line)))
     out.append(("line", ""))
 
