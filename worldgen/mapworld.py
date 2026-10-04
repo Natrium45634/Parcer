@@ -478,3 +478,62 @@ def homeland_score(link, race) -> float:
                 value *= 1.4
             best = max(best, value)
     return best
+
+
+# ---------------------------------------------------------------------------
+# Возврат карты открытому миру
+# ---------------------------------------------------------------------------
+
+def reattach(world) -> bool:
+    """Вернуть карту миру, поднятому из файла.
+
+    В файле мира самой карты нет: в нём лежит путь к `.world` (или
+    настройки, по которым карта делалась) и гексы каждой земли. Поэтому
+    открытый мир до сих пор оставался без карты — раздел с картой был
+    пуст, хотя всё, что нужно для него, в файле есть.
+
+    Земли заново не режутся. Их границы уже сохранены гексами, и резать
+    второй раз значило бы получить другие земли под теми же именами.
+    Берётся только сама карта и то, какой гекс к какой земле причтён;
+    выбирать места тут больше некому — мир дописан.
+
+    Возвращает, удалось ли: файл карты мог и переехать.
+    """
+    if getattr(world, "map_link", None) is not None:
+        return True
+    wmap = None
+    made = (world.settings or {}).get("map_make") or {}
+    if made:
+        # Своя карта считается заново по сиду и ползункам: Worldforge
+        # детерминирован, и выходит ровно та же карта, гекс в гекс.
+        from . import worldforge
+        options = dict(made)
+        seed = str(options.pop("seed", "") or world.seed_text)
+        try:
+            wmap = worldforge.forge(seed, **options)
+        except Exception:
+            return False
+    else:
+        import os
+        path = getattr(world, "map_source", "") or ""
+        if not path or not os.path.exists(path):
+            return False
+        try:
+            wmap = wm.load(path)
+        except Exception:
+            return False
+    if wmap is None:
+        return False
+    link = MapLink(wmap, getattr(world, "map_source", "") or "")
+    for region in world.regions.values():
+        for index in (region.hexes or ()):
+            link.region_of_hex[index] = region.id
+    # Занятость — по живым поселениям: мёртвые гекс не держат.
+    for item in world.settlements.values():
+        if item.hex_index < 0 or item.ended is not None:
+            continue
+        link.hex_owner[item.hex_index] = item.id
+        link.owner_hex[item.id] = item.hex_index
+        link.blocked[item.hex_index] = link.blocked.get(item.hex_index, 0) + 1
+    world.map_link = link
+    return bool(link.region_of_hex)

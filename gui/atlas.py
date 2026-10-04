@@ -32,6 +32,7 @@ import math
 import tkinter as tk
 from tkinter import ttk
 
+from worldgen import landlore
 from worldgen import worldmap as wm
 from worldgen.mapregions import FEATURE_NOUNS, translit
 from worldgen.worldforge import BIOME_COLORS, BIOME_NAMES
@@ -109,6 +110,12 @@ RELIEF_LAND = ((50, (168, 200, 110)), (200, (138, 185, 88)),
                (500, (199, 184, 106)), (1000, (181, 155, 90)),
                (2000, (165, 115, 70)), (3500, (140, 88, 52)),
                (5000, (110, 68, 38)), (99999, (232, 226, 218)))
+
+
+# Подписи кнопки подробностей: один и тот же текст нужен в двух местах,
+# и расходиться им нельзя.
+DEEP_SHOW = "Подробнее ▾"
+DEEP_HIDE = "Короче ▴"
 
 
 def _rgb(text: str) -> bytes:
@@ -189,12 +196,16 @@ def _decode_rle(flat) -> list:
 class Atlas(ttk.Frame):
     """Карта мира со всеми слоями, значками и карточкой гекса."""
 
-    def __init__(self, master, fonts=None, on_history=None):
+    def __init__(self, master, fonts=None, on_history=None, on_land=None):
         ttk.Frame.__init__(self, master)
         self.fonts = fonts or {}
         # Обратная дорога: с карты — в «Историю мира», к записям об этой
         # земле. Прямая (из истории на карту) уже есть.
         self.on_history = on_history
+        # И вторая обратная дорога: с гекса — на полную страницу места.
+        # В карточку шириной в ладонь вся история гекса не влезает, а
+        # читать её в столбик по тридцать знаков — мука.
+        self.on_land = on_land
         self.world = None
         self.wmap = None
 
@@ -244,6 +255,10 @@ class Atlas(ttk.Frame):
         self.note_var = tk.StringVar(value="")
         self.hover_var = tk.StringVar(value="")
         self._hover_at = -1
+        # Числа слоёв — не первое, что человек хочет видеть, щёлкнув по
+        # гексу: сперва он спрашивает, что это за место и что тут было.
+        # Поэтому подробности спрятаны под кнопку и по умолчанию закрыты.
+        self.deep_open = False
 
         self._build()
 
@@ -333,10 +348,20 @@ class Atlas(ttk.Frame):
         side.pack_propagate(False)
         ttk.Label(side, textvariable=self.note_var, anchor="w",
                   wraplength=330).pack(fill="x", pady=(0, 4))
-        self.to_history = ttk.Button(side, text="Эта земля в истории",
+        # Главная кнопка — во всю ширину: с неё человек уходит на полную
+        # страницу места.
+        self.to_land = ttk.Button(side, text="Полные данные о месте",
+                                  command=self.ask_land, state="disabled")
+        self.to_land.pack(fill="x", pady=(0, 3))
+        row = ttk.Frame(side)
+        row.pack(fill="x", pady=(0, 4))
+        self.to_deep = ttk.Button(row, text=DEEP_SHOW,
+                                  command=self.toggle_deep, state="disabled")
+        self.to_deep.pack(side="left", fill="x", expand=True)
+        self.to_history = ttk.Button(row, text="Земля в истории",
                                      command=self.ask_history,
                                      state="disabled")
-        self.to_history.pack(fill="x", pady=(0, 4))
+        self.to_history.pack(side="left", fill="x", expand=True, padx=(3, 0))
         holder = ttk.Frame(side)
         holder.pack(fill="both", expand=True)
         bar = ttk.Scrollbar(holder, orient="vertical")
@@ -350,6 +375,7 @@ class Atlas(ttk.Frame):
         self.card.tag_configure("head", foreground="#c6a14a",
                                 font=self.fonts.get("ui"))
         self._blank_card()
+        self._dim_buttons()
 
     def _place_sash(self, _event=None) -> None:
         """Карточке — правый край шириной в ладонь; дальше перегородкой
@@ -399,6 +425,7 @@ class Atlas(ttk.Frame):
         self._features = None
         self._picked = -1
         self._blank_card()
+        self._dim_buttons()
         if self.wmap is None:
             if getattr(world, "map_source", ""):
                 self.note_var.set(
@@ -428,6 +455,11 @@ class Atlas(ttk.Frame):
                           % (self.wmap.width, self.wmap.height))
         self.fit()
 
+    def _dim_buttons(self) -> None:
+        """Пока гекс не выбран, кнопкам нечего открывать."""
+        for button in (self.to_land, self.to_deep, self.to_history):
+            button.config(state="disabled")
+
     def clear(self) -> None:
         self.world = None
         self.wmap = None
@@ -439,6 +471,7 @@ class Atlas(ttk.Frame):
         self.legend.delete("all")
         self.note_var.set("")
         self._blank_card()
+        self._dim_buttons()
 
     def _forget_pictures(self) -> None:
         self._tint = None
@@ -1629,35 +1662,75 @@ class Atlas(ttk.Frame):
     def _blank_card(self) -> None:
         self.card.config(state="normal")
         self.card.delete("1.0", "end")
-        self.card.insert("1.0", "Щёлкните по гексу — и здесь будет всё, что "
-                                "о нём известно: земля, климат, недра, "
-                                "и вся его история на выбранный год.")
+        self.card.insert("1.0", "Щёлкните по гексу — и здесь будет то, что "
+                                "о нём известно: что это за земля, что на "
+                                "ней стоит и что на ней было в выбранный "
+                                "год.\n\n«Подробнее» добавит числа слоёв, "
+                                "недра и нрав округи. «Полные данные» "
+                                "откроют раздел «Земля»: там это же место "
+                                "расписано прозой и по годам.")
         self.card.config(state="disabled")
 
     def describe(self, index: int) -> None:
-        """Всё, что известно про этот гекс — человеческим языком."""
+        """Всё, что известно про этот гекс — человеческим языком.
+
+        Главное идёт сразу: что это за место, что на нём стоит и что тут
+        было в выбранный год. Числа слоёв, недра и нрав округи лежат под
+        кнопкой: их спрашивают не всякий раз, а занимают они больше, чем
+        всё остальное вместе.
+        """
         wmap, world = self.wmap, self.world
         if wmap is None or world is None:
             return
         lines = []
         lines.extend(self._card_land(index))
-        lines.extend(self._card_nature(index))
         lines.extend(self._card_here(index))
         lines.extend(self._card_history(index))
+        deep_at = len(lines)
+        if self.deep_open:
+            lines.extend(self._card_deep(index))
+            lines.extend(self._card_nature(index))
         self.card.config(state="normal")
         self.card.delete("1.0", "end")
-        for line in lines:
+        for number, line in enumerate(lines):
+            if number == deep_at:
+                # Метка на начало подробностей: открыв их, человек должен
+                # увидеть именно их, а не прокручивать всю карточку.
+                self.card.mark_set("deep", "end-1c")
+                self.card.mark_gravity("deep", "left")
             if line.startswith("## "):
                 self.card.insert("end", line[3:] + "\n", "head")
             else:
                 self.card.insert("end", line + "\n")
         self.card.config(state="disabled")
-        self.card.see("1.0")
+        self.card.see("deep" if self.deep_open else "1.0")
         link = getattr(self.world, "map_link", None)
         has_land = bool((getattr(link, "region_of_hex", {}) or {}).get(index))
         self.to_history.config(
             state="normal" if (self.on_history is not None and has_land)
             else "disabled")
+        self.to_land.config(
+            state="normal" if self.on_land is not None else "disabled")
+        self.to_deep.config(state="normal",
+                            text=DEEP_HIDE if self.deep_open else DEEP_SHOW)
+
+    def toggle_deep(self) -> None:
+        """Открыть или закрыть подробности — числа слоёв, недра, округу."""
+        self.deep_open = not self.deep_open
+        self.to_deep.config(text=DEEP_HIDE if self.deep_open else DEEP_SHOW)
+        if self._picked >= 0:
+            self.describe(self._picked)
+
+    def ask_land(self) -> None:
+        """С гекса — на его полную страницу в разделе «Земля».
+
+        В карточке шириной в ладонь летопись места не читается: там на
+        строку приходится тридцать знаков, а в летописи иного гекса
+        полторы сотни строк.
+        """
+        if self.on_land is None or self._picked < 0 or self.world is None:
+            return
+        self.on_land(self._picked, self._year_now())
 
     def _card_land(self, index: int) -> list:
         """Первое, что нужно знать о месте: что это за земля."""
@@ -1672,18 +1745,13 @@ class Atlas(ttk.Frame):
                  "высота ......... %d м" % round(wmap.elevation_m(index))]
         temp = wmap.layer(wm.L_TEMP)
         if temp is not None:
-            # Лето и зима считаются из средней и широты — так же, как их
-            # считает карта: чем дальше от равнины экватора, тем больше
-            # разброс.
-            lat = abs(wmap.latitude(index))
-            swing = 4.0 + 26.0 * lat
-            lines.append("тепло .......... %+.1f °C в среднем, "
-                         "лето %+.0f, зима %+.0f"
-                         % (temp[index], temp[index] + swing / 2.0,
-                            temp[index] - swing / 2.0))
-        moist = wmap.layer(wm.L_MOIST)
-        if moist is not None:
-            lines.append("влага .......... %d %%" % round(moist[index] * 100))
+            lines.append("тепло .......... %+.1f °C в среднем" % temp[index])
+        if wmap.is_land(index):
+            # Главный ответ на главный вопрос: можно ли тут жить. Слово
+            # берётся у landlore, чтобы карточка и полная страница не
+            # говорили об одном месте разное.
+            lines.append("житьё .......... %s"
+                         % landlore.live_word(wmap, index))
         water = []
         if wmap.is_ocean(index):
             water.append("океан")
@@ -1698,6 +1766,26 @@ class Atlas(ttk.Frame):
             water.append("берег")
         if water:
             lines.append("вода ........... %s" % ", ".join(water))
+        return lines
+
+    def _card_deep(self, index: int) -> list:
+        """Числа, которые нужны не всякий раз: широта, лето с зимой, плита."""
+        wmap = self.wmap
+        lines = ["", "## ПОДРОБНО О ЗЕМЛЕ"]
+        lat = abs(wmap.latitude(index))
+        temp = wmap.layer(wm.L_TEMP)
+        if temp is not None:
+            # Лето и зима считаются из средней и широты — так же, как их
+            # считает карта: чем дальше от равнины экватора, тем больше
+            # разброс.
+            swing = 4.0 + 26.0 * lat
+            lines.append("лето и зима .... %+.0f и %+.0f"
+                         % (temp[index] + swing / 2.0,
+                            temp[index] - swing / 2.0))
+        lines.append("широта ......... %.2f" % lat)
+        moist = wmap.layer(wm.L_MOIST)
+        if moist is not None:
+            lines.append("влага .......... %d %%" % round(moist[index] * 100))
         plate = wmap.layer(wm.L_PLATE)
         stress = wmap.layer(wm.L_STRESS)
         if plate is not None:
@@ -1854,9 +1942,14 @@ class Atlas(ttk.Frame):
             owner = self._names.get(slots[index])
         lines.append("   землёй владела: %s" % (owner or "ничья земля"))
 
-        for item in world.settlements.values():
-            if item.hex_index != index:
-                continue
+        # Живое впереди мёртвого: человек спрашивает прежде всего, что
+        # тут есть сейчас, а уж потом — что было до этого.
+        here = [item for item in world.settlements.values()
+                if item.hex_index == index]
+        here.sort(key=lambda item: (
+            0 if _alive_at(item.founded, item.ended, year) else 1,
+            len(item.id), item.id))
+        for item in here:
             if _alive_at(item.founded, item.ended, year):
                 polity = world.polities.get(item.polity_id)
                 lines.append("   %s — %d жителей%s"
@@ -1865,8 +1958,13 @@ class Atlas(ttk.Frame):
                 if polity is not None:
                     lines.append("   держава: %s" % polity.full_name)
             elif item.ended is not None and item.ended.year < year:
-                lines.append("   %s — покинут в %d году (%s)"
-                             % (item.full_name, item.ended.year,
+                lines.append("   %s — %s в %d году (%s)"
+                             % (item.full_name,
+                                landlore.agree(
+                                    landlore.gender_of(item.word),
+                                    ("покинут", "покинута", "покинуто",
+                                     "покинуты")),
+                                item.ended.year,
                                 item.end_reason or "причина не названа"))
         for fortress in world.fortresses.values():
             if getattr(fortress, "hex_index", -1) != index:

@@ -15,10 +15,11 @@ from tkinter import filedialog, messagebox, ttk
 from gui.atlas import Atlas
 from gui.errors import human_error
 from gui.history import HistoryTab
+from gui.land import LandTab
 from gui.sidetabs import SideTabs
 from gui import wizard as wizard_mod
 from gui.wizard import Wizard
-from worldgen import chronicle, storage
+from worldgen import chronicle, mapworld, storage
 from worldgen.engine import GenerationCancelled, generate
 from worldgen.models import ACTIVE
 from worldgen.races import RACES, RACES_BY_ID, get_race
@@ -419,6 +420,7 @@ class ChronicleApp(tk.Tk):
 
         self._build_chronicle_tab()
         self._build_map_tab()
+        self._build_land_tab()
         self._build_timeline_tab()
         self._build_history_tab()
         self.eras_text = self._add_text_tab("Эпохи")
@@ -592,13 +594,57 @@ class ChronicleApp(tk.Tk):
         """
         self.atlas = Atlas(self.tabs, fonts={"ui": self.ui_font,
                                              "mono": self.mono},
-                           on_history=self.show_in_history)
+                           on_history=self.show_in_history,
+                           on_land=self.show_land)
         self.tabs.add(self.atlas, text="Карта мира")
         self._fillers[str(self.atlas)] = self._fill_atlas
 
     def _fill_atlas(self) -> None:
         if self.world is not None:
             self.atlas.show(self.world)
+
+    def _build_land_tab(self) -> None:
+        """Земля: одно место мира целиком.
+
+        Карта отвечает на вопрос «где», карточка гекса — «что тут», но на
+        вопрос «что тут было за всю историю» не отвечает ни одна: в
+        карточке на строку приходится тридцать знаков. Этот раздел и есть
+        ответ: всё об одном месте прозой и по годам.
+        """
+        self.land = LandTab(self.tabs, fonts={"ui": self.ui_font,
+                                              "mono": self.mono,
+                                              "head": self.head_font},
+                            on_map=self.show_hex_on_map)
+        self.tabs.add(self.land, text="Земля")
+        self._fillers[str(self.land)] = self._fill_land
+
+    def _fill_land(self) -> None:
+        if self.world is not None:
+            self.land.set_world(self.world)
+
+    def show_land(self, hex_index: int, year: int) -> None:
+        """С карты — в «Землю»: полная страница этого самого гекса."""
+        if self.world is None:
+            return
+        titles = list(self.tabs._titles)
+        if "Земля" not in titles:
+            return
+        self.tabs.select(titles.index("Земля"))
+        self.update_idletasks()
+        self._on_tab_changed()
+        self.land.show_hex(hex_index, year)
+
+    def show_hex_on_map(self, hex_index: int, year: int) -> None:
+        """И обратно: из «Земли» на карту, к тому же гексу и году."""
+        if self.world is None:
+            return
+        titles = list(self.tabs._titles)
+        if "Карта мира" not in titles:
+            return
+        self.tabs.select(titles.index("Карта мира"))
+        self.update_idletasks()
+        self._on_tab_changed()
+        self.atlas.look_at(year=year, hex_index=hex_index)
 
     def _build_history_tab(self) -> None:
         """История мира: отбор по летописи вместо блуждания по разделам.
@@ -1088,6 +1134,8 @@ class ChronicleApp(tk.Tk):
             self.atlas.clear()     # чтобы не осталась карта прошлого мира
         if getattr(self, "history", None) is not None:
             self.history.world = None
+        if getattr(self, "land", None) is not None:
+            self.land.clear()      # и страница места прошлого мира тоже
         self._fill_figure_picks()   # в списках выбора — только то, что в мире есть
         self.refresh_chronicle()
         self._set_text(self.eras_text, chronicle.render_eras(world))
@@ -2019,6 +2067,13 @@ class ChronicleApp(tk.Tk):
         if source and os.path.exists(source):
             self.wizard.map_path = source
             self.wizard.set_map_mode(wizard_mod.MAP_FILE)
+        # И сама карта возвращается миру. Без этого открытый мир оставался
+        # без карты: гексы земель в файле есть, а гексовой основы под ними
+        # нет, и разделы «Карта мира» и «Земля» выходили пустыми.
+        if not mapworld.reattach(self.world):
+            self.status_var.set("Мир открыт, но карту к нему вернуть не "
+                                "удалось: файл карты не найден. Летопись "
+                                "читается, карта — нет.")
         self._fill_all()
         self.show_viewer()
 

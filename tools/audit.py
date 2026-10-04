@@ -1098,6 +1098,104 @@ def m_or_unknown(world):
     return len(origin.unknown) if origin is not None else None
 
 
+# ---------------------------------------------------------------------------
+# Земля: вес мест
+# ---------------------------------------------------------------------------
+
+# Сколько гексов брать на пробу. Весь мир перебирать нельзя: вес одного
+# места считается по всем битвам и всем бедам мира, и полтораста тысяч
+# гексов обошлись бы в часы. Двести с лишним гексов вразбивку говорят о
+# доле ровно то же, что весь мир.
+LAND_SAMPLE = 220
+
+# Сколько заметных мест взвешивать полным весом.
+LAND_TOP = 120
+
+
+def _land_scores(world):
+    """Вес проб: (гексы вразбивку, заметные места). Считается один раз."""
+    found = getattr(world, "_audit_land", None)
+    if found is not None:
+        return found
+    from worldgen import landlore
+    link = getattr(world, "map_link", None)
+    wmap = getattr(link, "wmap", None) if link is not None else None
+    if wmap is None:
+        world._audit_land = ((), ())
+        return world._audit_land
+    size = wmap.width * wmap.height
+    land = [index for index in range(size) if wmap.is_land(index)]
+    step = max(1, len(land) // LAND_SAMPLE)
+    spread = [landlore.weight(world, index) for index in land[::step]]
+    top = [landlore.weight(world, index)
+           for index, _said in landlore.notable(world, LAND_TOP)]
+    world._audit_land = (tuple(spread), tuple(top))
+    return world._audit_land
+
+
+def m_land_dull(world):
+    """Доля мест, о которых нечего сказать."""
+    spread, _top = _land_scores(world)
+    if not spread:
+        return None
+    from worldgen.landlore import WEIGHT_WORDS
+    dull = WEIGHT_WORDS[-1][1]
+    return sum(1 for _score, verdict, _why in spread
+               if verdict == dull) / float(len(spread))
+
+
+def m_land_pivot(world):
+    """Сколько мест, вокруг которых повернулась история."""
+    _spread, top = _land_scores(world)
+    if not top:
+        return None
+    from worldgen.landlore import WEIGHT_WORDS
+    edge = WEIGHT_WORDS[0][0]
+    return sum(1 for score, _verdict, _why in top if score >= edge)
+
+
+def m_land_voices(world):
+    """Сколько разных приговоров о весе в ходу."""
+    spread, top = _land_scores(world)
+    if not spread and not top:
+        return None
+    return len({verdict for _score, verdict, _why in tuple(spread) + tuple(top)})
+
+
+def m_land_reasons(world):
+    """Доля весомых мест, у которых вес объяснён делом."""
+    spread, top = _land_scores(world)
+    rows = [row for row in tuple(spread) + tuple(top) if row[0] > 0]
+    if not rows:
+        return None
+    return sum(1 for _score, _verdict, why in rows if why) / float(len(rows))
+
+
+def m_land_told(world):
+    """Сколько записей в летописи самого весомого места."""
+    from worldgen import landlore
+    best = landlore.best_hex(world)
+    if best < 0:
+        return None
+    return len(landlore.timeline(world, best))
+
+
+def m_land_words(world):
+    """Сколько строк об условиях у самого скудного места пробы."""
+    from worldgen import landlore
+    link = getattr(world, "map_link", None)
+    wmap = getattr(link, "wmap", None) if link is not None else None
+    if wmap is None:
+        return None
+    size = wmap.width * wmap.height
+    land = [index for index in range(size) if wmap.is_land(index)]
+    if not land:
+        return None
+    step = max(1, len(land) // 40)
+    return min(len(landlore.conditions(world, index))
+               for index in land[::step])
+
+
 MEASURES = (
     Measure("были", "не про судьбу мира", m_story_small, 0.82, 0.98,
             "доля", "девять из десяти былей не спасают мир"),
@@ -1363,6 +1461,20 @@ MEASURES = (
     Measure("мир", "летописей в одну запись", m_thin_codices, None, 0.2,
             "доля", "свод начинают с того, что город ещё помнит",
             min_years=3000),
+    Measure("земля", "мест, о которых нечего сказать", m_land_dull, 0.6,
+            None, "доля",
+            "если весомо всякое место, то весомого в мире нет"),
+    Measure("земля", "мест, повернувших историю", m_land_pivot, 1, 30,
+            "штук", "таких мест единицы, но они есть", min_years=3000),
+    Measure("земля", "приговоров о весе в ходу", m_land_voices, 3, None,
+            "из 5", "мера веса различает места, а не делит их надвое"),
+    Measure("земля", "вес объяснён делом", m_land_reasons, 1.0, None,
+            "доля", "число без названной причины — вес по приговору, а не "
+            "по делам"),
+    Measure("земля", "записей о самом весомом месте", m_land_told, 5, None,
+            "штук", "у весомого места есть что рассказать"),
+    Measure("земля", "строк об условиях у скудного места", m_land_words, 3,
+            None, "штук", "о всяком месте есть что сказать прозой"),
 )
 
 

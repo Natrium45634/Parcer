@@ -550,6 +550,158 @@ def check_gods(world, seed: str) -> list:
     return problems
 
 
+def check_land(world, seed: str) -> list:
+    """Страница места: собирается ли она и не врёт ли.
+
+    Тут ловится то, что ломается тихо. Страница, которая падает на пустом
+    гексе или на открытой воде, — а таких гексов в мире девять из десяти.
+    Летопись места не по порядку или с годом за концом истории. Одна и та
+    же строка дважды. Город, показанный в год, когда его ещё не
+    основали. Признак места не в том роде — «Новый Усыпальница»: такое
+    имя разъезжается с русским языком, а ловится только счётом. И
+    латиница в русском выводе: один забытый английский корень в
+    пояснении — и текст выдаёт машину.
+    """
+    from worldgen import landlore
+    from worldgen.names import PLACE_MARKS, _place_gender, _in_gender
+
+    problems = []
+    total = world.total_years
+    link = getattr(world, "map_link", None)
+    wmap = getattr(link, "wmap", None) if link is not None else None
+
+    # --- признак места согласован с головным словом ---------------------
+    # Проверяется на всём мире, а не на странице: имена-то в реестрах.
+    for table in (world.sites, world.settlements):
+        for item in table.values():
+            first = (item.name or "").split(" ")[0]
+            for forms in PLACE_MARKS:
+                if first not in forms:
+                    continue
+                rest = item.name[len(first):].strip()
+                gender = _place_gender(rest)
+                if not gender:
+                    break       # рода не знаем — и придираться не к чему
+                want = _in_gender(forms, gender)
+                if first != want:
+                    problems.append(
+                        "сид «%s»: имя места «%s» не согласовано — должно "
+                        "быть «%s %s»" % (seed, item.name, want, rest))
+                break
+        if problems:
+            break
+
+    if wmap is None:
+        # Мир без карты: страница обязана сказать это, а не упасть.
+        said = landlore.chapter(world, 0)
+        if not said or "без карты" not in " ".join(said):
+            problems.append("сид «%s»: мир без карты, а страница места о "
+                            "этом молчит" % seed)
+        if landlore.best_hex(world) != -1 or landlore.notable(world):
+            problems.append("сид «%s»: мир без карты, а места в нём "
+                            "нашлись" % seed)
+        return problems
+
+    size = wmap.width * wmap.height
+    busy = landlore.best_hex(world)
+    if not 0 <= busy < size:
+        problems.append("сид «%s»: самое весомое место — гекс %d, а гексов "
+                        "всего %d" % (seed, busy, size))
+        return problems
+    for index, said in landlore.notable(world):
+        if not 0 <= index < size:
+            problems.append("сид «%s»: в списке мест гекс %d, а гексов "
+                            "всего %d" % (seed, index, size))
+            break
+        if not said.strip():
+            problems.append("сид «%s»: место на гексе %d без подписи"
+                            % (seed, index))
+            break
+
+    # Пустая суша и открытая вода: страница должна собираться и на них.
+    taken = {item.hex_index for item in world.settlements.values()}
+    taken |= {getattr(item, "hex_index", -1) for item in world.sites.values()}
+    empty = next((i for i in range(size)
+                  if wmap.is_land(i) and i not in taken), -1)
+    water = next((i for i in range(size) if wmap.is_ocean(i)), -1)
+    look = [index for index in (busy, empty, water, 0, size - 1) if index >= 0]
+
+    latin = set("abcdefghijklmnopqrstuvwxyz"
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    for index in look:
+        try:
+            page = landlore.blocks(world, index, total)
+        except Exception as error:
+            problems.append("сид «%s»: страница гекса %d не собралась: %s"
+                            % (seed, index, error))
+            break
+        tags = {tag for tag, _line in page}
+        if not tags <= {"title", "head", "line", "dim", "dated"}:
+            problems.append("сид «%s»: у страницы гекса %d метка не из "
+                            "списка: %s" % (seed, index, sorted(tags)))
+            break
+        text = " ".join(line for _tag, line in page)
+        wrong = sorted(set(text) & latin)
+        if wrong:
+            problems.append("сид «%s»: в странице гекса %d латиница: %s"
+                            % (seed, index, "".join(wrong)))
+            break
+
+        # Летопись места: по порядку, в пределах истории, без повторов.
+        told = landlore.timeline(world, index)
+        seen = set()
+        last = 0
+        for year, _kind, line in told:
+            if year < last:
+                problems.append("сид «%s»: летопись гекса %d идёт не по "
+                                "порядку: %d после %d"
+                                % (seed, index, year, last))
+                break
+            last = year
+            if not 1 <= year <= total:
+                problems.append("сид «%s»: в летописи гекса %d год %d, а "
+                                "история идёт до %d"
+                                % (seed, index, year, total))
+                break
+            if (year, line) in seen:
+                problems.append("сид «%s»: в летописи гекса %d одно и то же "
+                                "дважды: %d, «%s»" % (seed, index, year, line))
+                break
+            seen.add((year, line))
+        if problems:
+            break
+
+        # Вес: пустое место весит ноль и так и названо.
+        score, verdict, why = landlore.weight(world, index)
+        if score < 0:
+            problems.append("сид «%s»: вес гекса %d отрицателен (%.1f)"
+                            % (seed, index, score))
+            break
+        if score == 0 and why:
+            problems.append("сид «%s»: гекс %d весит ноль, а причины веса "
+                            "названы: %s" % (seed, index, why[0]))
+            break
+        if not verdict:
+            problems.append("сид «%s»: у гекса %d нет приговора о весе"
+                            % (seed, index))
+            break
+
+    # Год на странице соблюдается: в первый год не стоит то, чего ещё нет.
+    if not problems:
+        young = [item for item in world.settlements.values()
+                 if item.hex_index >= 0 and item.founded is not None
+                 and item.founded.year > 1]
+        if young:
+            item = min(young, key=lambda row: (len(row.id), row.id))
+            said = " ".join(landlore.standing(world, item.hex_index, 1))
+            if item.name in said:
+                problems.append("сид «%s»: на первый год на гексе %d уже "
+                                "стоит %s, а основан он в %d году"
+                                % (seed, item.hex_index, item.full_name,
+                                   item.founded.year))
+    return problems
+
+
 def check_origin(world, seed: str) -> list:
     """Начало мира: сходится ли оно само с собой и с миром.
 
@@ -3486,6 +3638,7 @@ def main(only: str = "") -> int:
         failures.extend(check_towns(first, seed))
         failures.extend(check_holidays(first, seed))
         failures.extend(check_origin(first, seed))
+        failures.extend(check_land(first, seed))
         failures.extend(check_gods(first, seed))
         failures.extend(check_renown(first, seed))
 
@@ -3557,6 +3710,7 @@ def main(only: str = "") -> int:
             failures.extend(check_towns(first, "карта/" + seed))
             failures.extend(check_holidays(first, "карта/" + seed))
             failures.extend(check_origin(first, "карта/" + seed))
+            failures.extend(check_land(first, "карта/" + seed))
             failures.extend(check_gods(first, "карта/" + seed))
             failures.extend(check_renown(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
@@ -3607,7 +3761,7 @@ def main(only: str = "") -> int:
                       check_tribes, check_capitals, check_souls,
                       check_tales,
                       check_lives, check_stories, check_towns,
-                      check_holidays, check_origin,
+                      check_holidays, check_origin, check_land,
                       check_gods, check_renown):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
