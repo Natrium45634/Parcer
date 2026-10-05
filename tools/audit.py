@@ -1265,6 +1265,19 @@ def m_town_one_city(world):
     return sum(1 for value in counts if value <= 1) / float(len(counts))
 
 
+def m_town_great(world):
+    """Доля живых поселений, доросших до великого города.
+
+    Великий город должен быть редкостью: когда их десяток, слово «великий»
+    перестаёт что-либо значить.
+    """
+    towns = _alive_towns(world)
+    if not towns:
+        return None
+    return sum(1 for item in towns
+               if item.rank == town_cat.GREAT_CITY) / float(len(towns))
+
+
 def m_town_urban(world):
     """Какая доля мира живёт в городах."""
     souls = world.world_population()
@@ -1310,8 +1323,10 @@ MEASURES = (
             "доля", "города-призраки и те, кто пришёл после них"),
     Measure("города", "живых на землю", m_town_count, 1.0, 6.0, "штук",
             "земля держит столько городов, сколько кормит"),
-    Measure("города", "доросли до города", m_town_is_city, 0.2, 0.8, "доля",
-            "если городом зовётся всё, города в мире нет ни одного"),
+    Measure("города", "доросли до города", m_town_is_city, 0.2, 0.95,
+            "доля", "городом зовётся не всякое поселение"),
+    Measure("города", "великих городов", m_town_great, None, 0.25, "доля",
+            "великий город — редкость, иначе слово ничего не значит"),
     Measure("города", "людность первого города", m_town_biggest, 15000, None,
             "душ", "в мире есть хоть один настоящий город",
             min_years=3000),
