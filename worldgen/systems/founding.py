@@ -25,6 +25,42 @@ from ..models import ACTIVE, GONE, GREAT, MINOR, RUINED, SETTLED
 
 SETTLE_MIN_POPULATION = 380
 
+# Сколько душ кормит земля на единицу своей ёмкости — не одному своему
+# городу, а всем им вместе.
+#
+# Прежде ёмкость считалась каждому городу отдельно, а соседей он учитывал
+# «легко»: делителем стояло число городов земли в степени 0,12. На земле
+# с тридцатью городами это 1,46 — каждый получал две трети полного куска,
+# и земля кормила вдвадцатеро больше, чем кормит. Отсюда и выходило то,
+# что видно в мире: городов много, а больших среди них нет ни одного.
+# Каждому хватало, и ни одному не доставалось вдоволь.
+#
+# Теперь хлеб у земли один, и города его делят. Новый город берёт хлеб у
+# соседей, а не добывает свой из ничего, — и потому встаёт не всякий
+# год, а только там, где есть чем кормиться.
+REGION_BREAD = 30000.0
+
+# Насколько хлеб достаётся тому, кто уже велик. Ноль — всем поровну, и
+# тогда в мире одни середняки; единица — ровно по людности, и тогда
+# первый город съедает землю целиком. Половина даёт то, что видно в
+# настоящей истории: один город заметно крупнее прочих, дальше по
+# убывающей. Больше своего аппетита город всё равно не возьмёт — съесть
+# больше, чем может прокормить его собственная округа, нельзя.
+PRIMACY = 0.5
+
+# Сколько хлеба нужно оставить незанятым, чтобы на земле встал ещё один
+# город, — в долях того, что держит один город этой земли. Единица значит
+# «на целый город»: земля держит столько городов, сколько может прокормить
+# до полного роста, и ни одного лишнего.
+#
+# Считать свободное по нынешней людности нельзя — это и была первая
+# попытка. В молодом мире города ещё малы, свободного хлеба на земле
+# будто бы вдоволь, и новые встают один за другим; а когда они вырастут,
+# окажется, что земли на всех не хватило, и останутся на ней не города, а
+# деревни при чужих городах. Поэтому занятым считается не то, что города
+# съели, а то, что они съедят, когда вырастут.
+TOWN_SHARE = 1.0
+
 # Чем больше у расы городов, тем меньше шанс, что следующий город будет её же.
 # Без этого один удачливый народ (обычно люди) застраивает весь мир.
 CROWDING = 0.12
@@ -101,6 +137,53 @@ def _leader_of(ctx, rng, race, year, settlement=None, tribe=None, kind="founder"
     return figure, True
 
 
+def _join_town(ctx, rng, tribe, year: int) -> None:
+    """Племя приходит в готовый город, потому что своей земли уже нет.
+
+    Это и есть то, из чего растут большие города. Прежде племя в такой
+    год ставило рядом ещё одно поселение — и в мире копились деревни,
+    которым негде было вырасти. Теперь люди идут туда, где город уже
+    стоит, и город становится больше: доля хлеба земли считается по
+    людности, так что пришедшие не просто прибавляются числом, а
+    перетягивают хлеб у соседей.
+
+    Город выбирается в своей земле и своей крови: племя не растворяется в
+    чужом народе за один год. Если такого города нет — племя кочует
+    дальше, и это честный исход, а не недоработка.
+    """
+    world = ctx.world
+    here = []
+    for settlement_id in world.active_settlements:
+        settlement = world.settlements[settlement_id]
+        if settlement.region_id != tribe.region_id:
+            continue
+        if settlement.race_id != tribe.race_id:
+            continue
+        # Свой народ впереди соседней крови той же расы.
+        same_folk = 0 if settlement.folk_id == tribe.folk_id else 1
+        here.append((same_folk, -settlement.population,
+                     len(settlement.id), settlement.id))
+    if not here:
+        return
+    here.sort()
+    settlement = world.settlements[here[0][3]]
+    came = max(1, int(tribe.population * 0.92))
+    settlement.population += came
+    settlement.notes.append("%d: сюда пришло племя по имени %s — %d душ"
+                            % (year, tribe.name, came))
+    date = ctx.date_in(rng, year)
+    world.end_tribe(tribe, date,
+                    "влилось в город по имени %s" % settlement.name, SETTLED)
+    tribe.settlement_id = settlement.id
+    world.add_event(
+        date=date, era_index=world.era_index_at(year), kind="tribe_joined",
+        title="Племя влилось в город: %s" % settlement.name,
+        text=town_texts.joined_text(rng, tribe.name, settlement.name, came),
+        importance=2, subjects=[settlement.id, tribe.id],
+        region_id=settlement.region_id, race_id=tribe.race_id,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Племя оседает и строит поселение
 # ---------------------------------------------------------------------------
@@ -119,18 +202,32 @@ def tick_settling(ctx, year: int) -> None:
         race_id = world.settlements[settlement_id].race_id
         settled_by_race[race_id] = settled_by_race.get(race_id, 0) + 1
 
-    candidates = []
+    # Хлеб земель: на занятой земле новый город не встаёт. Прежде он
+    # встал бы — и стал бы тринадцатой деревней там, где кормиться уже
+    # нечем.
+    free, one = _room_for_towns(ctx, year)
+
+    roomy, crowded = [], []
     for tribe_id in world.active_tribes:
         tribe = world.tribes[tribe_id]
         race = races_mod.get_race(tribe.race_id)
         if not race.settles or tribe.population < SETTLE_MIN_POPULATION:
             continue
         weight = float(tribe.population) * _crowding(settled_by_race.get(race.id, 0))
-        candidates.append((tribe, weight))
-    if not candidates:
+        where = world.regions.get(tribe.region_id)
+        (roomy if _has_room(free, one, where)
+         else crowded).append((tribe, weight))
+    if not roomy and not crowded:
         return
 
-    tribe = rng.weighted(candidates)
+    if not roomy:
+        # Свободной земли нет нигде. Тогда племя не строит своего, а идёт
+        # в готовый город — и город от этого растёт. Из таких приходов
+        # большие города и складываются.
+        _join_town(ctx, rng, rng.weighted(crowded), year)
+        return
+
+    tribe = rng.weighted(roomy)
     race = races_mod.get_race(tribe.race_id)
     region = world.regions.get(tribe.region_id)
     if region is None:
@@ -222,7 +319,20 @@ def tick_colonies(ctx, year: int) -> None:
         polity = None
         race = races_mod.get_race(source.race_id)
         home_id = source.region_id
-    region = ctx.pick_region(rng, race, near=home_id, spread=0.25)
+    # Колонию ставят туда, где есть чем кормиться. Три попытки, а не
+    # одна: земля выбирается с оглядкой на родную, и первая подвернувшаяся
+    # бывает уже занята. Если места нет и на третий раз — не ставят вовсе,
+    # и держава растёт теми городами, какие у неё есть. Так и бывало:
+    # расселение кончается не указом, а тем, что селиться стало некуда.
+    free, one = _room_for_towns(ctx, year)
+    region = None
+    for _ in range(3):
+        spot = ctx.pick_region(rng, race, near=home_id, spread=0.25)
+        if spot is None:
+            break
+        if _has_room(free, one, spot):
+            region = spot
+            break
     if region is None:
         return
 
@@ -419,13 +529,85 @@ def _tributaries(world) -> dict:
             counts[lord] = counts.get(lord, 0) + 1
     return counts
 
-def _townfolk(world) -> dict:
-    """Сколько городов стоит на каждой земле — считается раз за такт."""
-    counts = {}
+def _region_bread(ctx, era_index: int, bounty: float) -> dict:
+    """Сколько душ кормит каждая земля во всех своих городах вместе.
+
+    Считается раз за такт: земель десятки, а городов сотни, и спрашивать
+    землю о её хлебе на каждый город незачем.
+    """
+    world = ctx.world
+    out = {}
+    for region in world.regions.values():
+        bread = REGION_BREAD * max(0.0, region.capacity) * bounty
+        bread *= 0.75 + 0.14 * era_index
+        if ctx.map is not None and region.from_map:
+            bread *= 0.85 + 0.5 * ctx.map.bounty(region.id)
+        out[region.id] = bread
+    return out
+
+
+def _taken_bread(world) -> dict:
+    """Сколько хлеба земли уже съедено её городами."""
+    out = {}
     for settlement_id in world.active_settlements:
-        region_id = world.settlements[settlement_id].region_id
-        counts[region_id] = counts.get(region_id, 0) + 1
-    return counts
+        settlement = world.settlements[settlement_id]
+        out[settlement.region_id] = (out.get(settlement.region_id, 0.0)
+                                     + settlement.population)
+    return out
+
+
+def _one_town(ctx, era_index: int, bounty: float) -> dict:
+    """Сколько держит один город каждой земли: (земля -> душ).
+
+    Это та же мера, что и аппетит, но без расы, державы и государевой
+    хватки: голый счёт земли. По ней и выходит, сколько городов земля
+    кормит, — её хлеб, поделённый на один город.
+    """
+    world = ctx.world
+    out = {}
+    for region in world.regions.values():
+        one = 7000.0 * max(0.0, region.capacity) * bounty
+        one *= 0.75 + 0.14 * era_index
+        if ctx.map is not None and region.from_map:
+            one *= 0.85 + 0.5 * ctx.map.bounty(region.id)
+        out[region.id] = max(1.0, one)
+    return out
+
+
+def _room_for_towns(ctx, year: int):
+    """Где на земле ещё есть место под город: (свободный хлеб, один город).
+
+    Один вызов на такт основания: земель десятки, городов сотни, и
+    спрашивать землю о хлебе на каждый город незачем.
+    """
+    world = ctx.world
+    era_index = world.era_index_at(year)
+    bounty = ctx.fate_bounty(year)
+    bread = _region_bread(ctx, era_index, bounty)
+    one = _one_town(ctx, era_index, bounty)
+    tributaries = _tributaries(world)
+    free = dict(bread)
+    for settlement_id in world.active_settlements:
+        settlement = world.settlements[settlement_id]
+        region = world.regions.get(settlement.region_id)
+        want = _appetite(ctx, settlement,
+                         races_mod.get_race(settlement.race_id), region,
+                         era_index, bounty, tributaries)
+        free[settlement.region_id] = (free.get(settlement.region_id, 0.0)
+                                      - want)
+    return free, one
+
+
+def _has_room(free, one, region) -> bool:
+    """Хватит ли на этой земле хлеба ещё на один город.
+
+    Город — это не двести душ: ему нужна своя округа и свой кормилец.
+    Поэтому спрашивается не «осталась ли крошка», а «хватит ли на целый
+    город».
+    """
+    if region is None:
+        return False
+    return free.get(region.id, 0.0) >= TOWN_SHARE * one.get(region.id, 1.0)
 
 
 # Насколько заметно поселению шагнуть по ступени, чтобы летопись об этом
@@ -524,58 +706,115 @@ def _restep(ctx, settlement, race, year: int, era_index: int, rng) -> None:
     )
 
 
+def _appetite(ctx, settlement, race, region, era_index: int, bounty: float,
+              tributaries: dict) -> float:
+    """Сколько душ удержал бы этот город, стоя на своей земле один.
+
+    Это его собственный предел: своя округа, свой уклад, своё ремесло и
+    своя власть. Хлеба земли тут нет вовсе — он делится дальше, и ни один
+    город не берёт больше своего аппетита.
+    """
+    world = ctx.world
+    capacity = max(1.0, 7000.0 * (region.capacity if region else 1.0))
+    # Земля кормит одинаково, а живут на ней по-разному: дворфский город
+    # уходит вниз ярусами и держит вдвое больше людского при той же
+    # округе, эльфийский стоит редким и малым.
+    capacity *= race.density
+    capacity *= bounty
+    if ctx.map is not None and region is not None and region.from_map:
+        # Урожайные годы и рыбный ход кормят больше ртов, чем голая земля.
+        capacity *= 0.85 + 0.5 * ctx.map.bounty(region.id)
+    polity = world.polities.get(settlement.polity_id)
+    if polity is not None and polity.hunger:
+        # Города державы, которой нечем кормить, просто не растут: это
+        # честнее постоянного мора и куда точнее по сути.
+        capacity *= max(0.35, 1.0 - polity.hunger * 0.8)
+    if settlement.is_capital:
+        capacity *= 2.1
+    elif settlement.polity_id:
+        capacity *= 1.35
+    capacity *= 0.75 + 0.14 * era_index
+    if polity is not None:
+        # Плуг, трёхполье и акведук кормят больше народу, чем указ.
+        capacity *= crafts_mod.bonus(polity.known, "growth")
+        # Но и указ кое-что значит: отпущенные рабы пашут лучше рабов.
+        capacity *= laws_mod.bonus(polity.reforms, "growth")
+        # Хозяйская хватка государя кормит города или не кормит их:
+        # отсюда и берутся «при нём страна поднялась» и наоборот.
+        capacity *= rulers_mod.stewardship(world, polity)
+        # Дань уходит хлебом и людьми: данник растёт хуже, сюзерен —
+        # лучше. Без этого дань была бы строкой в договоре и только.
+        if polity.tribute_to:
+            capacity *= 0.90
+        capacity *= 1.0 + 0.03 * min(4, tributaries.get(polity.id, 0))
+    return max(1.0, capacity)
+
+
+def _share_bread(world, appetite: dict, bread: dict) -> dict:
+    """Уложить аппетиты городов одной земли в её хлеб — по старшинству.
+
+    Поровну делить нельзя: тогда в мире одни середняки, ни одного
+    крупного города. По людности как есть — тоже нельзя: первый город
+    съест землю целиком. Поэтому доля считается по аппетиту, помноженному
+    на людность в степени `PRIMACY`, — большой город тянет к себе
+    сильнее, но не бесконечно.
+
+    Больше своего аппетита город не получает: хлеб чужой округи до него
+    всё равно не доедет.
+    """
+    pull = {}
+    total = {}
+    for settlement_id, want in appetite.items():
+        settlement = world.settlements[settlement_id]
+        value = want * (max(1, settlement.population) ** PRIMACY)
+        pull[settlement_id] = value
+        total[settlement.region_id] = (total.get(settlement.region_id, 0.0)
+                                       + value)
+    out = {}
+    for settlement_id, want in appetite.items():
+        settlement = world.settlements[settlement_id]
+        whole = total.get(settlement.region_id, 0.0)
+        loaf = bread.get(settlement.region_id, 0.0)
+        if whole <= 0 or loaf <= 0:
+            out[settlement_id] = max(1.0, min(want, loaf))
+            continue
+        out[settlement_id] = max(1.0, min(want,
+                                          loaf * pull[settlement_id] / whole))
+    return out
+
+
 def upkeep(ctx, year: int, period: int) -> None:
     world = ctx.world
     spec = ctx.era_spec(year)
     rng = ctx.rng("settlement_upkeep", year)
     era_index = world.era_index_at(year)
     tributaries = _tributaries(world)
-    townfolk = _townfolk(world)
     # Судьба мира: во сколько раз земля кормит в этом году. У одного мира
     # она идёт ровно вверх, у другого поднимает великую державу в первые
     # века и потом тысячу лет опускает. Города сами мельчают и пустеют —
     # подделывать упадок не нужно.
     bounty = ctx.fate_bounty(year)
 
-    for settlement_id in list(world.active_settlements):
+    # Два прохода, а не один. Сперва у каждого города спрашивается, сколько
+    # он удержал бы, стоя на своей земле один; потом аппетиты всех городов
+    # одной земли укладываются в её хлеб. Прежде этого второго прохода не
+    # было, и земля с тридцатью городами кормила вдвадцатеро больше, чем
+    # кормит: каждый считал её ёмкость почти целиком своей.
+    order = list(world.active_settlements)
+    appetite = {}
+    for settlement_id in order:
+        settlement = world.settlements[settlement_id]
+        appetite[settlement_id] = _appetite(
+            ctx, settlement, races_mod.get_race(settlement.race_id),
+            world.regions.get(settlement.region_id), era_index, bounty,
+            tributaries)
+    shared = _share_bread(world, appetite, _region_bread(ctx, era_index,
+                                                         bounty))
+
+    for settlement_id in order:
         settlement = world.settlements[settlement_id]
         race = races_mod.get_race(settlement.race_id)
-        region = world.regions.get(settlement.region_id)
-        capacity = max(1.0, 7000.0 * (region.capacity if region else 1.0))
-        # Земля кормит одинаково, а живут на ней по-разному: дворфский
-        # город уходит вниз ярусами и держит вдвое больше людского при
-        # той же округе, эльфийский стоит редким и малым.
-        capacity *= race.density
-        capacity *= bounty
-        # Землю город делит с соседями — но легко: ёмкость земли и так
-        # считается на один город, а не на всю округу сразу.
-        capacity /= max(1, townfolk.get(settlement.region_id, 1)) ** 0.12
-        if ctx.map is not None and region is not None and region.from_map:
-            # Урожайные годы и рыбный ход кормят больше ртов, чем голая земля.
-            capacity *= 0.85 + 0.5 * ctx.map.bounty(region.id)
-        polity = world.polities.get(settlement.polity_id)
-        if polity is not None and polity.hunger:
-            # Города державы, которой нечем кормить, просто не растут:
-            # это честнее постоянного мора и куда точнее по сути.
-            capacity *= max(0.35, 1.0 - polity.hunger * 0.8)
-        if settlement.is_capital:
-            capacity *= 2.1
-        elif settlement.polity_id:
-            capacity *= 1.35
-        capacity *= 0.75 + 0.14 * era_index
-        if polity is not None:
-            # Плуг, трёхполье и акведук кормят больше народу, чем указ.
-            capacity *= crafts_mod.bonus(polity.known, "growth")
-            # Но и указ кое-что значит: отпущенные рабы пашут лучше рабов.
-            capacity *= laws_mod.bonus(polity.reforms, "growth")
-            # Хозяйская хватка государя кормит города или не кормит их:
-            # отсюда и берутся «при нём страна поднялась» и наоборот.
-            capacity *= rulers_mod.stewardship(world, polity)
-            # Дань уходит хлебом и людьми: данник растёт хуже, сюзерен —
-            # лучше. Без этого дань была бы строкой в договоре и только.
-            if polity.tribute_to:
-                capacity *= 0.90
-            capacity *= 1.0 + 0.03 * min(4, tributaries.get(polity.id, 0))
+        capacity = shared[settlement_id]
 
         population = settlement.population
         population += (population * ctx.growth(race.growth, settlement.region_id)

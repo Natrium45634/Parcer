@@ -1196,6 +1196,80 @@ def m_land_words(world):
                for index in land[::step])
 
 
+# ---------------------------------------------------------------------------
+# Города: сколько их и каковы они
+# ---------------------------------------------------------------------------
+
+# Смотр мерил у городов всё, кроме главного: сколько их и велики ли они.
+# Оттого и вышло, что в мире копились середняки — сто с лишним поселений,
+# из которых ни одно не доросло до великого города, — а ни одна мера на
+# это не срабатывала.
+
+
+def _alive_towns(world) -> list:
+    return [world.settlements[sid] for sid in world.active_settlements]
+
+
+def m_town_count(world):
+    """Живых поселений на одну землю."""
+    towns = _alive_towns(world)
+    if not world.regions:
+        return None
+    return len(towns) / float(len(world.regions))
+
+
+def m_town_is_city(world):
+    """Доля живых поселений, доросших до города и выше."""
+    towns = _alive_towns(world)
+    if not towns:
+        return None
+    return sum(1 for item in towns
+               if town_cat.is_city(item.rank)) / float(len(towns))
+
+
+def m_town_biggest(world):
+    """Людность самого большого города мира."""
+    towns = _alive_towns(world)
+    if not towns:
+        return None
+    return max(item.population for item in towns)
+
+
+def m_town_primacy(world):
+    """Во сколько раз первый город мира больше середняка.
+
+    Если это число около единицы, в мире нет ни первого города, ни
+    столицы — одни одинаковые поселения.
+    """
+    towns = sorted(item.population for item in _alive_towns(world))
+    if len(towns) < 4:
+        return None
+    middle = towns[len(towns) // 2]
+    return towns[-1] / float(max(1, middle))
+
+
+def m_town_per_polity(world):
+    """Сколько городов у державы — у середины списка."""
+    counts = []
+    for polity_id in world.active_polities:
+        polity = world.polities[polity_id]
+        alive = sum(1 for sid in polity.settlement_ids
+                    if sid in world.active_settlements)
+        counts.append(alive)
+    if not counts:
+        return None
+    counts.sort()
+    return counts[len(counts) // 2]
+
+
+def m_town_urban(world):
+    """Какая доля мира живёт в городах."""
+    souls = world.world_population()
+    if souls <= 0:
+        return None
+    return sum(item.population for item in _alive_towns(world)) / float(souls)
+
+
 MEASURES = (
     Measure("были", "не про судьбу мира", m_story_small, 0.82, 0.98,
             "доля", "девять из десяти былей не спасают мир"),
@@ -1231,6 +1305,19 @@ MEASURES = (
             min_years=1500),
     Measure("города", "встали на старом месте", m_town_reborn, 0.02, 0.6,
             "доля", "города-призраки и те, кто пришёл после них"),
+    Measure("города", "живых на землю", m_town_count, 1.0, 6.0, "штук",
+            "земля держит столько городов, сколько кормит"),
+    Measure("города", "доросли до города", m_town_is_city, 0.2, 0.8, "доля",
+            "если городом зовётся всё, города в мире нет ни одного"),
+    Measure("города", "людность первого города", m_town_biggest, 15000, None,
+            "душ", "в мире есть хоть один настоящий город",
+            min_years=3000),
+    Measure("города", "первый город больше середняка", m_town_primacy, 3.0,
+            None, "раз", "у мира есть главный город, а не сто одинаковых"),
+    Measure("города", "городов у державы", m_town_per_polity, 2, None,
+            "штук", "держава — это не один город со стеной"),
+    Measure("города", "живут в городах", m_town_urban, 0.04, 0.35, "доля",
+            "город кормится деревней, и деревня больше города"),
     Measure("боги", "с биографией", m_god_covered, 1.0, None, "доля", ""),
     Measure("боги", "видов происхождения", m_god_origins, 5, None, "из 12",
             ""),

@@ -2042,6 +2042,77 @@ def check_mortality(world, seed: str) -> list:
     return problems
 
 
+def check_town_bread(world, seed: str) -> list:
+    """Хлеб земли: города делят его, а не выдумывают каждый свой.
+
+    Тут ловится то, что ломается тихо. Племя, записанное влившимся в
+    город, которого нет, — или в город чужой земли и чужой крови: тогда
+    летопись говорит об одном, а реестры о другом. Поселение, которое
+    одно на всю землю держит больше душ, чем земля кормит во всех своих
+    городах вместе: это значит, что делёж хлеба обошли стороной.
+
+    Запас взят с умыслом. Хлеб земли считается на год такта, а людность
+    города — на конец истории; за век между ними земля могла и оскудеть.
+    Поэтому проверка срабатывает не на превышение, а на превышение в
+    разы: это уже не колебание, а обход правила.
+    """
+    from worldgen.systems import founding
+    from worldgen.models import SETTLED
+
+    problems = []
+    # --- племя пришло в готовый город ---------------------------------
+    for tribe in world.tribes.values():
+        if tribe.status != SETTLED or not tribe.settlement_id:
+            continue
+        settlement = world.settlements.get(tribe.settlement_id)
+        if settlement is None:
+            problems.append("сид «%s»: племя %s осело в городе, которого в "
+                            "мире нет" % (seed, tribe.name))
+            break
+        said = tribe.end_reason or ""
+        if "влилось в город" not in said:
+            continue        # своё поселение построило — это другой исход
+        if settlement.name not in said:
+            problems.append("сид «%s»: племя %s влилось в город «%s», а в "
+                            "летописи назван другой: %s"
+                            % (seed, tribe.name, settlement.name, said))
+            break
+        if settlement.race_id != tribe.race_id:
+            problems.append("сид «%s»: племя %s влилось в город чужой "
+                            "расы (%s)" % (seed, tribe.name, settlement.name))
+            break
+        if tribe.region_id and settlement.region_id != tribe.region_id:
+            problems.append("сид «%s»: племя %s влилось в город на другой "
+                            "земле (%s)" % (seed, tribe.name, settlement.name))
+            break
+
+    # --- хлеб земли ----------------------------------------------------
+    if not problems:
+        alone = {}
+        for settlement_id in world.active_settlements:
+            settlement = world.settlements[settlement_id]
+            alone[settlement.region_id] = alone.get(settlement.region_id,
+                                                    0) + 1
+        for settlement_id in world.active_settlements:
+            settlement = world.settlements[settlement_id]
+            if alone.get(settlement.region_id, 0) != 1:
+                continue    # делёж проверяется на том, кто на земле один
+            region = world.regions.get(settlement.region_id)
+            if region is None or region.capacity <= 0:
+                continue
+            # Полный хлеб земли в самые тучные годы: с запасом на эпоху и
+            # на урожайность карты.
+            bread = founding.REGION_BREAD * region.capacity * 3.0
+            if settlement.population > bread * 3.0:
+                problems.append(
+                    "сид «%s»: %s держит %d душ, а земля по имени %s кормит "
+                    "в своих городах около %d"
+                    % (seed, settlement.full_name, settlement.population,
+                       region.name, int(bread)))
+                break
+    return problems
+
+
 def check_ranks(world, seed: str) -> list:
     """Ступень поселения: она считается из людности и не врёт о нём.
 
@@ -3620,6 +3691,7 @@ def main(only: str = "") -> int:
         failures.extend(check_after_end(first, seed))
         failures.extend(check_mortality(first, seed))
         failures.extend(check_ranks(first, seed))
+        failures.extend(check_town_bread(first, seed))
         failures.extend(check_war_cost(first, seed))
         failures.extend(check_world_code(first, seed))
         failures.extend(check_invasions(first, seed))
@@ -3692,6 +3764,7 @@ def main(only: str = "") -> int:
             failures.extend(check_after_end(first, "карта/" + seed))
             failures.extend(check_mortality(first, "карта/" + seed))
             failures.extend(check_ranks(first, "карта/" + seed))
+            failures.extend(check_town_bread(first, "карта/" + seed))
             failures.extend(check_war_cost(first, "карта/" + seed))
             failures.extend(check_world_code(first, "карта/" + seed))
             failures.extend(check_invasions(first, "карта/" + seed))
@@ -3759,6 +3832,7 @@ def main(only: str = "") -> int:
         for check in (check_nobility, check_wars, check_politics,
                       check_calamities, check_disasters, check_after_end,
                       check_mortality, check_ranks, check_war_cost,
+                      check_town_bread,
                       check_world_code,
                       check_invasions, check_subjects,
                       check_traces, check_year_slices,
