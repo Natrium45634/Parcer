@@ -336,7 +336,11 @@ def _new_district(ctx, rng, town, settlement, year: int) -> None:
     have = {item["конец"] for item in town.districts}
     # Концов у города столько, сколько он может прокормить: у пятитысячного
     # их четыре, у сорокатысячного — с десяток, и это уже большой город.
-    if len(town.districts) >= 3 + souls // 4000:
+    # Потолок сверху — две трети каталога: у города на сто тысяч душ счёт
+    # давал двадцать пять концов, то есть почти все виды разом, и карточка
+    # такого города превращалась в перечень видов, а не в портрет места.
+    room = min(3 + souls // 4000, (2 * len(cat.DISTRICTS)) // 3)
+    if len(town.districts) >= room:
         return
     trade = town.trade
     pairs = []
