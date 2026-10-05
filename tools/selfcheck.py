@@ -37,7 +37,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from worldgen import chronicle, espionage, storage, warfare   # noqa: E402
 from worldgen.engine import Settings, generate                # noqa: E402
 from worldgen.models import ACTIVE, ONGOING as ONGOING_STATE                             # noqa: E402
-from worldgen.races import BEASTFOLK, EVIL, RACES, get_race   # noqa: E402
+from worldgen.races import (BEASTFOLK, EVIL, MONSTER, RACES,   # noqa: E402
+                           get_race)                           # noqa: E402
 
 RACE_IDS = {race.id for race in RACES}
 
@@ -1982,6 +1983,13 @@ def check_mortality(world, seed: str) -> list:
     Четвёртая: раса, которой в этом мире век не отмерен, от старости не
     умирает вовсе — она уходит. Если в таком мире нашлась смерть «в
     глубокой старости», значит особенность мира до свода причин не дошла.
+
+    Пятая: небывалый не кончается по смертной графе. Владыка демонов,
+    ведущий войну со всем миром, не умирает в обвале в горах и не чахнет
+    от хвори: у него своя графа — его низвергают туда, откуда призвали,
+    или он иссякает, когда остыл последний жертвенник. Сторож нужен
+    потому, что эта поломка тихая: строка в летописи стоит и читается
+    гладко, а неправда в ней видна только тому, кто помнит, кто это был.
     """
     from worldgen import mortality
 
@@ -1996,6 +2004,24 @@ def check_mortality(world, seed: str) -> list:
     departure = set()
     for pair in mortality.DEPARTURE:
         departure.update(pair)
+    # Свод смертных строк: всё, чем кончается человек. Небывалому ни одна
+    # из них не годится, и обратно — его графа смертному не достаётся.
+    mortal_lines = set()
+    for table in (mortality.OLD_AGE, mortality.ILLNESS, mortality.MISHAP,
+                  mortality.VIOLENCE, mortality.OWN_HAND,
+                  mortality.CHILDBIRTH, mortality.DEPARTURE,
+                  mortality.UNRECORDED):
+        for pair in table:
+            mortal_lines.update(pair)
+    for rows in mortality.BY_CRAFT.values():
+        for pair in rows:
+            mortal_lines.update(pair)
+    monster_lines = set()
+    for pair in mortality.MONSTER_ANY:
+        monster_lines.update(pair)
+    for rows in mortality.MONSTER_END.values():
+        for pair in rows:
+            monster_lines.update(pair)
 
     seen = named = 0
     for figure in world.figures.values():
@@ -2015,6 +2041,17 @@ def check_mortality(world, seed: str) -> list:
         race = get_race(figure.race_id)
         if race is None:
             continue
+        beast = race.category == MONSTER
+        if beast and cause in mortal_lines:
+            problems.append("сид «%s»: %s — беда мира, а причина конца "
+                            "взята из смертной графы: «%s»"
+                            % (seed, figure.name, cause))
+            break
+        if not beast and cause in monster_lines:
+            problems.append("сид «%s»: %s из смертных народов, а причина "
+                            "конца взята из графы небывалых: «%s»"
+                            % (seed, figure.name, cause))
+            break
         share = (figure.death.year - figure.birth.year) / float(
             max(1, race.lifespan[1]))
         if cause in old_set:

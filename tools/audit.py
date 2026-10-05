@@ -640,6 +640,45 @@ def _subjects(world):
     return list(world.subjects.values())
 
 
+def _beast_ends(world):
+    """Небывалые с названной причиной конца и сами эти причины."""
+    from worldgen import mortality, races
+    own = set()
+    for pair in mortality.MONSTER_ANY:
+        own.update(pair)
+    for rows in mortality.MONSTER_END.values():
+        for pair in rows:
+            own.update(pair)
+    named = []
+    for figure in world.figures.values():
+        kin = races.RACES_BY_ID.get(figure.race_id)
+        if kin is None or kin.category != races.MONSTER:
+            continue
+        if figure.death_cause:
+            named.append(figure.death_cause)
+    return named, own
+
+
+def m_beast_own_end(world):
+    """Доля небывалых, кончивших по своей графе, а не по смертной.
+
+    Не единица и не должна быть единицей: владыку вторжения часто
+    сражают в бою, и это записано там, где случилось. Но если доля
+    близка к нулю, значит своя графа до небывалых не доходит — а это та
+    самая поломка, когда великий демон гибнет в обвале в горах.
+    """
+    named, own = _beast_ends(world)
+    return _share(sum(1 for item in named if item in own), len(named))
+
+
+def m_beast_end_kinds(world):
+    """Сколько разных концов у небывалых: один на всех — не конец."""
+    named, own = _beast_ends(world)
+    if not named:
+        return None
+    return len({item for item in named if item in own})
+
+
 def m_sub_kinds(world):
     """В своде не одни люди: дракон и бог проходят ту же систему."""
     return len({item.kind for item in _subjects(world)})
@@ -1467,6 +1506,11 @@ MEASURES = (
             "доля", "из остатков через века растут новые беды"),
     Measure("нашествия", "отвечали врозь", m_inv_answers, 0.2, None, "доля",
             "кто воевал, не простит тому, кто заплатил"),
+    Measure("субъекты", "конец по своей графе", m_beast_own_end, 0.2, None,
+            "доля", "демон не гибнет в обвале в горах"),
+    Measure("субъекты", "разных концов у небывалых", m_beast_end_kinds, 4,
+            None, "видов", "один конец на всех — не конец, а отписка",
+            min_years=3000),
     Measure("субъекты", "родов в своде", m_sub_kinds, 3, None, "из 13",
             "дракон, бог и крестьянин проходят одну систему",
             min_years=3000),

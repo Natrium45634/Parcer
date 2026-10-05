@@ -373,11 +373,20 @@ def _known_hands(world, home, began_year: int, end_year: int) -> list:
     Государей не берём: сказание о короле, сгинувшем в болоте, ломает
     половину престолонаследия. И брать можно только того, кто прожил всю
     дорогу: и в год выхода был взрослым, и к возвращению ещё жив.
+
+    И небывалого не берём вовсе. Отбор шёл по словам в роли, а «вождь
+    вторжения» начинается с того же «вожд», что и вождь племени, — и
+    владычица пустоты уходила в дружину за артефактом, а потом сгинула в
+    походе, как обычная наёмница. Беда мира в дружину героев не ходит:
+    это против неё дружину и собирают.
     """
     crowns = {world.polities[pid].ruler_id for pid in world.active_polities}
     out = []
     for figure in world.figures.values():
         if figure.id in crowns or not figure.alive_at(end_year):
+            continue
+        kin = races_mod.RACES_BY_ID.get(figure.race_id)
+        if kin is not None and kin.category == races_mod.MONSTER:
             continue
         if figure.origin_region != home.region_id:
             continue
