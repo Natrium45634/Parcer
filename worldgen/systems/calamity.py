@@ -525,9 +525,8 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
         host_size = _host_size(rng, spec, severity)
 
     date = ctx.date_in(rng, year)
-    name = texts.unique_calamity_name(
-        texts.calamity_name(rng, spec, host, victim, duration),
-        spec.noun[1] if len(spec.noun) > 1 else "m",
+    name = texts.pick_calamity_name(
+        rng, spec, host, victim, duration,
         {item.name for item in world.calamities.values()})
     calamity = world.add_calamity(
         key=spec.key, kind=spec.kind, name=name, severity=severity,

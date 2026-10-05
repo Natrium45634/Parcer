@@ -334,8 +334,15 @@ def late_omens(ctx, calamity, spec, rng, year: int) -> None:
         return
     # Раньше причины знака быть не может, и слишком далеко его тоже не
     # уводят: век — это уже не знак, а другая эпоха.
-    oldest = max(1, min(int(calamity.cause_year or 0) or year - 1, year - 1),
-                 year - 60)
+    #
+    # Причина не всегда тянется веками: иногда она названа тем же годом,
+    # что и беда. Тогда места для знака до неё нет вовсе, и знака не
+    # будет — а не будет он за год до причины. На этом сторож в
+    # самопроверке меня и поймал, на четырёх мирах из восьми.
+    cause = int(calamity.cause_year or 0)
+    if cause >= year:
+        return
+    oldest = max(1, cause or year - 1, year - 60)
     if oldest >= year:
         return
     count = min(len(omens), rng.randint(*LATE_COUNT))
