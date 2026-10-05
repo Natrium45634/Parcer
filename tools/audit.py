@@ -1248,18 +1248,21 @@ def m_town_primacy(world):
     return towns[-1] / float(max(1, middle))
 
 
-def m_town_per_polity(world):
-    """Сколько городов у державы — у середины списка."""
+def m_town_one_city(world):
+    """Доля держав, у которых всего один город.
+
+    Город-государство — дело обычное, и нулю эта доля быть не должна. Но
+    когда из одного города состоит почти всякая держава, это уже не мир
+    держав, а мир городов со стенами, между которыми ничего нет.
+    """
     counts = []
     for polity_id in world.active_polities:
         polity = world.polities[polity_id]
-        alive = sum(1 for sid in polity.settlement_ids
-                    if sid in world.active_settlements)
-        counts.append(alive)
+        counts.append(sum(1 for sid in polity.settlement_ids
+                          if sid in world.active_settlements))
     if not counts:
         return None
-    counts.sort()
-    return counts[len(counts) // 2]
+    return sum(1 for value in counts if value <= 1) / float(len(counts))
 
 
 def m_town_urban(world):
@@ -1314,8 +1317,8 @@ MEASURES = (
             min_years=3000),
     Measure("города", "первый город больше середняка", m_town_primacy, 3.0,
             None, "раз", "у мира есть главный город, а не сто одинаковых"),
-    Measure("города", "городов у державы", m_town_per_polity, 2, None,
-            "штук", "держава — это не один город со стеной"),
+    Measure("города", "держав из одного города", m_town_one_city, None, 0.6,
+            "доля", "держава — не один город со стеной, хотя бывает и так"),
     Measure("города", "живут в городах", m_town_urban, 0.04, 0.35, "доля",
             "город кормится деревней, и деревня больше города"),
     Measure("боги", "с биографией", m_god_covered, 1.0, None, "доля", ""),
