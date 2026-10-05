@@ -283,24 +283,86 @@ def choose_cause(ctx, spec, rng, year: int, parent=None) -> dict:
 # Предвестники и предотвращение
 # ---------------------------------------------------------------------------
 
-def want_omens(ctx, spec, rng) -> bool:
+def want_omens(ctx, spec, rng, severity: int = 0) -> bool:
     """Придёт ли беда с предвестниками или разом.
 
     Внезапность — свойство беды: землетрясение не предупреждает, а
     ледник виден за десятки лет.
+
+    И свойство тяжести тоже. Прежде вес беды тут не спрашивали, и выходило
+    наоборот: у малой беды знаки были у четверти, у великой — ни у одной.
+    Так не бывает. Большая беда зреет дольше: та, что идёт пятьдесят лет
+    и сносит державу, не собирается в один год, и к ней ведёт больше
+    видимого, чем к дурному лету. Поэтому с весом доля знаков растёт, а не
+    падает.
     """
     if spec.kind == cat.CLIMATE:
         return True
+    heft = 1.0 + 0.16 * max(0, int(severity) - 2)
     if spec.key in ("earthquake", "eruption", "wildfire", "sundering"):
-        return rng.chance(0.3)
-    return rng.chance(OMEN_SHARE)
+        # Земля не предупреждает: гора рвётся без спроса, сколько бы ни
+        # копилось под ней. Вес тут весит меньше, чем у прочих бед.
+        return rng.chance(min(0.6, 0.3 * heft))
+    return rng.chance(min(0.92, OMEN_SHARE * heft))
 
 
-def schedule(ctx, year: int, spec, rng, severity: int, region_ids) -> None:
-    """Кладёт беду в зреющие: со знаками и годом, когда она придёт."""
+# Сколько знаков разбирают потом у великой беды и с какого веса. Порог
+# четвёртый: беда третьего веса ещё бывает частным горем одной земли, а с
+# четвёртого её ищут в летописях и находят, с чего она началась.
+LATE_FROM = 4
+LATE_COUNT = (1, 2)
+
+
+def late_omens(ctx, calamity, spec, rng, year: int) -> None:
+    """Знаки, которые разобрали после: у великой беды они есть всегда.
+
+    Беда, рождённая не из зреющих, а сразу — из цепи, из проснувшегося
+    следа, из перемены климата или из великого слома, — знаков не имела
+    вовсе: путь к ним шёл только через `schedule`. Выходило, что чем беда
+    больше, тем меньше о ней было известно заранее, — а это обратно
+    правде.
+
+    Поправка честная, а не подложенная: знак ставится не раньше года
+    причины, которая у беды уже названа, и помечается тем, что он есть, —
+    «разобран только после». Предупреждением он не был и беду не отводил:
+    его прочли, когда искали начало.
+    """
+    if calamity.omens or calamity.severity < LATE_FROM:
+        return
     omens = dis.omens_for(spec)
     if not omens:
         return
+    # Раньше причины знака быть не может, и слишком далеко его тоже не
+    # уводят: век — это уже не знак, а другая эпоха.
+    oldest = max(1, min(int(calamity.cause_year or 0) or year - 1, year - 1),
+                 year - 60)
+    if oldest >= year:
+        return
+    count = min(len(omens), rng.randint(*LATE_COUNT))
+    seen = set()
+    for _ in range(count):
+        omen = rng.weighted([(item, item.weight) for item in omens])
+        if omen.key in seen:
+            continue
+        seen.add(omen.key)
+        calamity.omens.append({"знак": omen.key,
+                               "год": rng.randint(oldest, year - 1),
+                               "прочтение": dis.READ_LATE})
+    calamity.omens.sort(key=lambda sign: sign["год"])
+
+
+def schedule(ctx, year: int, spec, rng, severity: int, region_ids) -> bool:
+    """Кладёт беду в зреющие: со знаками и годом, когда она придёт.
+
+    Отвечает, вышло ли. Прежде отвечала молчанием, и у этого было тихое
+    последствие: тот, кто её звал, уже вернулся из своей ветки, считая
+    беду отложенной, — а она не отложилась, а не случилась вовсе. Беда,
+    которой не нашлось ни одного знака, должна приходить сразу, а не
+    исчезать.
+    """
+    omens = dis.omens_for(spec)
+    if not omens:
+        return False
     lead = rng.randint(*OMEN_LEAD)
     count = min(len(omens), rng.randint(*OMEN_COUNT))
     chosen = []
@@ -314,12 +376,13 @@ def schedule(ctx, year: int, spec, rng, severity: int, region_ids) -> None:
                        "год": max(1, year + rng.randint(0, max(1, lead - 1))),
                        "прочтение": ""})
     if not chosen:
-        return
+        return False
     ctx.disaster_pending.append({
         "ключ": spec.key, "тяжесть": severity, "земли": list(region_ids),
         "год": year + lead, "знаки": chosen, "читали": "",
         "отведено": "",
     })
+    return True
 
 
 def _readers(ctx, region_ids) -> tuple:
@@ -645,7 +708,7 @@ def name_actors(ctx, calamity, spec, rng, year: int) -> None:
     и дальше живёт своей жизнью.
     """
     world = ctx.world
-    if calamity.severity < 2:
+    if calamity.severity < cat.WORLD_WEIGHT:
         return
     count = min(4, 1 + calamity.severity // 2)
     roles = [key for key, _ in dis.ACTORS]
@@ -660,6 +723,23 @@ def name_actors(ctx, calamity, spec, rng, year: int) -> None:
             settlement = world.settlements[settlement_id]
             if settlement.region_id in calamity.region_ids:
                 races.append(settlement.race_id)
+                break
+    if not races:
+        # Беда прошла там, где держав и городов нет, — но люди там есть:
+        # племя у реки, стойбище на перегоне. Прежде поиск кончался на
+        # городах, и у такой беды не оказывалось ни одного лица: ни того,
+        # кто первым понял, ни того, кому не поверили. А беда без людей
+        # не беда, а запись о погоде.
+        for tribe_id in world.active_tribes:
+            tribe = world.tribes[tribe_id]
+            if tribe.region_id in calamity.region_ids:
+                races.append(tribe.race_id)
+                break
+    if not races:
+        for camp_id in world.active_camps:
+            camp = world.camps[camp_id]
+            if camp.region_id in calamity.region_ids:
+                races.append(camp.race_id)
                 break
     if not races:
         return
@@ -727,6 +807,12 @@ def plan_chain(ctx, calamity, spec, rng, year: int) -> None:
         want = max(1, calamity.severity - 1)
         levels = [level for level, _ in child_spec.severities]
         severity = min(levels, key=lambda level: (abs(level - want), level))
+        # И затухает до конца. Прежде из беды второго веса вырастала беда
+        # первого — дурной год с записью в летописи мира и без единого
+        # лица. Цепь, дошедшая до дурного года, кончилась: земля своё
+        # получила, а миру рассказывать нечего.
+        if severity < cat.WORLD_WEIGHT:
+            continue
         regions = list(calamity.region_ids[:2]) or list(calamity.region_ids)
         queue.append({
             "год": year + rng.randint(*link.delay),
@@ -1954,6 +2040,7 @@ __all__ = ["prepare", "vuln_of", "vuln_kind", "vuln_factor", "hurt_lands",
            "build_works", "forget", "choose_cause", "want_omens", "schedule",
            "tick_pending", "phase_at", "note_phase", "maybe_turn",
            "force_now", "respond", "count_gains", "name_actors",
+           "late_omens",
            "plan_chain", "tick_chains", "count_damage", "four_outcomes",
            "dark_pressure_of", "leave_scars", "age_scars",
            "lose_lore", "find_lore", "wants_front", "open_front",

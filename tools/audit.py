@@ -266,15 +266,79 @@ def m_cause_hidden(world):
 
 
 def m_omens_read(world):
-    """Знаки читают верно не всегда — иначе мир перестаёт быть опасным."""
+    """Знаки читают верно не всегда — иначе мир перестаёт быть опасным.
+
+    Считаются только те, которые видели заранее. Знак, разобранный после
+    беды, предупреждением не был, и в этой мере ему места нет: иначе
+    поправка, из-за которой у великой беды знаки вообще появились,
+    читалась бы как «читать стали хуже».
+    """
     from worldgen import disaster as dis
     right = seen = 0
     for calamity in world.calamities.values():
         for omen in calamity.omens:
+            if omen.get("прочтение") == dis.READ_LATE:
+                continue
             seen += 1
             if omen.get("прочтение") == dis.READ_RIGHT:
                 right += 1
     return _share(right, seen)
+
+
+def m_omens_heavy(world):
+    """Знаки у тяжёлой беды: их должно быть больше, чем у малой.
+
+    Прежде было наоборот — у беды первого веса знаки находились чаще, чем
+    у беды пятого, потому что великая беда рождалась не из зреющих и к
+    предвестникам не заходила вовсе. Мера считает долю тяжёлых бед, у
+    которых хоть что-то названо: заранее прочтённое или разобранное
+    после.
+    """
+    rows = [item for item in world.calamities.values() if item.severity >= 4]
+    return _share(sum(1 for item in rows if item.omens), len(rows))
+
+
+def m_omens_late(world):
+    """И часть знаков разбирают только после: мир узнаёт начало потом."""
+    from worldgen import disaster as dis
+    late = seen = 0
+    for calamity in world.calamities.values():
+        for omen in calamity.omens:
+            seen += 1
+            if omen.get("прочтение") == dis.READ_LATE:
+                late += 1
+    return _share(late, seen)
+
+
+# Слова, которыми летопись нумерует повторившуюся беду. Если их в именах
+# много, значит имена кончились и пошёл список.
+_ORDINAL_WORDS = ("Второй", "Вторая", "Второе", "Третий", "Третья", "Третье",
+                  "Четвёртый", "Четвёртая", "Четвёртое", "Пятый", "Пятая",
+                  "Пятое", "Шестой", "Шестая", "Шестое", "Седьмой",
+                  "Седьмая", "Седьмое", "Восьмой", "Восьмая", "Восьмое",
+                  "Девятый", "Девятая", "Девятое")
+
+
+def m_woe_name_ordinal(world):
+    """«Вторая Чёрная Засуха» — это не имя, а номер в списке.
+
+    Нумерует летопись только то, что уже было названо так же. Нуля тут не
+    ждём: повторившаяся беда и должна называться по счёту. Но если
+    пронумерована каждая десятая, значит имён у бед не хватает.
+    """
+    rows = [item.name for item in world.calamities.values() if item.name]
+    hit = sum(1 for name in rows if name.split()[0] in _ORDINAL_WORDS)
+    return _share(hit, len(rows))
+
+
+def m_woe_name_top(world):
+    """И одно слово не должно стоять в начале каждого третьего имени."""
+    import collections
+    rows = [item.name for item in world.calamities.values() if item.name]
+    if not rows:
+        return None
+    heads = collections.Counter(name.split()[0] for name in rows)
+    return _share(heads.most_common(1)[0][1], len(rows))
 
 
 def m_prevented(world):
@@ -1442,6 +1506,18 @@ MEASURES = (
             "доля", "мир не всегда знает, отчего это было"),
     Measure("беда", "знаки прочли верно", m_omens_read, 0.1, 0.65, "доля",
             "предупреждение — не подарок: нужен тот, кто умеет читать"),
+    Measure("беда", "у тяжёлой беды знаки есть", m_omens_heavy, 0.6, None,
+            "доля", "великая беда зреет дольше и успевает показать больше",
+            min_years=3000),
+    Measure("беда", "знак разобрали после", m_omens_late, 0.03, 0.7, "доля",
+            "с чего всё началось, нашли в летописях задним числом",
+            min_years=3000),
+    Measure("беда", "имя по счёту, а не своё", m_woe_name_ordinal, None,
+            0.12, "доля", "«Вторая Чёрная Засуха» — это номер, а не имя",
+            min_years=3000),
+    Measure("беда", "самое частое слово в имени", m_woe_name_top, None, 0.35,
+            "доля", "одним словом не называют треть всех бед мира",
+            min_years=3000),
     Measure("беда", "отведено до начала", m_prevented, 1, None, "штук",
             "люди иногда успевают, иначе мир безнадёжен", min_years=3000),
     Measure("беда", "власть ответила делом", m_responses, 0.5, None, "доля",

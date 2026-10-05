@@ -38,7 +38,19 @@ from ..morph import accusative_noun, genitive_phrase, phrase
 from ..timeline import Date
 from ..world import RURAL_FACTOR
 
-CALAMITY_RATE = 0.011          # годовой шанс, что где-то начнётся беда
+# Годовой шанс, что где-то начнётся беда. Было 0,011, и на десяти тысячах
+# лет выходило две беды на век — то есть беда мира каждые полвека, и
+# половина из них ничего после себя не оставляла. Беда, случающаяся раз в
+# два поколения, перестаёт быть бедой: это погода.
+#
+# Срезано вдвое, и срезано дважды. Первый раз — чтобы бед стало меньше.
+# Второй — потому что прежняя ставка была сосчитана под беды, которые
+# вполовину мимо: очаг искался наугад, и каждая вторая беда приходила в
+# пустую землю, где ей некого было брать. Теперь беда всегда приходит
+# туда, где живут, и при той же ставке мир терял на четверть больше
+# людей, чем прежде, — то есть бед стало меньше, а бедствий больше. Это
+# не то, к чему мы шли.
+CALAMITY_RATE = 0.006
 GREAT_MEMORY = "великое"       # общая память всех великих бед
 RELIC_WAKE_RATE = 0.0013       # годовой шанс пробуждения на один спящий след
 MIN_SETTLEMENT = 45            # ниже этого поселение считается погибшим
@@ -320,9 +332,18 @@ def _great_memory(ctx, year: int) -> float:
     return min(1.0, ((year - last) / 2300.0) ** 2.0)
 
 
-# Великое бедствие должно коснуться людей: извержение в пустой глуши —
-# это событие природы, а не истории, и летописи о нём не пишут.
-WITNESSED_FROM = 4
+# Бедствие должно коснуться людей: извержение в пустой глуши — это
+# событие природы, а не истории, и летописи о нём не пишут.
+#
+# Порог был четвёртым, и это значило, что беды второго и третьего веса —
+# а их в мире девять из десяти — выбирали себе землю наугад, людная она
+# или пустая. Отсюда и выходили записи вроде «Чёрная Засуха, 48–49,
+# погибло 0»: беда была, а бедой не стала, потому что ей не досталось
+# никого. Теперь порог равен порогу беды мира: если беда попала в
+# летопись, она попала и в чью-то жизнь. Землетрясения это не отменяет —
+# у них своя ветка выше: гора рвётся там, где дрожит земля, а не там,
+# где живут люди.
+WITNESSED_FROM = cat.WORLD_WEIGHT
 
 
 def _pick_regions(ctx, rng, spec, count: int, victim=None, severity: int = 0):
@@ -426,16 +447,23 @@ def _maybe_start(ctx, year: int) -> None:
     spec = _pick_spec(ctx, year, rng)
     if spec is None:
         return
+    # Вес беды бросается тут, а не внутри. Прежде он бросался только в
+    # ветке со знаками, и выходило две неправды сразу: знаков у великой
+    # беды было меньше, чем у малой, и дурной год попадал в летопись мира
+    # наравне с падением державы.
+    severity = spec.severity(rng)
+    if severity < cat.WORLD_WEIGHT:
+        return
     # Часть бед приходит с предвестниками: их видно за годы, и у мира
-    # есть время прочесть знак — или не прочесть.
-    if disaster_sys.want_omens(ctx, spec, rng):
-        severity = spec.severity(rng)
+    # есть время прочесть знак — или не прочесть. Чем беда тяжелее, тем
+    # дольше она зреет и тем больше успевает показать.
+    if disaster_sys.want_omens(ctx, spec, rng, severity):
         count = min(len(world.regions), spec.regions_count(rng, severity))
         region_ids = _pick_regions(ctx, rng, spec, count, None, severity)
-        if region_ids:
-            disaster_sys.schedule(ctx, year, spec, rng, severity, region_ids)
+        if region_ids and disaster_sys.schedule(ctx, year, spec, rng,
+                                                severity, region_ids):
             return
-    _start_calamity(ctx, year, spec, rng)
+    _start_calamity(ctx, year, spec, rng, severity=severity)
 
 
 def start_scheduled(ctx, year: int, spec, rng, severity: int, region_ids,
@@ -451,6 +479,14 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
                     omens=None, prevented: str = "", chain_factor: str = ""):
     world = ctx.world
     severity = severity or spec.severity(rng)
+    # Один порог на все входы. Беду заводят из восьми разных мест — обычный
+    # жребий, зреющие, цепь, проснувшийся след, перемена климата, война за
+    # веру, вернувшийся вождь, — и порог, стоящий в каждом из них порознь,
+    # однажды в одном из них забудут. Поэтому он стоит тут: ниже этого веса
+    # беды мира не бывает, кто бы её ни позвал. Позвавший получает «не
+    # вышло» — и это честный ответ: цепь затухла, след поднял только эхо.
+    if severity < cat.WORLD_WEIGHT:
+        return None
     # Долгие перемены климата длятся ровно столько, сколько вписано в карту.
     duration = duration or spec.years(rng, severity)
     # В короткой истории и беда короче: тридцатилетний мор занимает в
@@ -490,7 +526,7 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
 
     date = ctx.date_in(rng, year)
     name = texts.unique_calamity_name(
-        texts.calamity_name(rng, spec, host, victim),
+        texts.calamity_name(rng, spec, host, victim, duration),
         spec.noun[1] if len(spec.noun) > 1 else "m",
         {item.name for item in world.calamities.values()})
     calamity = world.add_calamity(
@@ -520,6 +556,12 @@ def _start_calamity(ctx, year: int, spec, rng, severity: int = 0,
     calamity.trigger = story["спуск"]
     if omens:
         calamity.omens = list(omens)
+    else:
+        # Беда, рождённая сразу — из цепи, из проснувшегося следа, из
+        # перемены климата, — через зреющие не проходила и знаков не
+        # имела вовсе. У великой беды они есть: их разобрали потом, когда
+        # искали, с чего всё началось.
+        disaster_sys.late_omens(ctx, calamity, spec, rng, year)
     calamity.prevented = prevented or dis.STOP_NONE
     calamity.chain_factor = chain_factor
     calamity.scale = _scale_of(world, calamity, spec)

@@ -2377,12 +2377,27 @@ def check_disasters(world, seed: str) -> list:
     шрам не в утонувшей земле, знание не найдено раньше, чем потеряно,
     роль города не спорит с тем, что стало с землёй, и эпоха не короче
     своей первой беды.
+
+    Сюда же два правила о весе и знаках. Первое: беды ниже порога веса в
+    летописи мира быть не может — ни от жребия, ни от цепи, ни от
+    проснувшегося следа. Порог стоит одним сторожем на все входы, и
+    сторож этот проверяется тут: если он когда-нибудь перестанет
+    срабатывать, в мире снова завёдутся дурные годы с именем. Второе:
+    знак, разобранный после, не раньше причины, из которой беда выросла, —
+    иначе это уже не знак, а другая эпоха.
     """
+    from worldgen import catastrophe as cat
     from worldgen import disaster as dis
 
     problems = []
 
     for calamity in world.calamities.values():
+        if calamity.severity < cat.WORLD_WEIGHT:
+            problems.append("сид «%s»: беда «%s» весом %d — ниже порога "
+                            "беды мира (%d)"
+                            % (seed, calamity.name, calamity.severity,
+                               cat.WORLD_WEIGHT))
+            break
         if calamity.cause_year and calamity.cause_year > calamity.start.year:
             problems.append("сид «%s»: у беды «%s» причина позже самой беды"
                             % (seed, calamity.name))
@@ -2390,6 +2405,13 @@ def check_disasters(world, seed: str) -> list:
         for omen in calamity.omens:
             if int(omen.get("год", 0)) > calamity.start.year:
                 problems.append("сид «%s»: знак беды «%s» позже её начала"
+                                % (seed, calamity.name))
+                break
+            if omen.get("прочтение") == dis.READ_LATE \
+                    and calamity.cause_year \
+                    and int(omen.get("год", 0)) < calamity.cause_year:
+                problems.append("сид «%s»: у беды «%s» знак разобран после, "
+                                "но стоит раньше её причины"
                                 % (seed, calamity.name))
                 break
         for scar_id in calamity.scar_ids:

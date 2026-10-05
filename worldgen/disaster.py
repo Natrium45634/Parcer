@@ -372,6 +372,14 @@ READ_WRONG = "прочтён неверно"
 READ_NONE = "не понят вовсе"
 READINGS = (READ_RIGHT, READ_WRONG, READ_NONE)
 
+# И четвёртое, которое стоит отдельно от первых трёх. Великая беда редко
+# приходит из ниоткуда: её причина тянулась век, и в этом веке были знаки.
+# Но прочли их не заранее, а потом — когда стало поздно и когда искали, с
+# чего всё началось. Такой знак в летописи есть, а предупреждением он не
+# был: в READINGS его нет нарочно, потому что READINGS — это о том, как
+# знак поняли в своё время.
+READ_LATE = "разобран только после"
+
 
 # ---------------------------------------------------------------------------
 # Фазы: беда идёт, а не стоит
@@ -1270,7 +1278,7 @@ __all__ = [
     "Cause", "CAUSES", "CAUSES_BY_KEY", "UNKNOWN_CAUSE",
     "Trigger", "TRIGGERS", "TRIGGERS_BY_KEY",
     "Omen", "OMENS", "OMENS_BY_KEY", "omens_for", "READINGS",
-    "READ_RIGHT", "READ_WRONG", "READ_NONE",
+    "READ_RIGHT", "READ_WRONG", "READ_NONE", "READ_LATE",
     "Phase", "PHASES", "phases_for", "TURNS",
     "Response", "RESPONSES", "RESPONSES_BY_KEY", "responses_for", "WORKS",
     "DONE_HELPED", "DONE_LATE", "DONE_FAILED", "DONE_WORSE",
