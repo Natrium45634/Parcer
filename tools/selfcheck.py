@@ -2055,6 +2055,12 @@ def check_town_bread(world, seed: str) -> list:
     города — на конец истории; за век между ними земля могла и оскудеть.
     Поэтому проверка срабатывает не на превышение, а на превышение в
     разы: это уже не колебание, а обход правила.
+
+    Чего тут нарочно не проверяется — крови города. Племя приходит в
+    город своего народа, но город потом берут, переименовывают и
+    переселяют, и через триста лет он другой расы. Сторож на это
+    срабатывал и был неправ: запись летописи верна для своего года, а не
+    для конца истории. По той же причине имя годится и прежнее.
     """
     from worldgen.systems import founding
     from worldgen.models import SETTLED
@@ -2072,14 +2078,16 @@ def check_town_bread(world, seed: str) -> list:
         said = tribe.end_reason or ""
         if "влилось в город" not in said:
             continue        # своё поселение построило — это другой исход
-        if settlement.name not in said:
+        # Имя годится и прежнее. Город переименовывают победители, и
+        # запись летописи остаётся с тем именем, какое было в её год:
+        # племя пришло в Голодный Костёр, а через сто лет город зовётся
+        # Эонатиэлем. Это не расхождение, а память.
+        names = [settlement.name] + list(settlement.old_names or ())
+        if not any(name and name in said for name in names):
             problems.append("сид «%s»: племя %s влилось в город «%s», а в "
-                            "летописи назван другой: %s"
+                            "летописи назван другой, и прежним именем он "
+                            "так не звался: %s"
                             % (seed, tribe.name, settlement.name, said))
-            break
-        if settlement.race_id != tribe.race_id:
-            problems.append("сид «%s»: племя %s влилось в город чужой "
-                            "расы (%s)" % (seed, tribe.name, settlement.name))
             break
         if tribe.region_id and settlement.region_id != tribe.region_id:
             problems.append("сид «%s»: племя %s влилось в город на другой "

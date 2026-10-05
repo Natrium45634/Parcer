@@ -149,10 +149,19 @@ def _build_grid(ctx) -> None:
                     value *= NEIGHBOR_BONUS
             pairs.append((terrain, value))
         terrain = rng.weighted(pairs)
+        # Земли не равны между собой даже в одной местности: один лес
+        # стоит на чернозёме, другой на камне. На настоящей карте это
+        # видно — ёмкость там ходит от 0,17 до 1,57, впятеро, — и города
+        # на ней выходят разные. У процедурной сетки ёмкость ставилась
+        # одной местностью, все лесные земли были одинаково тучными, и
+        # потому все города выходили одинаково большими: великих среди
+        # них набиралась треть, а сёл не было вовсе. Теперь у каждой
+        # земли свой достаток.
+        worth = races_mod.TERRAIN_CAPACITY.get(terrain, 1.0)
         region = world.add_region(
             name=ctx.forge.region(rng, terrain),
             terrain=terrain, x=x, y=y,
-            capacity=races_mod.TERRAIN_CAPACITY.get(terrain, 1.0),
+            capacity=round(worth * rng.bell(0.35, 1.75), 3),
         )
         grid[(x, y)] = region
 

@@ -703,6 +703,10 @@ def weight(world, index: int) -> tuple:
             why.append(line)
         elif line.startswith("вершина"):
             marks += 0.8
+            # Вершина прибавляла вес и молчала о себе — и выходило место
+            # с весом без названной причины. Это поймала собственная мера
+            # смотра: «вес объяснён делом» вышла 0,993 вместо единицы.
+            why.append(line)
     score += _soft(marks, CAP_MARKS)
 
     return round(score, 1), _pick(WEIGHT_WORDS, score), why
