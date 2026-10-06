@@ -1651,6 +1651,127 @@ def m_town_urban(world):
     return sum(item.population for item in _alive_towns(world)) / float(souls)
 
 
+# ---------------------------------------------------------------------------
+# Чудеса света
+# ---------------------------------------------------------------------------
+#
+# Главная мера тут — счёт. Если чудес сорок, слово «чудо» ничего не
+# значит, и всё остальное о них мерить незачем.
+
+
+def m_wonder_count(world):
+    """Сколько в мире чудес."""
+    return len(world.wonders) or None
+
+
+def m_wonder_kinds(world):
+    """Сколько родов чудес в ходу: природные, рукотворные, волшебные."""
+    if not world.wonders:
+        return None
+    return len({item.kind for item in world.wonders.values()})
+
+
+def m_wonder_grounds(world):
+    """Сколько оснований в ходу: за величину, за красоту, за страх…
+
+    Если все чудеса — «за величину», система выродилась в список
+    рекордов, а ТЗ прямо говорит, что чудо — не рекорд.
+    """
+    if not world.wonders:
+        return None
+    return len({item.ground for item in world.wonders.values()})
+
+
+def m_wonder_size_only(world):
+    """Доля чудес, которые зовут чудом за одну величину."""
+    if not world.wonders:
+        return None
+    big = sum(1 for item in world.wonders.values() if item.ground == "size")
+    return big / float(len(world.wonders))
+
+
+def m_wonder_built(world):
+    """Доля рукотворных: мир, где чудеса только природные, — мир без людей."""
+    from worldgen import wonders as cat
+    if not world.wonders:
+        return None
+    made = sum(1 for item in world.wonders.values()
+               if item.kind != cat.NATURAL)
+    return made / float(len(world.wonders))
+
+
+def m_wonder_lost(world):
+    """Доля утраченных и забытых: старый мир теряет часть своих чудес."""
+    if not world.wonders:
+        return None
+    lost = sum(1 for item in world.wonders.values() if item.lost)
+    return lost / float(len(world.wonders))
+
+
+def m_wonder_named_late(world):
+    """Доля чудес, названных не в первом веке мира.
+
+    Чудом место делают люди. Если все чудеса названы в первые сто лет,
+    значит их выдала карта, а не история.
+    """
+    if not world.wonders:
+        return None
+    late = sum(1 for item in world.wonders.values() if item.born.year > 100)
+    return late / float(len(world.wonders))
+
+
+def m_wonder_top(world):
+    """Сколько чудес, о которых знают всюду."""
+    from worldgen import wonders as cat
+    if not world.wonders:
+        return None
+    return sum(1 for item in world.wonders.values()
+               if item.peak_fame >= cat.TOP_FAME)
+
+
+def m_wonder_moved(world):
+    """Доля чудес, у которых слава ходила: поднялась или осела."""
+    if not world.wonders:
+        return None
+    moved = sum(1 for item in world.wonders.values()
+                if item.peak_fame != item.fame or item.marks)
+    return moved / float(len(world.wonders))
+
+
+def m_wonder_voices(world):
+    """Доля чудес, о которых говорят по-разному."""
+    if not world.wonders:
+        return None
+    many = sum(1 for item in world.wonders.values() if len(item.voices) >= 2)
+    return many / float(len(world.wonders))
+
+
+def m_wonder_doubt(world):
+    """Доля чудес, которые чудом звали, а они им не были."""
+    if not world.wonders:
+        return None
+    doubted = sum(1 for item in world.wonders.values() if item.claimed)
+    return doubted / float(len(world.wonders))
+
+
+def m_wonder_lists(world):
+    """Сколько списков чудес составили в мире."""
+    return len(world.notes.get("списки чудес") or []) or None
+
+
+def m_wonder_reach(world):
+    """Доля чудес, до которых дойти не просто.
+
+    Если ко всякому чуду идёт дорога, чудеса стоят в одном ряду с
+    постоялыми дворами.
+    """
+    if not world.wonders:
+        return None
+    far = sum(1 for item in world.wonders.values()
+              if item.access in ("hard", "grim", "none"))
+    return far / float(len(world.wonders))
+
+
 MEASURES = (
     Measure("были", "не про судьбу мира", m_story_small, 0.82, 0.98,
             "доля", "девять из десяти былей не спасают мир"),
@@ -2007,6 +2128,37 @@ MEASURES = (
             "штук", "у весомого места есть что рассказать"),
     Measure("земля", "строк об условиях у скудного места", m_land_words, 3,
             None, "штук", "о всяком месте есть что сказать прозой"),
+    Measure("чудеса", "чудес в мире", m_wonder_count, 2, 14, "штук",
+            "чудо — то, чего мало: сорок чудес не чудеса, а список"),
+    Measure("чудеса", "родов чудес в ходу", m_wonder_kinds, 2, None, "из 5",
+            "одни горы или одни храмы — это не чудеса мира"),
+    Measure("чудеса", "оснований в ходу", m_wonder_grounds, 3, None,
+            "из 12", "чудом зовут не за одну величину"),
+    Measure("чудеса", "чудес за одну величину", m_wonder_size_only, None,
+            0.6, "доля", "мировой рекорд сам по себе ещё не чудо"),
+    Measure("чудеса", "чудес, сделанных руками или силой", m_wonder_built,
+            0.1, None, "доля", "мир без рукотворных чудес — мир без людей",
+            min_years=3000),
+    Measure("чудеса", "чудес утрачено или забыто", m_wonder_lost, 0.1, 0.9,
+            "доля", "старый мир теряет часть чудес, но не все",
+            min_years=3000),
+    Measure("чудеса", "названы не в первом веке", m_wonder_named_late, 0.3,
+            None, "доля", "чудом место делают люди, а не карта"),
+    Measure("чудеса", "чудес, о которых знают всюду", m_wonder_top, None, 3,
+            "штук", "верхняя ступень славы — для единиц"),
+    Measure("чудеса", "чудес, у которых что-то менялось", m_wonder_moved,
+            0.5, None, "доля", "чудо живёт, а не стоит записью",
+            min_years=3000),
+    Measure("чудеса", "чудес с разными правдами", m_wonder_voices, 0.3,
+            None, "доля", "об одном чуде говорят по-разному",
+            min_years=3000),
+    Measure("чудеса", "чудес оспорено", m_wonder_doubt, None, 0.5, "доля",
+            "ложным оказывается иное чудо, а не половина их"),
+    Measure("чудеса", "списков чудес", m_wonder_lists, 1, 3, "штук",
+            "счёт чудесам ведут, но не всякая держава и не всякий век",
+            min_years=3000),
+    Measure("чудеса", "чудес, до которых дойти непросто", m_wonder_reach,
+            0.2, None, "доля", "к чуду не всегда идёт дорога"),
 )
 
 

@@ -582,6 +582,10 @@ class ChronicleApp(tk.Tk):
             (210, 150, 165, 120, 120, 160, 110, 80, 80, 190),
             self._on_monster_open, toolbar=self._monsters_toolbar,
             filler=lambda: self._fill_monsters())
+        # Чудес в мире единицы — отбор им не нужен, нужен текст.
+        self.wonders_text = self._add_text_tab(
+            "Чудеса света", lambda: self._set_text(
+                self.wonders_text, chronicle.render_wonders(self.world)))
         self.artifacts_text = self._add_text_tab(
             "Вещи", lambda: self._set_text(
                 self.artifacts_text, chronicle.render_artifacts(self.world)))
@@ -1969,6 +1973,28 @@ class ChronicleApp(tk.Tk):
                 ("Население", entity.population),
                 ("Состояние", entity.status),
                 ("Конец", entity.ended.long() if entity.ended else "—"),
+            ]
+        elif kind == "Wonder":
+            from worldgen import wonders as wonder_cat
+            from worldgen import narrative_wonders as wonder_texts
+            shape = wonder_cat.SHAPES_BY_KEY.get(entity.shape)
+            fields = [
+                ("Что это", shape.word if shape is not None else "место"),
+                ("Род чуда", wonder_cat.kind_name(entity.kind)),
+                ("Зовут чудом", wonder_cat.ground_name(entity.ground)),
+                ("Чем примечательно", entity.measure),
+                ("Названо чудом", entity.born.long()),
+                ("Земля", name_of(entity.region_id)),
+                ("Город", name_of(entity.settlement_id)
+                 if entity.settlement_id else "—"),
+                ("Слава", wonder_texts.fame_line(entity)),
+                ("Дойти туда", wonder_texts.access_line(entity)),
+                ("Кто и зачем", wonder_texts.made_line(world, entity) or "—"),
+                ("Ныне", "%s (с %d года)"
+                 % (wonder_cat.STATES_BY_KEY.get(entity.state, entity.state),
+                    wonder_texts.state_since(entity))),
+                ("В списках", "; ".join(entity.lists) or "—"),
+                ("Оспорено", entity.truth if entity.claimed else "нет"),
             ]
         return fields
 

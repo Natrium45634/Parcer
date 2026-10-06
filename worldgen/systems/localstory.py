@@ -38,6 +38,7 @@ from .. import localstory as cat
 from .. import lore as lore_cat
 from .. import narrative_local as texts
 from .. import narrative_lore as lore_texts
+from .. import narrative_wonders as wonder_texts
 from .. import races as races_mod
 from .. import sites as sites_mod
 from .. import township as town_cat
@@ -130,6 +131,24 @@ def _nodes(ctx, year: int) -> list:
             cat.PLACE, "%s по имени %s" % (site.kind, site.name),
             site.created.year, ref=site.id, region_id=site.region_id,
             site_id=site.id, weight=0.8 + min(1.6, age / 800.0)))
+
+    # --- чудеса, с которых сошла слава ---------------------------------
+    #
+    # Чудо, которое заперли, занесло или просто забыли, — готовый узел:
+    # место стоит, к нему когда-то шли за тысячу вёрст, а теперь о нём
+    # спорят, было ли оно вообще. Своего рода узла ему не завели
+    # нарочно: по сути это нетронутое место, и быль берётся за него тем
+    # же способом.
+    for wonder in world.wonders.values():
+        if not wonder.lost:
+            continue
+        when = wonder_texts.state_since(wonder)
+        if year - when < ECHO_MIN_AGE:
+            continue
+        out.append(Node(
+            cat.PLACE, "чудо по имени %s ушло из памяти" % wonder.name,
+            when, ref=wonder.id, region_id=wonder.region_id,
+            weight=0.9 + 0.1 * wonder.peak_fame))
 
     # --- вещи, ушедшие из рук ------------------------------------------
     for artifact in world.artifacts.values():

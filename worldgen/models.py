@@ -2656,3 +2656,66 @@ class Species:
         data["full_name"] = self.full_name
         data["is_people"] = self.is_people
         return data
+
+
+@dataclass
+class Wonder:
+    """Чудо света: то, что мир сделал сам, а люди потом назвали чудом.
+
+    Чудо не ставится поверх карты — оно находится в том, что уже есть:
+    у природного есть свой гекс с настоящей вершиной или озером, у
+    рукотворного — свой город, своя держава и свой век, когда ей было чем
+    строить.
+
+    Главное тут — **основание**: за что именно его так зовут. Рекорд
+    среди оснований только один из двенадцати, и чудом бывает не самый
+    высокий водопад, а тот, который случается семь дней в десятилетие.
+
+    И отдельно — **слава**: величина не равна известности. О крупнейшем
+    озере мира можно не знать вовсе, если рядом никто не живёт.
+    """
+
+    id: str
+    name: str
+    kind: str                  # природное / рукотворное / волшебное / …
+    shape: str                 # ключ облика: гора, храм, башня …
+    ground: str                # за что зовут чудом
+    born: Date                 # когда появилось или когда его заметили
+    region_id: str = ""
+    hex_index: int = -1
+    settlement_id: str = ""    # при каком городе, если при городе
+    site_id: str = ""          # место истории, если оно же
+    polity_id: str = ""        # кто построил
+    figure_id: str = ""        # и по чьей воле
+    faith_id: str = ""
+    motive: str = ""           # зачем построили
+    cost: str = ""             # чего это стоило
+    measure: str = ""          # чем именно оно исключительно, словами
+    fame: int = 0              # 0…7, ходит сама
+    peak_fame: int = 0
+    state: str = "стоит"
+    access: str = "fair"
+    access_why: str = ""
+    effects: list = field(default_factory=list)      # чем отозвалось
+    marks: list = field(default_factory=list)        # [{год, что, отчего}]
+    voices: list = field(default_factory=list)       # [{чей, что}]
+    truth: str = ""            # как было на самом деле
+    claimed: bool = False      # чудом зовут, а чудом оно не было
+    lists: list = field(default_factory=list)        # в чьих списках стоит
+    notes: list = field(default_factory=list)
+
+    @property
+    def full_name(self) -> str:
+        return self.name
+
+    @property
+    def lost(self) -> bool:
+        from .wonders import is_lost
+        return is_lost(self.state)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["born"] = _date_out(self.born)
+        data["full_name"] = self.full_name
+        data["lost"] = self.lost
+        return data

@@ -33,6 +33,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Reign,
                      Godhead, Renown,
                      Relic, Seed, Settlement, Site, Species, Story, Strife,
+                     Wonder,
                      Tale,
                      Township,
                      Temple,
@@ -89,6 +90,7 @@ _ENTITY_TABLES = {
     "MG": ("migrations",), "NV": ("invasions",), "RN": ("renowns",),
     "SB": ("subjects",), "SC": ("scars",), "SF": ("strifes",),
     "SG": ("tales",), "SP": ("species",), "TR": ("traces",),
+    "WN": ("wonders",),
     "TW": ("townships",),
 }
 
@@ -177,6 +179,7 @@ class World:
         # правды, и в мире известен только первый.
         self.myths = []
         self._godhead_of = {}          # божество -> id биографии
+        self.wonders = {}              # чудеса света
         self.species = {}              # виды существ: кто вообще водится в мире
         self._species_of = {}          # ключ вида -> id записи
         self.townships = {}            # биографии городов
@@ -1260,6 +1263,11 @@ class World:
                                 for item in self.godheads.values()}
         head_id = self._godhead_of.get(deity_id)
         return self.godheads.get(head_id) if head_id else None
+
+    def add_wonder(self, **kwargs) -> Wonder:
+        wonder = Wonder(id=self.next_id("WN"), **kwargs)
+        self.wonders[wonder.id] = wonder
+        return wonder
 
     def add_species(self, **kwargs) -> Species:
         kin = Species(id=self.next_id("SP"), **kwargs)

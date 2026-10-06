@@ -502,6 +502,20 @@ def _anchors(world, index: int) -> dict:
     return out
 
 
+def wonders_here(world, index: int) -> list:
+    """Чудеса света, стоящие в этом самом гексе.
+
+    Чудес в мире единицы, поэтому перебор по всему реестру тут дешевле
+    любого указателя, а порядок закреплён по имени — чтобы страница
+    места всякий раз читалась одинаково.
+    """
+    if index < 0:
+        return []
+    return sorted((item for item in getattr(world, "wonders", {}).values()
+                   if item.hex_index == index),
+                  key=lambda item: (-item.peak_fame, item.id))
+
+
 def _region_of(world, index: int):
     link = getattr(world, "map_link", None)
     region_id = (getattr(link, "region_of_hex", {}) or {}).get(index)
@@ -781,6 +795,16 @@ def weight(world, index: int) -> tuple:
     if told:
         score += _soft(1.3 * told, CAP_STORIES)
         why.append("былей отсюда выросло: %d" % told)
+
+    # Чудо света — то, за чем в это место идут издалека. Вес его не в
+    # камне, а в том, как далеко о нём знают: о чуде, известном всюду,
+    # знает и тот, кто тут никогда не был.
+    for item in wonders_here(world, index):
+        # Вес такой, чтобы приговор не спорил сам с собой: о месте с
+        # чудом, известным по всему материку, нельзя сказать «мир этого
+        # не заметил» — он как раз заметил, и дальше всех.
+        score += 3.0 + 0.7 * item.peak_fame
+        why.append("тут стоит чудо света: %s" % item.name)
 
     marks = 0.0
     for line in features(world, index):
@@ -1526,6 +1550,34 @@ def blocks(world, index: int, year: int = 0) -> list:
     for line in standing(world, index, year):
         out.append(("line", "  %s" % line))
     out.append(("line", ""))
+
+    shown = wonders_here(world, index)
+    if shown:
+        from . import narrative_wonders as wonder_texts
+        from . import wonders as wonder_cat
+        out.append(("head", "ЧУДО СВЕТА"))
+        out.append(("line", ""))
+        for item in shown:
+            out.append(("line", "  %s" % wonder_texts.head_line(item)))
+            out.append(("line", "    %s" % item.measure))
+            out.append(("line", "    %s" % wonder_texts.fame_line(item)))
+            out.append(("line", "    %s" % wonder_texts.access_line(item)))
+            made = wonder_texts.made_line(world, item)
+            if made:
+                out.append(("line", "    %s" % made))
+            out.append(("dim", "    %s с %d года"
+                        % (item.state, wonder_texts.state_since(item))))
+            if item.claimed and item.truth:
+                out.append(("dim", "    чудом звали, а на деле: %s"
+                            % item.truth))
+            for row in item.voices:
+                out.append(("dim", "    %s" % wonder_texts.voice_line(row)))
+            if item.lists:
+                out.append(("dim", "    в списках: %s"
+                            % "; ".join(item.lists)))
+            out.append(("dim", "    чудо %s"
+                        % wonder_cat.kind_name(item.kind)))
+        out.append(("line", ""))
 
     rule = holders(world, index)
     if rule:

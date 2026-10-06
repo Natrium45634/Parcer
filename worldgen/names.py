@@ -1108,6 +1108,20 @@ class NameForge:
 
         return self._unique("place", make, rng)
 
+    def place_word(self, rng, race, tongue=None) -> str:
+        """Одно слово местного звучания — для того, чему имени не нашлось.
+
+        Описательные названия («Белый Оплот») тут не годятся: оборот
+        «башня чародея по имени Белый Оплот» нелеп. Нужно именно имя.
+        """
+        st = self.style_of(race)
+        laws = _laws(tongue)
+
+        def make():
+            return tongues_mod.speak(self._proper_place(rng, st), laws)
+
+        return self._unique("place", make, rng)
+
     # --- земли ----------------------------------------------------------
 
     def region(self, rng, terrain: str) -> str:

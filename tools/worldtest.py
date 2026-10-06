@@ -961,11 +961,62 @@ def weightiest_place(world, out) -> None:
     out("")
 
 
+def best_wonder(world, out) -> None:
+    """Портрет самого громкого чуда мира — и того, что с ним стало.
+
+    Чудес в мире единицы, и по одному из них видно сразу всё: нашёл его
+    генератор в готовой земле или выдумал, нашлось ли основание, кроме
+    величины, ходила ли слава и чем это кончилось. Берётся не нынешнее
+    первое, а то, о котором знали дальше всех за всю историю: чудо,
+    которое уже забыли, рассказывает о мире больше целого.
+    """
+    from worldgen import wonders as cat
+    from worldgen import narrative_wonders as texts
+
+    out("=" * 78)
+    out("ЧУДО, О КОТОРОМ ЗНАЛИ ДАЛЬШЕ ВСЕХ")
+    out("=" * 78)
+    if not world.wonders:
+        out("  Чудом в этом мире не назвали ничего — и так бывает.")
+        out("")
+        return
+    rows = sorted(world.wonders.values(),
+                  key=lambda item: (-item.peak_fame, item.born.year, item.id))
+    wonder = rows[0]
+    region = world.regions.get(wonder.region_id)
+    out("  %s" % texts.head_line(wonder))
+    out("  чудо %s; земля по имени %s"
+        % (cat.kind_name(wonder.kind),
+           region.name if region is not None else "неизвестная"))
+    out("  названо чудом в %d году — %s"
+        % (wonder.born.year, cat.ground_about(wonder.ground)))
+    out("  %s" % wonder.measure)
+    made = texts.made_line(world, wonder)
+    if made:
+        out("  %s" % made)
+    out("  слава: %s" % texts.fame_line(wonder))
+    out("  ходить туда: %s" % texts.access_line(wonder))
+    out("  ныне: %s (с %d года)"
+        % (cat.STATES_BY_KEY.get(wonder.state, wonder.state),
+           texts.state_since(wonder)))
+    for mark in wonder.marks:
+        out("    %s" % texts.mark_line(mark))
+    for row in wonder.voices:
+        out("    %s" % texts.voice_line(row))
+    if wonder.lists:
+        out("  в списках: %s" % "; ".join(wonder.lists))
+    if wonder.claimed and wonder.truth:
+        out("  а чудом оно не было: %s" % wonder.truth)
+    out("  всего чудес в мире: %d, из них утрачено или забыто %d"
+        % (len(rows), sum(1 for item in rows if item.lost)))
+    out("")
+
+
 def portraits(world, out) -> None:
-    """Девять портретов мира: имена, ушедшие народы, старый город, злое
+    """Десять портретов мира: имена, ушедшие народы, старый город, злое
     время, тот, кто людям не ровня, самый долгий праздник, самое громкое
-    за всю историю, самое весомое место и — если мир стоит на гексовой
-    карте — сама эта земля."""
+    за всю историю, самое весомое место, самое громкое чудо и — если мир
+    стоит на гексовой карте — сама эта земля."""
     great_names(world, out)
     peoples_gone(world, out)
     oldest_town(world, out)
@@ -974,6 +1025,7 @@ def portraits(world, out) -> None:
     longest_feast(world, out)
     loudest(world, out)
     weightiest_place(world, out)
+    best_wonder(world, out)
     land_portrait(world, out)
 
 

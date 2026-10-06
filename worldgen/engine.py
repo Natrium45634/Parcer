@@ -25,6 +25,7 @@ from . import mortality
 from .rng import normalize_seed, seed_to_int
 from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       creatures as creature_sys,
+                      wonders as wonder_sys,
                       disaster as disaster_sys,
                       citylife,
                       crafts, culture,
@@ -157,6 +158,10 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     # И только теперь виды привязываются к богам: тот, кто их сделал, и
     # тот, из чьей крови они поднялись, к этому часу уже есть.
     creature_sys.settle(ctx)
+    # Чудеса света — последними из приготовлений: природное чудо ищется в
+    # готовой карте, а не ставится поверх неё, и к этому часу карта уже
+    # нарисована, земли собраны, а первородные оставили свои следы.
+    wonder_sys.prepare(ctx)
 
     # По настоящей карте ведём ещё и политическую летопись: кто чем владел
     # в такой-то год. Её потом читает вкладка «Страны» картогенератора.
@@ -226,6 +231,10 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             # их такте, а тут идёт жизнь всего рода: ветви, разум, уход и
             # возвращение.
             creature_sys.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Чудеса — после бед и держав: беда их рушит, держава их
+            # строит, и к этому часу и то, и другое за это десятилетие
+            # уже случилось.
+            wonder_sys.upkeep(ctx, year, UPKEEP_PERIOD)
             sites.upkeep(ctx, year, UPKEEP_PERIOD)
             # Сказания идут следом за чудовищами, местами и вещами: к
             # этому часу в мире уже есть и беда, и те, кто на неё пойдёт.

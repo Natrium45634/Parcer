@@ -732,6 +732,174 @@ def check_creatures(world, seed: str) -> list:
     return problems
 
 
+def check_wonders(world, seed: str) -> list:
+    """Чудеса света: сходится ли чудо с миром, который его назвал.
+
+    Ловится тут то, во что эта система ломается тихо. Чудо, названное
+    прежде, чем в его земле появился хоть кто-нибудь: карта-то знает о
+    величайшем водопаде с первого года, а чудом его делают люди. Беда,
+    «разрушившая до основания» реку или гору, — природное чудо кончается
+    по своей графе, и «от него остались стены» в неё не входит. Слава
+    выше той, какую мир может разнести. Список чудес, в котором
+    числительное не согласовано («Три чудес») или который ссылается на
+    чудо, которого в мире нет. И имя, повторяющее само себя: «твердыня
+    по имени Вечная Твердыня» — это не имя, а заикание.
+    """
+    from worldgen import wonders as cat
+    from worldgen import narrative_wonders as texts
+    from worldgen import chronicle as chron
+    from worldgen.models import ACTIVE as ACTIVE_STATE
+
+    problems = []
+    total = world.total_years
+    for wonder in sorted(world.wonders.values(), key=lambda item: item.id):
+        shape = cat.SHAPES_BY_KEY.get(wonder.shape)
+        if shape is None:
+            problems.append("сид «%s»: у чуда по имени %s облик «%s» не из "
+                            "справочника" % (seed, wonder.name, wonder.shape))
+            break
+        if wonder.kind != shape.kind:
+            problems.append("сид «%s»: чудо по имени %s зовётся %s, а облик "
+                            "у него %s" % (seed, wonder.name, wonder.kind,
+                                           shape.kind))
+            break
+        if wonder.ground not in cat.GROUNDS_BY_KEY:
+            problems.append("сид «%s»: чудо по имени %s зовут чудом ни за "
+                            "что: «%s»" % (seed, wonder.name, wonder.ground))
+            break
+        if not wonder.measure:
+            problems.append("сид «%s»: у чуда по имени %s не сказано, чем "
+                            "оно примечательно" % (seed, wonder.name))
+            break
+        if not 1 <= wonder.born.year <= total:
+            problems.append("сид «%s»: чудо по имени %s названо в %d году, а "
+                            "история идёт до %d"
+                            % (seed, wonder.name, wonder.born.year, total))
+            break
+        if not 0 <= wonder.fame <= cat.TOP_FAME \
+                or wonder.peak_fame < wonder.fame:
+            problems.append("сид «%s»: у чуда по имени %s слава %d при "
+                            "наибольшей %d" % (seed, wonder.name,
+                                               wonder.fame, wonder.peak_fame))
+            break
+        if wonder.access not in cat.ACCESS_BY_KEY:
+            problems.append("сид «%s»: к чуду по имени %s ходят неведомо "
+                            "как: «%s»" % (seed, wonder.name, wonder.access))
+            break
+
+        # Чудом называют люди, а не карта: к году, когда его назвали, в
+        # этой земле должен был кто-то быть.
+        region = world.regions.get(wonder.region_id)
+        if region is not None:
+            came = [item.founded.year for item in world.settlements.values()
+                    if item.region_id == region.id]
+            came += [item.founded.year for item in world.tribes.values()
+                     if getattr(item, "region_id", "") == region.id]
+            if came and min(came) > wonder.born.year:
+                problems.append("сид «%s»: чудо по имени %s названо в %d "
+                                "году, а первые люди пришли в эту землю в %d"
+                                % (seed, wonder.name, wonder.born.year,
+                                   min(came)))
+                break
+
+        # Природное чудо не «разрушают до основания»: реку нельзя снести.
+        if shape.kind != cat.BUILT and wonder.state in (cat.RUINS, cat.GONE):
+            problems.append("сид «%s»: %s по имени %s — природное чудо, а "
+                            "состояние у него «%s»"
+                            % (seed, shape.word, wonder.name, wonder.state))
+            break
+        for mark in wonder.marks:
+            year = int(mark.get("год", 0))
+            if not 1 <= year <= total or year < wonder.born.year:
+                problems.append("сид «%s»: с чудом по имени %s что-то "
+                                "случилось в %d году, а названо оно в %d"
+                                % (seed, wonder.name, year,
+                                   wonder.born.year))
+                break
+            if not mark.get("отчего"):
+                problems.append("сид «%s»: с чудом по имени %s что-то "
+                                "случилось без названной причины"
+                                % (seed, wonder.name))
+                break
+        if problems:
+            break
+
+        # Имя не повторяет слово облика дважды. Проверяется именно на
+        # обороте («гора по имени X»): заголовок называет облик нарочно.
+        said = texts.said_of(wonder)
+        head = shape.word.split(",")[0].split()[0]
+        if said.lower().count(head.lower()) > 1:
+            problems.append("сид «%s»: имя чуда заикается: «%s»"
+                            % (seed, said))
+            break
+        if wonder.polity_id and wonder.polity_id not in world.polities:
+            problems.append("сид «%s»: чудо по имени %s построила держава, "
+                            "которой в мире нет" % (seed, wonder.name))
+            break
+
+    # Списки чудес: числительное в падеже и ссылки на живые чудеса.
+    if not problems:
+        for row in (world.notes.get("списки чудес") or []):
+            name = row.get("имя", "")
+            if "чудес державы" not in name and "чудес народа" not in name \
+                    and "чуда державы" not in name \
+                    and "чуда народа" not in name:
+                problems.append("сид «%s»: список чудес назван не по-русски: "
+                                "«%s»" % (seed, name))
+                break
+            if not 1 <= int(row.get("год", 0)) <= total:
+                problems.append("сид «%s»: список «%s» составлен в %s году"
+                                % (seed, name, row.get("год")))
+                break
+            if not row.get("почему"):
+                problems.append("сид «%s»: в списке «%s» не сказано, по чему "
+                                "выбирали" % (seed, name))
+                break
+            missing = [wid for wid in row.get("чудеса", ())
+                       if wid not in world.wonders]
+            if missing or len(row.get("чудеса", ())) < 3:
+                problems.append("сид «%s»: список «%s» ссылается не на те "
+                                "чудеса" % (seed, name))
+                break
+
+    # Нерождённые притязания: они вправе остаться, но не вправе врать.
+    if not problems:
+        for row in (world.notes.get("чудеса впереди") or []):
+            if row.get("нужда") not in cat.SHAPES_BY_NEED:
+                problems.append("сид «%s»: притязание на чудо неведомого "
+                                "вида: «%s»" % (seed, row.get("нужда")))
+                break
+
+    # Слава выше той, что мир способен разнести, — это слава из воздуха.
+    if not problems:
+        for wonder in world.wonders.values():
+            if wonder.peak_fame < cat.TOP_FAME:
+                continue
+            near = sum(1 for item in world.settlements.values()
+                       if item.region_id == wonder.region_id
+                       and item.status == ACTIVE_STATE)
+            if not near and not wonder.lists:
+                problems.append("сид «%s»: о чуде по имени %s знают всюду, а "
+                                "вокруг него не живёт никто и ни в один "
+                                "список оно не вошло" % (seed, wonder.name))
+                break
+
+    # И раздел должен собираться, в том числе на мире без единого чуда.
+    if not problems:
+        try:
+            text = chron.render_wonders(world)
+        except Exception as error:
+            problems.append("сид «%s»: раздел о чудесах не собрался: %s"
+                            % (seed, error))
+        else:
+            wrong = [word for word in re.findall("[A-Za-z]+", text)
+                     if not set(word) <= set("IVXLCDM")]
+            if wrong:
+                problems.append("сид «%s»: в разделе о чудесах чужое слово: "
+                                "«%s»" % (seed, wrong[0]))
+    return problems
+
+
 def check_land(world, seed: str) -> list:
     """Страница места: собирается ли она и не врёт ли.
 
@@ -4126,6 +4294,7 @@ def main(only: str = "") -> int:
         failures.extend(check_land(first, seed))
         failures.extend(check_gods(first, seed))
         failures.extend(check_creatures(first, seed))
+        failures.extend(check_wonders(first, seed))
         failures.extend(check_renown(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
@@ -4200,6 +4369,7 @@ def main(only: str = "") -> int:
             failures.extend(check_land(first, "карта/" + seed))
             failures.extend(check_gods(first, "карта/" + seed))
             failures.extend(check_creatures(first, "карта/" + seed))
+            failures.extend(check_wonders(first, "карта/" + seed))
             failures.extend(check_renown(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
@@ -4251,7 +4421,7 @@ def main(only: str = "") -> int:
                       check_tales,
                       check_lives, check_stories, check_towns,
                       check_holidays, check_origin, check_land,
-                      check_creatures,
+                      check_creatures, check_wonders,
                       check_gods, check_renown):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge

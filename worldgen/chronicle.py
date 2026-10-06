@@ -2706,6 +2706,84 @@ def render_creatures(world) -> str:
     return "\n".join(rows)
 
 
+def render_wonders(world) -> str:
+    """Чудеса света: то немногое, что мир сам счёл исключительным.
+
+    Раздел нарочно начинается не с перечня, а со счёта: чудес в мире
+    единицы, и это и есть главное о них. Если бы их было сорок, слово
+    «чудо» ничего бы не значило, и раздел пришлось бы читать как
+    справочник.
+    """
+    from . import wonders as cat
+    from . import narrative_wonders as wonder_texts
+
+    rows = ["ЧУДЕСА СВЕТА", ""]
+    if not world.wonders:
+        rows.append("  Чудом в этом мире не назвали ничего.")
+        return "\n".join(rows)
+
+    items = sorted(world.wonders.values(),
+                   key=lambda item: (-item.peak_fame, item.born.year,
+                                     item.id))
+    stands = [item for item in items if not item.lost]
+    lost = [item for item in items if item.lost]
+    line = "  Чудес в мире: %d" % len(items)
+    if lost:
+        line += "; из них утрачено или забыто %d" % len(lost)
+    if stands:
+        line += "; стоит и помнится %d" % len(stands)
+    rows.append(line + ".")
+    doubted = [item for item in items if item.claimed]
+    if doubted:
+        rows.append("  Чудом звали, а чудом не было: %s."
+                    % ", ".join(item.name for item in doubted))
+    rows.append("")
+
+    for wonder in items:
+        rows.append("  %s" % wonder_texts.head_line(wonder).upper())
+        region = world.regions.get(wonder.region_id)
+        where = "      земля по имени %s" % region.name if region is not None \
+            else "      земля неизвестна"
+        city = world.settlements.get(wonder.settlement_id)
+        if city is not None:
+            where += ", город по имени %s" % city.name
+        rows.append(where)
+        rows.append("      %d год — %s" % (wonder.born.year,
+                                           cat.ground_about(wonder.ground)))
+        rows.append("      %s" % wonder.measure)
+        made = wonder_texts.made_line(world, wonder)
+        if made:
+            rows.append("      %s" % made)
+        rows.append("      слава: %s" % wonder_texts.fame_line(wonder))
+        rows.append("      ходить туда: %s"
+                    % wonder_texts.access_line(wonder))
+        for key in wonder.effects:
+            name, about = cat.EFFECTS_BY_KEY.get(key, ("", ""))
+            if name:
+                rows.append("      %s: %s" % (name, about))
+        for mark in wonder.marks:
+            rows.append("      %s" % wonder_texts.mark_line(mark))
+        for row in wonder.voices:
+            rows.append("      %s" % wonder_texts.voice_line(row))
+        if wonder.lists:
+            rows.append("      в списках: %s" % "; ".join(wonder.lists))
+        if wonder.claimed and wonder.truth:
+            rows.append("      а на деле: %s" % wonder.truth)
+        rows.append("")
+
+    lists = world.notes.get("списки чудес") or []
+    if lists:
+        rows.append("  СПИСКИ ЧУДЕС")
+        for row in lists:
+            names = [world.wonders[wid].name for wid in row.get("чудеса", ())
+                     if wid in world.wonders]
+            rows.append("      %s (%d год, считали %s): %s"
+                        % (row.get("имя", ""), int(row.get("год", 0)),
+                           row.get("почему", ""), ", ".join(names)))
+        rows.append("")
+    return "\n".join(rows)
+
+
 def render_soldiery(world) -> str:
     """Крепости и вольные роты: то, что остаётся от войны между войнами."""
     from .models import ACTIVE as ACTIVE_STATE
@@ -5195,6 +5273,7 @@ def full_text(world) -> str:
         render_upheavals(world),
         render_creatures(world),
         render_monsters(world),
+        render_wonders(world),
         render_artifacts(world),
         render_sites(world),
         render_stats(world),
