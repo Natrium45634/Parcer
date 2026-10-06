@@ -589,8 +589,13 @@ def check_creatures(world, seed: str) -> list:
             break
 
         # Зверьё не держит ни народов, ни держав, ни языков — иначе
-        # сторож пробуждения не сработал, и мир вышел нечестным.
-        if cr.can_be_folk(kin.kind) and not kin.is_people:
+        # сторож пробуждения не сработал, и мир вышел нечестным. Но это
+        # про тех, кто зверьём родился: одичавшие были народом по-
+        # настоящему, и их пробуждение в своё время — не поломка, а их
+        # история. Без этой оговорки сторож ругался на честный мир.
+        fell = any(mark.get("ключ") in cr.FALL_BY_KEY
+                   for mark in kin.mind_marks)
+        if cr.can_be_folk(kin.kind) and not kin.is_people and not fell:
             if kin.race_id in world.race_awakening:
                 problems.append("сид «%s»: %s в этом мире зверьё, а раса их "
                                 "всё же проснулась" % (seed, kin.name))

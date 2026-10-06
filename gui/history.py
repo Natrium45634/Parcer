@@ -48,11 +48,14 @@ GROUPS = (
         "hall_sealed")),
     ("беды", (
         "calamity_", "famine", "dark_age", "crisis_era", "invasion_",
-        "monster_", "relic_", "scar", "trace_", "land_drowned",
+        "monster_", "creature_", "relic_", "scar", "trace_", "land_drowned",
         "land_sundered", "refuge", "shortage", "dark_errand")),
     ("города, племена и народы", (
         "settlement_", "city", "camp", "tribe", "site", "migration",
         "folk_", "race_awakening", "race_gone", "assimilation",
+        # Вид существ — это про народы и про тех, кто народом не стал:
+        # обретённый разум, одичание, новые ветви.
+        "species_",
         "colony_free", "founder", "festival")),
     ("хозяйство и открытия", (
         "guild", "discovery", "expedition_", "artifact_", "craft")),
