@@ -4,17 +4,21 @@
 Главное правило тут — из присланного задания и из здравого смысла:
 **не создавать десять красивых объектов, а находить в уже готовом мире
 то, что само собой стало исключительным.** Поэтому природные чудеса
-берутся не с потолка, а из карты: вот эта вершина с этой высотой, вот
-это озеро с этой площадью, вот этот водопад — река, у которой под ногами
-обрыв в четыреста метров. А рукотворные — из истории: держава, у которой
-к этому веку хватило людей и денег, город, в котором было кому строить,
-и названная причина, зачем.
+берутся не с потолка, а из карты: вот эта вершина, выше которой нет
+ничего, вот это озеро, другого берега которого не видно, вот этот
+водопад — река, у которой под ногами обрыв. А рукотворные — из истории:
+держава, у которой к этому веку хватило людей и денег, город, в котором
+было кому строить, и названная причина, зачем.
 
 Четыре вещи, которые тут происходят по-настоящему.
 
 **Находится.** Чудо не ставится, а отыскивается: движок перебирает то,
 что карта и реестры уже знают, и спрашивает, есть ли среди этого
-исключительное. Если нет — чуда не будет, и мир от этого не обеднеет.
+исключительное. Если нет — чуда не будет, и мир от этого не обеднеет. И
+находится оно не в первый год мира: карта даёт только притязания, а
+чудом место делают люди — тем десятилетием, когда в эту землю пришли
+жить. Иное чудо и вовсе написала история, а не карта: шрам беды, на
+который через век с лишним стали ходить смотреть.
 
 **Прославляется.** Величина не равна известности: о крупнейшем озере
 можно не знать вовсе, если рядом никто не живёт. Слава ходит вверх и
@@ -25,9 +29,9 @@
 тех, кто ходил. Утраченное остаётся в списках и в спорах, а через века
 его иногда находят снова.
 
-**Оспаривается.** У одного чуда четыре правды — своя, народная,
-храмовая и чужая, — и пятая, которую знает только генератор. А иное
-чудо и не было чудом: его просто так назвали.
+**Оспаривается.** У одного чуда пять правд — своя, народная, храмовая,
+чужая и та, что у знающих, — и шестая, которую знает только генератор.
+А иное чудо и не было чудом: его просто так назвали.
 """
 
 from __future__ import annotations
@@ -51,8 +55,13 @@ NAME_RATE = 0.22            # как скоро его назовут, когд�
 # чудо, а обычай.
 BUILT_RATE = 0.006
 MIXED_CHANCE = 0.3          # и если в земле уже есть чудо — строят при нём
+
 BUILT_SOULS = 60000         # меньшей державе такое не поднять
 BUILT_AGE = 120             # и моложе этого она ещё не успевает
+
+# Чудо, которое оставила беда. Редкое: шрамов много, чудес из них мало.
+SCAR_RATE = 0.004
+SCAR_QUIET = 150            # пока беду помнят, это место не чудо, а горе
 
 # Слава ходит сама. Вверх — пока есть кому рассказывать; вниз — когда
 # рассказывать стало некому.
@@ -361,17 +370,27 @@ def _region_of_row(world, row):
     return world.regions.get(region_id) if region_id else None
 
 
-def _lived_in(world, region) -> bool:
-    """Есть ли кому назвать это чудом — хоть кто-нибудь, хоть когда-нибудь."""
+def _witness(world, region, year: int):
+    """Кто в этой земле живёт к этому году — тот, кто и назовёт чудом.
+
+    Возвращается не просто «да», а именно он: племя или город. Его номер
+    ложится в отметку, и по нему потом можно проверить, что чудо назвали
+    не раньше, чем в эту землю пришли. Иначе проверить это уже нельзя:
+    племена кочуют, и к концу истории в земле стоят совсем другие.
+    """
     if region is None:
-        return False
-    for item in world.settlements.values():
-        if item.region_id == region.id:
-            return True
-    for item in getattr(world, "tribes", {}).values():
-        if getattr(item, "region_id", "") == region.id:
-            return True
-    return False
+        return None
+    best = None
+    for table in (world.settlements, getattr(world, "tribes", {})):
+        for item in table.values():
+            if getattr(item, "region_id", "") != region.id:
+                continue
+            if item.founded.year > year:
+                continue
+            if best is None or (item.founded.year, item.id) \
+                    < (best.founded.year, best.id):
+                best = item
+    return best
 
 
 def _name_natural(ctx, year: int, rng, scale: float) -> None:
@@ -389,23 +408,30 @@ def _name_natural(ctx, year: int, rng, scale: float) -> None:
     left = []
     for row in rows:
         region = _region_of_row(world, row)
-        if not _lived_in(world, region) or not rng.chance(NAME_RATE * scale):
+        witness = _witness(world, region, year)
+        if witness is None or not rng.chance(NAME_RATE * scale):
             left.append(row)
             continue
-        if _make_natural(ctx, rng, row, year, region) is None:
+        if _make_natural(ctx, rng, row, year, region, witness) is None:
             left.append(row)
     world.notes["чудеса впереди"] = left
 
 
-def _make_natural(ctx, rng, row, year: int, region):
+def _make_natural(ctx, rng, row, year: int, region, witness):
     shapes = cat.SHAPES_BY_NEED.get(row["нужда"]) or ()
     if not shapes:
         return None
     shape = rng.choice(list(shapes))
-    return _add(ctx, rng, shape, row.get("основание", "size"), region,
-                int(row.get("гекс", -1)),
-                row.get("мера", "") or rng.choice(shape.about),
-                born_year=year, given=row.get("имя", ""))
+    wonder = _add(ctx, rng, shape, row.get("основание", "size"), region,
+                  int(row.get("гекс", -1)),
+                  row.get("мера", "") or rng.choice(shape.about),
+                  born_year=year, given=row.get("имя", ""))
+    if wonder is not None:
+        wonder.marks.append({
+            "год": year, "что": "названо чудом", "кто": witness.id,
+            "отчего": "стояло и прежде, а чудом его назвали те, кто "
+                      "поселился рядом: %s" % witness.name})
+    return wonder
 
 
 def _add(ctx, rng, shape, ground, region, index, measure, born_year=1,
@@ -496,6 +522,8 @@ def upkeep(ctx, year: int, period: int) -> None:
     scale = period / 10.0
 
     _name_natural(ctx, year, rng, scale)
+    if rng.chance(SCAR_RATE * scale):
+        _from_scar(ctx, year, rng)
     if rng.chance(BUILT_RATE * scale):
         _build(ctx, year, rng)
 
@@ -506,6 +534,73 @@ def upkeep(ctx, year: int, period: int) -> None:
         _compile_list(ctx, year, rng)
     if rng.chance(FALSE_RATE * scale):
         _expose(ctx, year, rng)
+
+
+# ---------------------------------------------------------------------------
+# Чудо, которое сделала беда
+# ---------------------------------------------------------------------------
+#
+# Беда не только рушит чудеса — иногда она их и оставляет. Земля
+# разошлась, и через век в разлом ходят смотреть; город ушёл под воду, и
+# озеро на его месте стали звать по имени города. Такое чудо нельзя
+# найти на карте: карты эти шрамы не знала, их написала история.
+
+# Из какого шрама что выходит. Шрамов видов больше, но чудом становится
+# не всякий: сгоревший лес — беда, а не чудо.
+SCAR_SHAPES = {
+    "новый каньон": ("canyon", "ущелье это разошлось на глазах живших, и "
+                               "дна его с тех пор никто не достал"),
+    "новая гора": ("peak", "её не было при дедах, и это помнят"),
+    "озеро на месте города": ("lake", "на дне его стоит город, и в тихую "
+                                      "воду видно крыши"),
+    "лавовое поле": ("waste", "камень тут остыл не весь, и по нему не "
+                              "растёт ничего"),
+    "пепельная пустошь": ("waste", "пепел лежал тут десятки лет, а теперь "
+                                   "на нём сады, каких нет нигде"),
+}
+
+
+def _from_scar(ctx, year: int, rng) -> None:
+    """Шрам беды, на который стали ходить смотреть.
+
+    Нужно, чтобы шрам отстоял от беды на век с лишним: пока беда
+    помнится, место это не чудо, а горе. И нужно, чтобы в земле жили —
+    иначе смотреть на него некому.
+    """
+    world = ctx.world
+    pool = []
+    for scar in sorted(world.scars.values(), key=lambda item: item.id):
+        if scar.created is None or year - scar.created.year < SCAR_QUIET:
+            continue
+        if scar.kind not in SCAR_SHAPES:
+            continue
+        if _witness(world, world.regions.get(scar.region_id), year) is None:
+            continue
+        if any(item.scar_id == scar.id for item in world.wonders.values()):
+            continue
+        pool.append(scar)
+    if not pool:
+        return
+    scar = rng.choice(pool)
+    key, measure = SCAR_SHAPES[scar.kind]
+    shapes = [item for item in cat.SHAPES_BY_NEED.get(key, ())]
+    if not shapes:
+        return
+    shape = rng.choice(shapes)
+    calamity = world.calamities.get(scar.calamity_id)
+    region = world.regions.get(scar.region_id)
+    wonder = _add(ctx, rng, shape, "story", region, -1, measure,
+                  born_year=year)
+    if wonder is None:
+        return
+    wonder.scar_id = scar.id
+    witness = _witness(world, region, year)
+    wonder.marks.append({
+        "год": year, "что": "названо чудом",
+        "кто": witness.id if witness is not None else "",
+        "отчего": "его оставила беда по имени %s" % calamity.name
+        if calamity is not None else "его оставила давняя беда"})
+    scar.notes.append("%d: на него стали ходить смотреть как на чудо" % year)
 
 
 # ---------------------------------------------------------------------------
@@ -692,9 +787,18 @@ def _tick(ctx, wonder, year: int, rng, scale: float) -> None:
                         "в эту землю вернулись жить, и вернулись к нему"
                         if _peopled(world, wonder.region_id)
                         else "его нашли те, кто искал совсем не его")
-    elif wonder.state in (cat.RUINS, cat.HURT) and rng.chance(FIX_RATE * scale):
-        _move_state(ctx, wonder, year, rng, cat.FIXED,
-                    "нашлась держава, которой это понадобилось")
+    elif wonder.state in (cat.RUINS, cat.HURT) \
+            and rng.chance(FIX_RATE * scale):
+        # Поднять заново можно стену и храм. Лес и озеро никто не
+        # «восстанавливает» — они оправляются сами, и причина у этого
+        # своя, а не державная.
+        shape = cat.SHAPES_BY_KEY.get(wonder.shape)
+        if shape is not None and shape.kind == cat.NATURAL:
+            _move_state(ctx, wonder, year, rng, cat.STANDS,
+                        "прошло столько лет, что следов беды уже не видно")
+        else:
+            _move_state(ctx, wonder, year, rng, cat.FIXED,
+                        "нашлась держава, которой это понадобилось")
 
 
 def _fame_cap(world, wonder) -> int:

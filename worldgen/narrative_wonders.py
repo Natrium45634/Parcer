@@ -176,6 +176,8 @@ def fame_moved(rng, wonder, up: bool) -> tuple:
 # ---------------------------------------------------------------------------
 
 STATE_LINES = {
+    cat.STANDS: ("%(who_cap)s снова %(whole)s: %(why)s.",
+                 "О %(name)s говорят, что %(he)s оправилось: %(why)s."),
     cat.HURT: ("%(who_cap)s стоит, но уже не %(whole_in)s: %(why)s.",
                "С %(name)s случилось то, что рано или поздно случается со "
                "всем: %(why)s. %(he_cap)s стоит, но половина %(it_of)s "

@@ -2702,6 +2702,7 @@ class Wonder:
     truth: str = ""            # как было на самом деле
     claimed: bool = False      # чудом зовут, а чудом оно не было
     lists: list = field(default_factory=list)        # в чьих списках стоит
+    scar_id: str = ""          # если чудо оставила беда — какой её шрам
     notes: list = field(default_factory=list)
 
     @property

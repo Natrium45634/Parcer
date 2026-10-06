@@ -787,20 +787,31 @@ def check_wonders(world, seed: str) -> list:
                             "как: «%s»" % (seed, wonder.name, wonder.access))
             break
 
-        # Чудом называют люди, а не карта: к году, когда его назвали, в
-        # этой земле должен был кто-то быть.
-        region = world.regions.get(wonder.region_id)
-        if region is not None:
-            came = [item.founded.year for item in world.settlements.values()
-                    if item.region_id == region.id]
-            came += [item.founded.year for item in world.tribes.values()
-                     if getattr(item, "region_id", "") == region.id]
-            if came and min(came) > wonder.born.year:
+        # Чудом называют люди, а не карта: у природного чуда записан тот,
+        # кто его назвал, и этот кто-то должен был к тому году появиться.
+        # Проверяется именно по записанному свидетелю: по нынешним
+        # границам это уже не проверить — племена кочуют, и к концу
+        # истории в земле стоят другие.
+        named = [mark for mark in wonder.marks
+                 if mark.get("что") == "названо чудом"]
+        if shape.kind == cat.NATURAL and not wonder.polity_id and not named:
+            problems.append("сид «%s»: у природного чуда по имени %s не "
+                            "записано, кто его назвал чудом"
+                            % (seed, wonder.name))
+            break
+        for mark in named:
+            who = world.entity(mark.get("кто", ""))
+            if who is None:
+                continue        # свидетель мог не дожить до конца истории
+            came = getattr(who, "founded", None)
+            if came is not None and came.year > wonder.born.year:
                 problems.append("сид «%s»: чудо по имени %s названо в %d "
-                                "году, а первые люди пришли в эту землю в %d"
+                                "году, а назвавшие его явились в %d"
                                 % (seed, wonder.name, wonder.born.year,
-                                   min(came)))
+                                   came.year))
                 break
+        if problems:
+            break
 
         # Природное чудо не «разрушают до основания»: реку нельзя снести.
         if shape.kind != cat.BUILT and wonder.state in (cat.RUINS, cat.GONE):
@@ -839,13 +850,22 @@ def check_wonders(world, seed: str) -> list:
 
     # Списки чудес: числительное в падеже и ссылки на живые чудеса.
     if not problems:
+        from worldgen.timeline import plural
         for row in (world.notes.get("списки чудес") or []):
             name = row.get("имя", "")
-            if "чудес державы" not in name and "чудес народа" not in name \
-                    and "чуда державы" not in name \
-                    and "чуда народа" not in name:
-                problems.append("сид «%s»: список чудес назван не по-русски: "
-                                "«%s»" % (seed, name))
+            # «Три чудес» — счёт, собранный без согласования. Проверяется
+            # не подстрокой, а тем же правилом, каким имя и собиралось:
+            # сколько чудес в списке, такая и форма слова.
+            count = len(row.get("чудеса", ()))
+            want = plural(count, "чудо", "чуда", "чудес")
+            if (" %s " % want) not in name:
+                problems.append("сид «%s»: список из %d чудес назван «%s» — "
+                                "тут нужно «%s»" % (seed, count, name, want))
+                break
+            if "державы по имени" not in name \
+                    and "народа по имени" not in name:
+                problems.append("сид «%s»: у списка «%s» не названо, чей он"
+                                % (seed, name))
                 break
             if not 1 <= int(row.get("год", 0)) <= total:
                 problems.append("сид «%s»: список «%s» составлен в %s году"
@@ -4045,7 +4065,7 @@ def check_faiths(world, seed: str) -> list:
 
 
 def check_catalogues() -> list:
-    """Сходятся ли каталоги живой беды между собой.
+    """Сходятся ли каталоги между собой: беда, субъекты, следы, чудеса.
 
     Мир тут не нужен: это проверка договора. Ответ, которого правитель
     «хочет», должен ссылаться на настоящую черту нрава; задержка фронта —
@@ -4068,9 +4088,11 @@ def check_catalogues() -> list:
     vulns = set(dis.VULNERABILITIES)
 
     def miss(what, rows, known):
+        # Приставка общая на все каталоги: тут сверяются не только беды,
+        # но и субъекты, следы, нашествия и чудеса.
         bad = sorted(set(rows) - set(known))
         if bad:
-            problems.append("каталог беды: %s — нет такого: %s"
+            problems.append("каталоги: %s — нет такого: %s"
                             % (what, ", ".join(bad)))
 
     miss("ключи бед у шрамов",
@@ -4176,6 +4198,58 @@ def check_catalogues() -> list:
         if kind != sub.PEOPLE and not [one for one, kinds in sub.WISHES
                                        if kind in kinds]:
             problems.append("каталог субъектов: у рода «%s» нет цели" % kind)
+
+    # Чудеса света: у облика должны быть настоящий род, настоящие
+    # основания и хоть одна строка о том, чем оно примечательно. Облик
+    # без основания не выпадет никогда, а облик без строки выпадет и
+    # окажется чудом, о котором нечего сказать.
+    from worldgen import wonders as won
+    from worldgen.systems import wonders as won_sys
+    miss("роды у обликов чудес", [item.kind for item in won.SHAPES],
+         {key for key, _n, _a in won.KINDS})
+    miss("основания у обликов чудес",
+         [key for item in won.SHAPES for key in item.grounds],
+         set(won.GROUNDS_BY_KEY))
+    miss("состояния в лестнице порчи", list(won_sys.HARM),
+         set(won.STATES_BY_KEY))
+    miss("состояния, которые считаются утратой", list(won.LOST_STATES),
+         set(won.STATES_BY_KEY))
+    miss("облики, которые портит беда", list(won_sys.MARRABLE),
+         {item.need for item in won.SHAPES})
+    miss("основания, которые можно оспорить", list(won_sys.DOUBTFUL),
+         set(won.GROUNDS_BY_KEY))
+    miss("облики у чудес из шрамов",
+         [key for key, _about in won_sys.SCAR_SHAPES.values()],
+         set(won.SHAPES_BY_NEED))
+    from worldgen import disaster as dis_scars
+    miss("виды шрамов у чудес", list(won_sys.SCAR_SHAPES),
+         {item.key for item in dis_scars.SCARS})
+    miss("состояния, из которых ход легче", list(won_sys.EASIER),
+         set(won.ACCESS_BY_KEY))
+    miss("состояния, в которые ход легче",
+         list(won_sys.EASIER.values()), set(won.ACCESS_BY_KEY))
+    for item in won.SHAPES:
+        if not item.about:
+            problems.append("каталог чудес: у облика «%s» не сказано, чем "
+                            "оно примечательно" % item.key)
+        if not item.grounds:
+            problems.append("каталог чудес: у облика «%s» нет ни одного "
+                            "основания" % item.key)
+    if len({item.key for item in won.SHAPES}) != len(won.SHAPES):
+        problems.append("каталог чудес: два облика с одним ключом")
+    if set(won.STATES_BY_KEY) - set(won_sys.HARM):
+        problems.append("каталог чудес: состояние вне лестницы порчи — %s"
+                        % ", ".join(sorted(set(won.STATES_BY_KEY)
+                                           - set(won_sys.HARM))))
+    if len(won.FAME_WORDS) != won.TOP_FAME + 1:
+        problems.append("каталог чудес: ступеней славы не столько, сколько "
+                        "слов")
+    for said in won.FAME_WORDS:
+        # Слова шкалы ставятся к чуду любого рода, поэтому местоимения
+        # из них убраны: «о горе знают соседи», а не «о ней о нём».
+        if "нём" in said or "ней" in said:
+            problems.append("каталог чудес: в слове о славе осталось "
+                            "местоимение: «%s»" % said)
 
     # Имена нашествий привязаны к роду пришедших: ссылка на несуществующий
     # род сделала бы имя общим, и рой снова звался бы «Разбитой Короной».
