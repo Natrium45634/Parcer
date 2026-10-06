@@ -78,6 +78,23 @@ WEIGHT_CHOICES = (
 # кладать незачем: сорок тысяч строк не читают, а отбор на то и дан.
 FIGURES_LIMIT = 4000
 
+# Ручки отбора в списке чудовищ. Те же, что у личностей, и по той же
+# причине: сотня тварей простынёй не читается, а спрашивают о них всегда
+# одно и то же — кто тут самый матёрый и кого из них ещё не убили.
+ANY_KIND = "Все виды"
+ANY_FAMILY = "Все рода"
+ANY_LAND = "Все земли"
+ANY_FATE = "Любая судьба"
+TIER_CHOICES = (
+    ("Все, кто есть", 0),
+    ("Опасные и выше", 1),
+    ("Сильные и выше", 2),
+    ("Матёрые и выше", 3),
+    ("Древние и выше", 4),
+    ("Великие и выше", 5),
+    ("Легендарные и выше", 6),
+)
+
 
 def _as_year(var):
     """Год из поля ввода: пусто и ерунда — это «не задано», а не ноль."""
@@ -556,9 +573,15 @@ class ChronicleApp(tk.Tk):
         self.creatures_text = self._add_text_tab(
             "Виды существ", lambda: self._set_text(
                 self.creatures_text, chronicle.render_creatures(self.world)))
-        self.monsters_text = self._add_text_tab(
-            "Чудовища", lambda: self._set_text(
-                self.monsters_text, chronicle.render_monsters(self.world)))
+        # Чудовищ в мире сотня, и простынёй их читать нельзя: нужен тот
+        # же отбор, что у личностей, — по виду, ступени, роду и земле.
+        self.monster_tree = self._add_tree_tab(
+            "Чудовища",
+            ("Имя", "Вид", "Ступень", "Порода", "Род", "Земля", "Годы",
+             "Убито", "Клад", "Судьба"),
+            (210, 150, 165, 120, 120, 160, 110, 80, 80, 190),
+            self._on_monster_open, toolbar=self._monsters_toolbar,
+            filler=lambda: self._fill_monsters())
         self.artifacts_text = self._add_text_tab(
             "Вещи", lambda: self._set_text(
                 self.artifacts_text, chronicle.render_artifacts(self.world)))
@@ -1224,6 +1247,7 @@ class ChronicleApp(tk.Tk):
         if getattr(self, "land", None) is not None:
             self.land.clear()      # и страница места прошлого мира тоже
         self._fill_figure_picks()   # в списках выбора — только то, что в мире есть
+        self._fill_monster_picks()
         self.refresh_chronicle()
         self._set_text(self.eras_text, chronicle.render_eras(world))
         self._set_text(self.folks_text, chronicle.render_folks(world))
@@ -1400,6 +1424,138 @@ class ChronicleApp(tk.Tk):
                 calamity.resolution or "длится", len(calamity.relic_ids))))
         self._fill_tree(self.calamity_tree, rows)
 
+    def _monsters_toolbar(self, parent) -> None:
+        """Ручки отбора над списком чудовищ.
+
+        Тварей в мире за десять тысяч лет набирается под сотню, и простынёй
+        их читать нельзя: вопрос к этому списку всегда один и тот же —
+        кто тут самый матёрый, в какой он земле и жив ли он ещё.
+        """
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", pady=(6, 3))
+
+        def pick(label, var, values, width):
+            ttk.Label(bar, text=label).pack(side="left", padx=(8, 4))
+            box = ttk.Combobox(bar, textvariable=var, state="readonly",
+                               width=width, values=values)
+            box.pack(side="left")
+            box.bind("<<ComboboxSelected>>", lambda _e: self._refill_monsters())
+            return box
+
+        self.mon_kind_var = tk.StringVar(value=ANY_KIND)
+        self.mon_kind_box = pick("Вид:", self.mon_kind_var, [ANY_KIND], 20)
+        self.mon_tier_var = tk.StringVar(value=TIER_CHOICES[0][0])
+        pick("Ступень:", self.mon_tier_var,
+             [name for name, _ in TIER_CHOICES], 22)
+        self.mon_family_var = tk.StringVar(value=ANY_FAMILY)
+        self.mon_family_box = pick("Род:", self.mon_family_var, [ANY_FAMILY], 16)
+        self.mon_fate_var = tk.StringVar(value=ANY_FATE)
+        self.mon_fate_box = pick("Судьба:", self.mon_fate_var, [ANY_FATE], 14)
+        self.mon_land_var = tk.StringVar(value=ANY_LAND)
+        self.mon_land_box = pick("Земля:", self.mon_land_var, [ANY_LAND], 18)
+
+        ttk.Label(bar, text="Имя:").pack(side="left", padx=(12, 4))
+        self.mon_find_var = tk.StringVar(value="")
+        entry = ttk.Entry(bar, textvariable=self.mon_find_var, width=16)
+        entry.pack(side="left")
+        entry.bind("<Return>", lambda _e: self._refill_monsters())
+        ttk.Button(bar, text="Сбросить",
+                   command=self._reset_monsters).pack(side="left", padx=6)
+        self.monsters_note = tk.StringVar(value="")
+        ttk.Label(bar, textvariable=self.monsters_note).pack(side="left",
+                                                             padx=10)
+
+    def _reset_monsters(self) -> None:
+        self.mon_kind_var.set(ANY_KIND)
+        self.mon_tier_var.set(TIER_CHOICES[0][0])
+        self.mon_family_var.set(ANY_FAMILY)
+        self.mon_fate_var.set(ANY_FATE)
+        self.mon_land_var.set(ANY_LAND)
+        self.mon_find_var.set("")
+        self._refill_monsters()
+
+    def _refill_monsters(self) -> None:
+        if self.world is None:
+            return
+        self.status_var.set("Собираю таблицу…")
+        self.update_idletasks()
+        self._fill_monsters()
+        self._say_ready()
+
+    def _fill_monster_picks(self) -> None:
+        """В списках выбора — только то, что в этом мире действительно есть."""
+        world = self.world
+        from worldgen import creatures as cr
+        kinds, families, fates, lands = set(), set(), set(), set()
+        for item in world.monsters.values():
+            kin = world.species_of(item.species) if item.species else None
+            kinds.add(kin.name if kin is not None else item.word)
+            families.add(item.family)
+            fates.add(item.status)
+            region = world.regions.get(item.region_id)
+            if region is not None:
+                lands.add(region.name)
+        self.mon_kind_box.config(values=[ANY_KIND] + sorted(kinds))
+        self.mon_family_box.config(values=[ANY_FAMILY] + sorted(families))
+        self.mon_fate_box.config(values=[ANY_FATE] + sorted(fates))
+        self.mon_land_box.config(values=[ANY_LAND] + sorted(lands))
+        del cr
+
+    def _fill_monsters(self) -> None:
+        world = self.world
+        from worldgen import creatures as cr
+
+        def want(var, empty):
+            chosen = getattr(self, var, None)
+            return chosen.get() if chosen is not None else empty
+
+        kind_name = want("mon_kind_var", ANY_KIND)
+        family = want("mon_family_var", ANY_FAMILY)
+        fate = want("mon_fate_var", ANY_FATE)
+        land = want("mon_land_var", ANY_LAND)
+        find = want("mon_find_var", "").strip().lower()
+        floor = dict(TIER_CHOICES).get(want("mon_tier_var",
+                                            TIER_CHOICES[0][0]), 0)
+
+        rows = []
+        matched = 0
+        for item in world.monsters.values():
+            kin = world.species_of(item.species) if item.species else None
+            shape = cr.KINDS_BY_KEY.get(item.species)
+            name = kin.name if kin is not None else item.word
+            region = world.regions.get(item.region_id)
+            if kind_name != ANY_KIND and name != kind_name:
+                continue
+            if family != ANY_FAMILY and item.family != family:
+                continue
+            if fate != ANY_FATE and item.status != fate:
+                continue
+            if land != ANY_LAND and (region is None or region.name != land):
+                continue
+            if item.tier < floor:
+                continue
+            if find and find not in item.name.lower():
+                continue
+            matched += 1
+            slayer = world.figures.get(item.slayer_id)
+            doom = item.status
+            if slayer is not None:
+                doom = "%s — %s" % (item.status, slayer.name)
+            years = "%d—%s" % (item.born.year,
+                               item.ended.year if item.ended else "доныне")
+            rows.append((item.id, (
+                item.name, name,
+                cr.tier_word(shape, item.tier) if shape else item.word,
+                item.word, item.family,
+                region.name if region is not None else "—",
+                years, item.kills, item.hoard, doom)))
+        # Матёрые вперёд: о них и спрашивают.
+        rows.sort(key=lambda row: (-int(row[1][7]), row[1][0]))
+        self._fill_tree(self.monster_tree, rows)
+        note = getattr(self, "monsters_note", None)
+        if note is not None:
+            note.set("показано %d из %d" % (matched, len(world.monsters)))
+
     def _fill_figures(self) -> None:
         world = self.world
         only_noble = getattr(self, "only_noble", None)
@@ -1525,6 +1681,9 @@ class ChronicleApp(tk.Tk):
 
     def _on_calamity_open(self, event) -> None:
         self._open_card(self._selected(self.calamity_tree))
+
+    def _on_monster_open(self, event) -> None:
+        self._open_card(self._selected(self.monster_tree))
 
     def _on_faith_open(self, event) -> None:
         self._open_card(self._selected(self.faith_tree))
@@ -1773,6 +1932,32 @@ class ChronicleApp(tk.Tk):
                 ("Полегло", entity.deaths),
                 ("Пали", ", ".join(name_of(fid) for fid in entity.fallen_ids) or "—"),
                 ("Решающая", "да" if entity.decisive else "нет"),
+            ]
+        elif kind == "Monster":
+            from worldgen import creatures as cr
+            from worldgen import narrative_creatures as cr_texts
+            kin = world.species_of(entity.species) if entity.species else None
+            shape = cr.KINDS_BY_KEY.get(entity.species)
+            fields = [
+                ("Вид", kin.name if kin is not None else entity.word),
+                ("Ступень", "%s (%d)"
+                 % (cr.tier_word(shape, entity.tier) if shape else entity.word,
+                    entity.tier)),
+                ("Ветвь", entity.variant or "—"),
+                ("Откуда сила",
+                 cr_texts.power_line(entity.source, entity.gender) or "—"),
+                ("Порода", entity.word),
+                ("Род", entity.family),
+                ("Завелось", entity.born.long()),
+                ("Земля", name_of(entity.region_id)),
+                ("Логово", name_of(entity.site_id)),
+                ("Прячется в городе", name_of(entity.settlement_id)),
+                ("Убито", entity.kills),
+                ("Налётов", entity.raids),
+                ("Клад", entity.hoard),
+                ("Состояние", entity.status),
+                ("Кончил его", name_of(entity.slayer_id)),
+                ("Конец", entity.ended.long() if entity.ended else "—"),
             ]
         elif kind == "Camp":
             fields = [
