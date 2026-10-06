@@ -134,11 +134,13 @@ def settle(ctx) -> None:
     """
     world = ctx.world
     rng = ctx.rng("creatures", "settle")
+    used = {}
     for kin in sorted(world.species.values(), key=lambda item: item.id):
-        maker = _maker_for(world, kin, rng)
+        maker = _maker_for(world, kin, rng, used)
         if maker is not None:
             kin.maker_id = maker.id
             kin.origin_note = maker.given_name
+            used[maker.id] = used.get(maker.id, 0) + 1
         title, text = texts.species_born(rng, kin, kin.origin_note)
         world.add_event(
             date=ctx.date_in(rng, 1), era_index=0, kind="species_born",
@@ -578,20 +580,34 @@ def _power_for(rng, kin) -> str:
     return rng.weighted(pairs)
 
 
-def _maker_for(world, kin, rng):
-    """Тот, кто за этим стоит: бог, первородный или никто."""
+# За одним творцом числится не больше этого числа родов. На час творения
+# в мире бывает один-единственный бог — и без потолка все шесть видов
+# выходили делом одних рук, а это уже не пантеон, а мастерская.
+MAKER_LIMIT = 2
+
+
+def _maker_for(world, kin, rng, used=None):
+    """Тот, кто за этим стоит: бог, первородный или никто.
+
+    `used` — сколько родов уже числится за каждым. Если свободных нет,
+    имя не называется вовсе: «созданы богом» без имени — честный ответ,
+    а один творец на весь мир — нет.
+    """
     if kin.origin not in ("god_made", "god_blood", "beast_made", "elder_kin",
                           "fallen_god"):
         return None
+    used = used or {}
     want_first = kin.origin in ("god_blood", "elder_kin", "fallen_god")
     pool = [deity for deity in world.deities.values()
             if bool(getattr(deity, "primordial", False)) == want_first]
     if not pool:
         pool = list(world.deities.values())
-    if not pool:
+    fresh = [deity for deity in pool
+             if used.get(deity.id, 0) < MAKER_LIMIT]
+    if not fresh:
         return None
-    pool.sort(key=lambda item: item.id)
-    return rng.choice(pool)
+    fresh.sort(key=lambda item: item.id)
+    return rng.choice(fresh)
 
 
 def _some_region(world, kind, rng):

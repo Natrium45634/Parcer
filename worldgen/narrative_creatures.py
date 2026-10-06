@@ -26,25 +26,31 @@ BORN_TEMPLATES = (
     "%(who)s в этом мире %(origin)s: %(about)s.",
     "О том, откуда взялись %(who_low)s, говорят так: %(origin)s — "
     "%(about)s.",
-    "%(who)s — не из тех, кто был тут всегда. Они %(origin)s, и "
-    "%(about)s.",
+    "%(who)s — не из тех, кто был тут всегда. Они %(origin)s. "
+    "%(about_cap)s.",
     "Начало этого рода известно: %(who_low)s %(origin)s. %(about_cap)s.",
 )
 
+# Строка о том, кто за этим стоит, идёт следом за пояснением — и потому
+# не повторяет его, а только называет имя.
 MAKER_LINES = {
-    "god_made": "Сделал их %(maker)s, и по сей день видно, для чего.",
-    "god_blood": "Кровь, из которой они поднялись, была кровью того, "
-                 "кого звали %(maker)s.",
-    "beast_made": "Вывел их %(maker)s — ему нужно было войско, а не "
-                  "потомство.",
-    "elder_kin": "Кровь их идёт от того, кого звали %(maker)s.",
-    "fallen_god": "Был он %(maker)s, пока был.",
+    "god_made": "Имя тому, кто их сделал, — %(maker)s.",
+    "god_blood": "Кровь та была кровью того, кого звали %(maker)s.",
+    "beast_made": "Вывел их %(maker)s.",
+    "elder_kin": "Первородного того звали %(maker)s.",
+    "fallen_god": "Звали его тогда %(maker)s.",
 }
 
 
 def species_born(rng, kin, maker_name: str = "") -> tuple:
     name, about = cr.ORIGINS_BY_KEY.get(kin.origin, ("неизвестно откуда", ""))
-    text = rng.choice(BORN_TEMPLATES) % {
+    # «Не из тех, кто был тут всегда» не говорят о тех, кто как раз был
+    # тут всегда: оборот и пояснение спорили бы в одной фразе.
+    shapes = BORN_TEMPLATES
+    if kin.origin == "natural":
+        shapes = tuple(row for row in BORN_TEMPLATES
+                       if "кто был тут всегда" not in row)
+    text = rng.choice(shapes) % {
         "who": kin.name, "who_low": kin.name.lower(),
         "origin": name, "about": about, "about_cap": cap(about),
     }
@@ -116,10 +122,11 @@ VARIANT_TEMPLATES = (
     "%(name)s — то же самое и уже не то же: %(why)s. Отличить их от "
     "прочих можно с одного взгляда, и те, кто живёт рядом, отличают.",
     "Мир узнаёт, что %(who_low)s бывают разные: в земле по имени "
-    "%(region)s видели тех, кого зовут теперь %(name)s. %(why_cap)s.",
+    "%(region)s видели тех, кого зовут теперь %(name)s. Причиной тому "
+    "называют %(why)s.",
     "То, что вышло в земле по имени %(region)s, сперва считали уродством "
-    "одного выводка. Через два поколения стало ясно, что это ветвь: "
-    "%(name)s, и %(why)s.",
+    "одного выводка. Через два поколения стало ясно, что это ветвь — "
+    "%(name)s, — и что причина ей %(why)s.",
 )
 
 
