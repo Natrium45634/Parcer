@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from . import creatures as cr
 from .narrative import cap
+from .timeline import plural
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +248,12 @@ def nature_lines(kin) -> list:
             "плодится: %s" % kin.breeding,
             "держится %s — %s" % (social_name, social_about)]
     if kin.years:
-        rows.append("живёт около %d лет" % kin.years)
+        # «Около 41 лет» — не по-русски, а веков у видов бывает всякий:
+        # и 41 год, и 2 года, и 3240 лет.
+        rows.append("живёт около %s" % plural(kin.years,
+                                              "%d года" % kin.years,
+                                              "%d лет" % kin.years,
+                                              "%d лет" % kin.years))
     rarity, about, _named, _cap = cr.RARITIES_BY_KEY.get(
         kin.rarity, cr.RARITIES_BY_KEY["common"])
     rows.append("редкость: %s — %s" % (rarity, about))
