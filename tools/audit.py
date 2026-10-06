@@ -1453,6 +1453,35 @@ def m_hex_holders(world):
     return round(sum(len(rule) for rule in busy) / float(len(busy)), 2)
 
 
+def m_portrait_varied(world):
+    """Сколько разных зачинов у портретов мест.
+
+    Если на полсотни мест приходится три зачина, портрет перестаёт быть
+    портретом и становится шаблоном: человек видит одно и то же.
+    """
+    from worldgen import landlore
+    rows = _land_first(world)
+    if not rows:
+        return None
+    firsts = set()
+    for index, _steps, _rule in rows:
+        said = landlore.portrait(world, index, world.total_years)
+        if said:
+            firsts.add(said[0])
+    return len(firsts) or None
+
+
+def m_portrait_told(world):
+    """Доля мест, о которых портрет вообще что-то говорит."""
+    from worldgen import landlore
+    rows = _land_first(world)
+    if not rows:
+        return None
+    said = sum(1 for index, _steps, _rule in rows
+               if landlore.portrait(world, index, world.total_years))
+    return _share(said, len(rows))
+
+
 def m_land_dull(world):
     """Доля мест, о которых нечего сказать."""
     spread, _top = _land_scores(world)
@@ -1950,6 +1979,10 @@ MEASURES = (
     Measure("мир", "летописей в одну запись", m_thin_codices, None, 0.2,
             "доля", "свод начинают с того, что город ещё помнит",
             min_years=3000),
+    Measure("земля", "разных зачинов у портретов", m_portrait_varied, 12,
+            None, "штук", "портрет — не шаблон на весь мир"),
+    Measure("земля", "портрет собрался", m_portrait_told, 1.0, None, "доля",
+            "о всяком месте есть что сказать словами"),
     Measure("земля", "первые следы названы", m_first_told, 0.95, None,
             "доля", "где стоял город, там известно, когда сюда пришли"),
     Measure("земля", "видов свидетельства", m_first_evidence, 3, None,

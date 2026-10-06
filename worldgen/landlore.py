@@ -41,7 +41,9 @@ from . import worldmap as wm
 from .mapregions import FEATURE_NOUNS, translit
 from .rng import RngHub
 from .timeline import plural
+from . import narrative_land as land_texts
 from .worldforge import BIOME_NAMES
+from .worldforge.biomes import GROUPS as BIOME_GROUPS
 
 # Те же слова, что в карточке карты: расходиться им нельзя.
 AQUIFER_NAMES = ("нет", "лёгкий", "тяжёлый")
@@ -196,6 +198,93 @@ def live_word(wmap, index: int) -> str:
     разное, и доверия не будет ни той, ни другой.
     """
     return _pick(LIVE_SHORT, _habitable(wmap, index))
+
+
+def portrait(world, index: int, year: int = 0) -> list:
+    """Что это за место, если рассказать о нём словами, а не числами.
+
+    Первое, что человек хочет знать о гексе: ледяная ли это пустыня,
+    дымящий ли вулкан, душная ли сельва, — и живёт ли тут кто-нибудь.
+    Числа на этот вопрос отвечают, но через голову: их надо сперва
+    сложить. Портрет складывает их сам.
+
+    Берётся всё из тех же слоёв, что и условия, и теми же порогами:
+    портрет не имеет права спорить с тем, что написано ниже.
+    """
+    wmap = _map_of(world)
+    if wmap is None:
+        return []
+    year = int(year or getattr(world, "total_years", 0))
+    land = bool(wmap.is_land(index))
+    biome = int(_value(wmap, wm.L_BIOME, index))
+    group = BIOME_GROUPS[biome] if biome < len(BIOME_GROUPS) else ""
+
+    flow = 0
+    if wmap.is_river(index):
+        accum = _value(wmap, wm.L_ACCUM, index)
+        flow = 3 if accum >= 120 else (2 if accum >= 20 else 1)
+    moist = _value(wmap, wm.L_MOIST, index)
+
+    facts = {
+        "группа": group, "суша": land, "вода": not land,
+        "высота": round(wmap.elevation_m(index)),
+        "склон": _slope(wmap, index) if land else 0.0,
+        "река": flow,
+        "берег": bool(wmap.is_coast(index)),
+        "озеро": bool(wmap.is_lake(index))
+                 or any(wmap.is_lake(near) for near in wmap.neighbors(index)),
+        "сушь": moist <= 0.25,
+        "размах": 4.0 + 26.0 * abs(wmap.latitude(index)),
+        "житьё": _habitable(wmap, index),
+        "дикость": _value(wmap, wm.L_SAVAGERY, index) / 255.0,
+        "магия": _value(wmap, wm.L_MAGIC, index),
+    }
+    if not land:
+        swing = facts["размах"]
+        temp = _value(wmap, wm.L_TEMP, index)
+        facts["зима"] = temp - swing / 2.0
+        facts["глубина"] = abs(round(wmap.elevation_m(index)))
+    for volcano in (wmap.volcanoes or ()):
+        if volcano.get("i") == index:
+            facts["вулкан"] = volcano.get("status", "спящий")
+            break
+    for peak in (wmap.peaks or ()):
+        if peak.get("i") == index:
+            facts["вершина"] = peak.get("m", 0)
+            break
+    facts["логово"] = any(lair.get("i") == index
+                          for lair in (wmap.lairs or ()))
+
+    # --- обжито или дико ------------------------------------------------
+    found = _anchors(world, index)
+    alive = [item for item in found["settlements"]
+             if _alive_at(item.founded, item.ended, year)]
+    if alive:
+        facts["город"] = alive[0].full_name
+    else:
+        camps = [item for item in found["camps"] + found["tribes"]
+                 if _alive_at(item.founded, item.ended, year)]
+        if camps:
+            facts["стан"] = "%s по имени %s" % (camps[0].word.lower(),
+                                                camps[0].name)
+        else:
+            left = [item for item in found["sites"]
+                    if getattr(item, "created", None) is not None
+                    and item.created.year <= year]
+            gone = [item for item in found["settlements"]
+                    if item.ended is not None and item.ended.year <= year]
+            if left:
+                facts["руины"] = "%s по имени %s" % (left[0].kind,
+                                                     left[0].name)
+            elif gone:
+                facts["руины"] = "остатки того, что звалось %s" \
+                    % gone[0].full_name
+            else:
+                region = _region_of(world, index)
+                facts["ходили"] = bool(region is not None
+                                       and region.discovered_year
+                                       and region.discovered_year <= year)
+    return land_texts.portrait(_rng(world, index, "portrait"), facts)
 
 
 def conditions(world, index: int) -> list:
@@ -1279,10 +1368,15 @@ def brief(world, index: int, year: int = 0) -> list:
         return ["Мир построен без карты."]
     biome = int(_value(wmap, wm.L_BIOME, index))
     name = BIOME_NAMES[biome] if biome < len(BIOME_NAMES) else "неведомая земля"
-    rows = ["## %s" % name,
-            "гекс %d — столбец %d, строка %d"
-            % (index, index % wmap.width, index // wmap.width),
-            "высота ......... %d м" % round(wmap.elevation_m(index))]
+    rows = ["## %s" % name]
+    # Две фразы о том, что это за место, прежде всяких чисел: карточка
+    # узкая, и больше в неё не влезет, а меньше — уже не портрет.
+    for line in portrait(world, index, year)[:2]:
+        rows.append(line)
+    rows.append("")
+    rows.extend(["гекс %d — столбец %d, строка %d"
+                 % (index, index % wmap.width, index // wmap.width),
+                 "высота ......... %d м" % round(wmap.elevation_m(index))])
     temp = _value(wmap, wm.L_TEMP, index)
     rows.append("тепло .......... %+.1f °C в среднем" % temp)
     if wmap.is_land(index):
@@ -1385,6 +1479,12 @@ def blocks(world, index: int, year: int = 0) -> list:
     if region is not None:
         said += ", земля по имени %s" % region.name
     out = [("title", said), ("line", "")]
+
+    # Сперва словами: что это за место вообще. Числа — следом, для тех,
+    # кому нужна точность.
+    for line in portrait(world, index, year):
+        out.append(("line", "  %s" % line))
+    out.append(("line", ""))
 
     out.append(("head", "УСЛОВИЯ"))
     out.append(("line", ""))

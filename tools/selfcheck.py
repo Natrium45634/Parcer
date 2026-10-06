@@ -924,6 +924,44 @@ def check_land(world, seed: str) -> list:
                                 "«%s»" % (seed, item.name, said))
                 break
 
+    # Портрет места: он собирается на всяком гексе, он не пуст, в нём нет
+    # чужого слова — и он не спорит с условиями. Спор тут ловится по
+    # самому грубому: там, где жить нельзя, не может быть сказано, что
+    # земля щедра.
+    if not problems:
+        for index in look:
+            try:
+                said = landlore.portrait(world, index, total)
+            except Exception as error:
+                problems.append("сид «%s»: портрет гекса %d не собрался: %s"
+                                % (seed, index, error))
+                break
+            if not said or len(said) > 6:
+                problems.append("сид «%s»: портрет гекса %d в %d фраз"
+                                % (seed, index, len(said)))
+                break
+            text = " ".join(said)
+            wrong = alien(text)
+            if wrong:
+                problems.append("сид «%s»: в портрете гекса %d чужое слово: "
+                                "«%s»" % (seed, index, wrong))
+                break
+            # Спрос и с воды тоже: хвалить пашню посреди океана — та же
+            # поломка, что хвалить её на леднике. Слова берутся из самого
+            # каталога, а не переписываются сюда: переписанные разойдутся
+            # с ним на первой же правке, и сторож замолчит незаметно.
+            from worldgen.narrative_land import LIFE_LINES
+            best, worst = LIFE_LINES[0][1], LIFE_LINES[-1][1]
+            good = landlore._habitable(wmap, index)
+            if good < 0.22 and any(line in text for line in best):
+                problems.append("сид «%s»: на гексе %d жить нельзя, а "
+                                "портрет хвалит землю" % (seed, index))
+                break
+            if good >= 0.58 and any(line in text for line in worst):
+                problems.append("сид «%s»: на гексе %d жить можно, а "
+                                "портрет хоронит место" % (seed, index))
+                break
+
     # Первое присутствие: год в пределах истории, свидетельство из списка,
     # и — главное — свидетельство не врёт о своей точности. Запись того
     # года называет год, а раскоп называет век: если «по раскопу» стоит
