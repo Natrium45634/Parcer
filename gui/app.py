@@ -19,7 +19,7 @@ from gui.land import LandTab
 from gui.sidetabs import SideTabs
 from gui import wizard as wizard_mod
 from gui.wizard import Wizard
-from worldgen import chronicle, mapworld, storage
+from worldgen import chronicle, landlore, mapworld, storage
 from worldgen.engine import GenerationCancelled, generate
 from worldgen.models import ACTIVE
 from worldgen.races import RACES, RACES_BY_ID, get_race
@@ -435,10 +435,15 @@ class ChronicleApp(tk.Tk):
             # «Ступень» — не то же, что «Тип»: тип говорит, что это такое
             # (чертог, гавань, рудник), ступень — насколько велико. Прежде
             # в этом списке жила «Застава» на сто двадцать тысяч душ.
+            # «Земля» и «Место» — разные вопросы: земля говорит, в какой
+            # части мира город стоит, место — на чём именно он стоит, а из
+            # места и растёт причина, по которой он встал тут.
             ("Название", "Тип", "Ступень", "Раса", "Основан", "Основатель",
-             "Страна", "Население", "Наибольше", "Состояние"),
-            (190, 105, 105, 110, 85, 190, 170, 90, 110, 105),
-            self._on_city_open, filler=lambda: self._fill_cities())
+             "Страна", "Земля", "Место", "Население", "Наибольше",
+             "Состояние"),
+            (190, 105, 105, 110, 85, 190, 170, 150, 240, 90, 110, 105),
+            self._on_city_open, toolbar=self._cities_toolbar,
+            filler=lambda: self._fill_cities())
         self.group_tree = self._add_tree_tab(
             "Племена и лагеря",
             ("Название", "Тип", "Раса", "Основано", "Основатель", "Земля",
@@ -548,6 +553,9 @@ class ChronicleApp(tk.Tk):
         self.crafts_text = self._add_text_tab(
             "Ремёсла", lambda: self._set_text(
                 self.crafts_text, chronicle.render_crafts(self.world)))
+        self.creatures_text = self._add_text_tab(
+            "Виды существ", lambda: self._set_text(
+                self.creatures_text, chronicle.render_creatures(self.world)))
         self.monsters_text = self._add_text_tab(
             "Чудовища", lambda: self._set_text(
                 self.monsters_text, chronicle.render_monsters(self.world)))
@@ -634,8 +642,13 @@ class ChronicleApp(tk.Tk):
         self._on_tab_changed()
         self.land.show_hex(hex_index, year)
 
-    def show_hex_on_map(self, hex_index: int, year: int) -> None:
-        """И обратно: из «Земли» на карту, к тому же гексу и году."""
+    def show_hex_on_map(self, hex_index: int, year: int,
+                        close: bool = False) -> None:
+        """И обратно: из «Земли» на карту, к тому же гексу и году.
+
+        `close` просит приблизить карту к месту: из списка городов
+        приходят к одному городу, и обзорный вид его не покажет.
+        """
         if self.world is None:
             return
         titles = list(self.tabs._titles)
@@ -644,7 +657,7 @@ class ChronicleApp(tk.Tk):
         self.tabs.select(titles.index("Карта мира"))
         self.update_idletasks()
         self._on_tab_changed()
-        self.atlas.look_at(year=year, hex_index=hex_index)
+        self.atlas.look_at(year=year, hex_index=hex_index, close=close)
 
     def _build_history_tab(self) -> None:
         """История мира: отбор по летописи вместо блуждания по разделам.
@@ -854,6 +867,73 @@ class ChronicleApp(tk.Tk):
             self._fillers[str(frame)] = filler
         return self._make_text(frame)
 
+    def _cities_toolbar(self, parent) -> None:
+        """Две дороги от города к его месту.
+
+        В столбце о месте сказано тридцать знаков — «сосновый бор, у
+        реки», — и этого хватает, чтобы понять, но не хватает, чтобы
+        увидеть. Поэтому отсюда две дороги: на карту, где город стоит
+        среди соседей, рек и границ, и в «Землю», где о его гексе
+        рассказано всё и по годам.
+        """
+        bar = ttk.Frame(parent)
+        bar.pack(fill="x", pady=(6, 3))
+        ttk.Label(bar, text="Выбранный город:").pack(side="left", padx=(8, 6))
+        ttk.Button(bar, text="Показать на карте",
+                   command=self.show_city_on_map).pack(side="left")
+        ttk.Button(bar, text="Всё об этом месте",
+                   command=self.show_city_land).pack(side="left", padx=6)
+        self.cities_note = tk.StringVar(value="")
+        ttk.Label(bar, textvariable=self.cities_note).pack(side="left", padx=10)
+
+    def _city_place(self):
+        """Город, его гекс и год, с которых начинается дорога к месту."""
+        if self.world is None:
+            return None, -1, 0
+        settlement = self.world.settlements.get(
+            self._selected(self.city_tree) or "")
+        if settlement is None:
+            self.cities_note.set("Сначала выберите город в списке.")
+            return None, -1, 0
+        if settlement.hex_index < 0:
+            self.cities_note.set("Этот мир построен без карты: гексов в нём "
+                                 "нет, и показывать город не на чем.")
+            return settlement, -1, 0
+        # Живой город смотрят в нынешнем году — там он и стоит, и год на
+        # карте трогать незачем. Павший надо застать живым, и лучший для
+        # этого год — самый людный за всю его жизнь.
+        year = 0
+        if settlement.status != ACTIVE:
+            year = settlement.peak_year or settlement.founded.year
+        self.cities_note.set("")
+        return settlement, settlement.hex_index, year
+
+    def show_city_on_map(self) -> None:
+        """Из списка городов — на карту, к тому гексу, где город стоит."""
+        settlement, index, year = self._city_place()
+        if index < 0:
+            return
+        self.show_hex_on_map(index, year, close=True)
+        if not year:
+            self.status_var.set("На карте: город по имени %s."
+                                % settlement.name)
+        else:
+            # Кадры границ сняты не каждый год, и карта встанет на
+            # ближайший, — поэтому «около», а не «в».
+            gone = settlement.ended.year if settlement.ended else year
+            self.status_var.set(
+                "На карте: город по имени %s — он кончился в %d году, и "
+                "карта показывает его около %d, в самые людные его годы."
+                % (settlement.name, gone, year))
+
+    def show_city_land(self) -> None:
+        """И в «Землю» — всё, что известно о месте под этим городом."""
+        settlement, index, year = self._city_place()
+        if index < 0:
+            return
+        self.show_land(index, year)
+        self.status_var.set("Место под городом по имени %s." % settlement.name)
+
     def _figures_toolbar(self, parent) -> None:
         """Ручки отбора над списком личностей.
 
@@ -957,16 +1037,23 @@ class ChronicleApp(tk.Tk):
         self.tabs.add(frame, text=title)
         if toolbar is not None:
             toolbar(frame)
+        # Полоса прокрутки понизу: столбцов в иных списках дюжина, и при
+        # крупном шрифте правые из них уезжают за край окна. Без неё до
+        # них не добраться вовсе — ни колесом, ни тасканием заголовков.
+        bottom = ttk.Scrollbar(frame, orient="horizontal")
+        bottom.pack(side="bottom", fill="x")
         scroll = ttk.Scrollbar(frame, orient="vertical")
         scroll.pack(side="right", fill="y")
         tree = ttk.Treeview(frame, columns=columns, show="headings",
-                            yscrollcommand=scroll.set)
+                            yscrollcommand=scroll.set,
+                            xscrollcommand=bottom.set)
         for name, width in zip(columns, widths):
             tree.heading(name, text=name,
                          command=lambda t=tree, c=name: self._sort_tree(t, c, False))
-            tree.column(name, width=width, anchor="w")
+            tree.column(name, width=width, anchor="w", stretch=False)
         tree.pack(side="left", fill="both", expand=True)
         scroll.config(command=tree.yview)
+        bottom.config(command=tree.xview)
         tree.bind("<Double-1>", on_open)
         if filler is not None:
             self._fillers[str(frame)] = filler
@@ -1211,11 +1298,17 @@ class ChronicleApp(tk.Tk):
         for settlement in world.settlements.values():
             founder = world.figures.get(settlement.founder_id)
             polity = world.polities.get(settlement.polity_id)
+            region = world.regions.get(settlement.region_id)
             rows.append((settlement.id, (
                 settlement.name, settlement.kind, settlement.rank,
                 get_race(settlement.race_id).name,
                 settlement.founded.year, founder.name if founder else "—",
                 polity.full_name if polity else "—",
+                region.name if region else "—",
+                # Место под городом: на карте — биом с водой и высотой, без
+                # карты — хотя бы то, что о земле знает сама земля.
+                landlore.spot(world, settlement.hex_index)
+                or (region.terrain if region else "") or "—",
                 settlement.population,
                 # По нынешнему числу не видно, что город был вдвое больше
                 # тысячу лет назад, — а это про него самое интересное.

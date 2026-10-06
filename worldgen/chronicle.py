@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import textwrap
 
+from . import creatures
+from . import narrative_creatures as creature_texts
 from . import races as races_mod
 from .models import ACTIVE
 from .timeline import years_text
@@ -2608,6 +2610,17 @@ def render_monsters(world) -> str:
         rows.append("  %-8d %-26s %-18s %8d %7d %s"
                     % (item.born.year, item.name[:26], item.word[:18],
                        item.kills, item.hoard, fate))
+        # Ступень говорит о твари больше, чем порода: «дракон» бывает и
+        # драконёнком, и тем, с кем держава заключает договор.
+        kind = creatures.KINDS_BY_KEY.get(item.species)
+        if kind is not None:
+            rank = "        ступень: %s" % creatures.tier_word(kind, item.tier)
+            if item.variant:
+                rank += " (%s)" % item.variant.lower()
+            power = creature_texts.power_line(item.source, item.gender)
+            if power:
+                rank += "; %s" % power
+            rows.append(rank)
         line = "        земля: %s" % (region.name if region is not None else "—")
         site = world.sites.get(item.site_id)
         if site is not None:
@@ -2623,6 +2636,73 @@ def render_monsters(world) -> str:
                 rows.append("        погибли на охоте: %s"
                             % ", ".join(names[:5]))
     rows.append("")
+    return "\n".join(rows)
+
+
+def render_creatures(world) -> str:
+    """Виды существ: кто водится в этом мире, откуда взялся и что с ним стало.
+
+    Раздел отвечает не на вопрос «кого убили», а на вопрос «кто тут
+    вообще водится». Поэтому первым делом — разумность: мир, где орки
+    зверьё, и мир, где они народ, — это два разных мира, и видно это
+    должно быть сразу.
+    """
+    rows = ["ВИДЫ СУЩЕСТВ", ""]
+    if not world.species:
+        rows.append("  Об этом мире такого не записано.")
+        return "\n".join(rows)
+
+    items = sorted(world.species.values(),
+                   key=lambda item: (not item.is_people, item.name))
+    folk = [item for item in items if item.is_people]
+    feral = [item for item in items
+             if creatures.can_be_folk(item.kind) and not item.is_people]
+    line = "  Видов в мире: %d, народами из них стали %d." % (len(items),
+                                                              len(folk))
+    if feral:
+        line += (" Зверьём остались те, кто мог бы стать народом: %s."
+                 % ", ".join(item.name.lower() for item in feral))
+    else:
+        line += " Народом тут стали все, кто мог им стать."
+    rows.append(line)
+    rows.append("")
+
+    for kin in items:
+        kind = creatures.KINDS_BY_KEY.get(kin.kind)
+        head = "  %s" % kin.name.upper()
+        if kin.status != "живёт":
+            head += " — %s с %d года" % (kin.status, kin.gone_year)
+        rows.append(head)
+        rows.append("      %s" % creature_texts.mind_line(kin))
+        origin_name, origin_about = creatures.ORIGINS_BY_KEY.get(
+            kin.origin, ("неизвестно откуда", ""))
+        line = "      %s: %s" % (origin_name, origin_about)
+        if kin.origin_note:
+            line += " (%s)" % kin.origin_note
+        rows.append(line)
+        for text in creature_texts.nature_lines(kin):
+            rows.append("      %s" % text)
+        for mark in kin.mind_marks:
+            rows.append("      %s" % creature_texts.mark_line(mark))
+        for row in kin.variants:
+            rows.append("      ветвь: %s"
+                        % creature_texts.variant_line(row))
+        if kin.back_year:
+            rows.append("      объявились снова в %d году" % kin.back_year)
+
+        named = [world.monsters[mid] for mid in kin.named
+                 if mid in world.monsters]
+        named.sort(key=lambda item: -item.tier)
+        for item in named[:4]:
+            word = creatures.tier_word(kind, item.tier) if kind else item.word
+            line = "      %s — %s" % (item.name, word)
+            power = creature_texts.power_line(item.source, item.gender)
+            if power:
+                line += "; %s" % power
+            rows.append(line)
+        if len(named) > 4:
+            rows.append("      …и ещё %d с именем" % (len(named) - 4))
+        rows.append("")
     return "\n".join(rows)
 
 
@@ -5113,6 +5193,7 @@ def full_text(world) -> str:
         render_strifes(world),
         render_cabals(world),
         render_upheavals(world),
+        render_creatures(world),
         render_monsters(world),
         render_artifacts(world),
         render_sites(world),

@@ -25,7 +25,7 @@ from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Holiday, WorldOrigin,
                      Invasion, Subject, Trace,
                      Seed, Settlement, Site, Story,
-                     Strife, Township, Godhead, Renown,
+                     Species, Strife, Township, Godhead, Renown,
                      Tale,
                      Temple,
                      Tongue,
@@ -190,6 +190,8 @@ def world_to_dict(world: World) -> dict:
                     for item in world.stories.values()],
         "townships": [_compact(Township, item.to_dict())
                       for item in world.townships.values()],
+        "species": [_compact(Species, item.to_dict())
+                    for item in world.species.values()],
         "godheads": [_compact(Godhead, item.to_dict())
                      for item in world.godheads.values()],
         "renowns": [_compact(Renown, item.to_dict())
@@ -423,6 +425,10 @@ def dict_to_world(data: dict) -> World:
         town = Township(**_clean(Township, item))
         world.townships[town.id] = town
         world._town_of[town.settlement_id] = town.id
+    for item in data.get("species", ()):
+        kin = Species(**_clean(Species, item))
+        world.species[kin.id] = kin
+        world._species_of[kin.kind] = kin.id
     for item in data.get("godheads", ()):
         head = Godhead(**_clean(Godhead, item))
         world.godheads[head.id] = head

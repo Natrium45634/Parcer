@@ -1194,6 +1194,16 @@ class Monster:
     slayer_id: str = ""
     ended: Date = None
     notes: list = field(default_factory=list)
+    # Кто это такой по виду, а не по породе. Ступень не бросается при
+    # появлении: её набирают годами и делами, и потому великих единицы.
+    # Источник силы говорит, откуда она взялась: без него всякая высокая
+    # ступень читается как «ему повезло с броском».
+    species: str = ""              # ключ вида из справочника существ
+    variant: str = ""              # слово разновидности: «Пещерный»
+    variant_kind: str = ""         # род разновидности
+    tier: int = 0
+    source: str = ""               # откуда у него сила
+    tier_marks: list = field(default_factory=list)   # когда и отчего рос
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -2573,4 +2583,76 @@ class WorldOrigin:
         data = asdict(self)
         data["order"] = [row.get("слой", "") for row in self.order]
         data["law_texts"] = self.law_texts
+        return data
+
+
+@dataclass
+class Species:
+    """Вид существ в этом мире: откуда взялся, каков собой и что с ним стало.
+
+    Справочник говорит, что такое дракон вообще. Эта запись говорит, что
+    такое дракон в **этом** мире: кто его сделал, насколько он редок, что
+    у него за разновидности и — главное — разумен ли он тут. Разумность
+    стоит двумя полями, базовой и нынешней, потому что она не свойство, а
+    история: гоблины могли быть народом и одичать, орки — быть зверьём,
+    пока бог не дал им разум.
+
+    `race_id` стоит у видов, которые могут оказаться народом. Если такой
+    вид неразумен, раса не просыпается вовсе — и мир выходит другим.
+    """
+
+    id: str
+    kind: str                      # ключ вида из справочника
+    name: str                      # «Драконы» — как зовут их в летописи
+    word: str                      # «Дракон» — одного из них
+    gender: str
+    race_id: str = ""              # раса, если этот вид — возможный народ
+    origin: str = "natural"        # откуда взялся
+    origin_year: int = 0
+    origin_note: str = ""          # кто именно: бог, первородный, беда
+    maker_id: str = ""             # id бога, первородного или владыки
+    rarity: str = "common"
+    social: str = "alone"
+    diet: str = ""
+    breeding: str = ""
+    years: int = 0                 # сколько живёт обычная особь
+    # Разумность: с чего начал, где стоит сейчас и все переходы с годом и
+    # причиной. Переход — словарь: год, откуда, куда, отчего, кто виноват.
+    base_mind: str = "beastly"
+    mind: str = "beastly"
+    mind_marks: list = field(default_factory=list)
+    # Разновидности: ключ, имя, род разновидности, отчего, год, земля.
+    variants: list = field(default_factory=list)
+    regions: list = field(default_factory=list)    # где его встречали
+    named: list = field(default_factory=list)      # особи с именем
+    top_tier: int = 0              # до какой ступени поднимался в этом мире
+    status: str = "живёт"          # живёт / не встречается / сгинул
+    gone_year: int = 0
+    gone_why: str = ""
+    back_year: int = 0             # когда объявился снова
+    notes: list = field(default_factory=list)
+
+    @property
+    def full_name(self) -> str:
+        return self.name
+
+    @property
+    def is_people(self) -> bool:
+        """Народ ли он в этом мире — а не вообще.
+
+        Разума мало: владыка мёртвых умнее всякого пахаря, а народом от
+        этого не становится. Народом бывает только тот вид, за которым в
+        справочнике рас стоит раса с городами и престолами.
+        """
+        from .creatures import can_be_folk, is_people
+        return can_be_folk(self.kind) and is_people(self.mind)
+
+    @property
+    def mind_changed(self) -> bool:
+        return self.mind != self.base_mind
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["full_name"] = self.full_name
+        data["is_people"] = self.is_people
         return data

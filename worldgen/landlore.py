@@ -875,6 +875,44 @@ def around(world, index: int) -> list:
 # Готовые страницы
 # ---------------------------------------------------------------------------
 
+def spot(world, index: int) -> str:
+    """Где это стоит — одной строкой, в столбец таблицы.
+
+    В списке городов есть страна и земля, а места под городом нет: по
+    строке «Западный Предел» не видно, стоит он на броде, на морском
+    берегу или в горах, — а для города это и есть главное, потому что
+    из места растёт причина, по которой он тут встал. Фраза поэтому
+    нужна короткая: в столбец умещается тридцать знаков, а не абзац, —
+    берутся биом и самое заметное из воды и высоты, остальное человек
+    смотрит в «Земле».
+
+    Пусто, если мир построен без карты: гексов в нём нет, и места под
+    городом тоже.
+    """
+    wmap = _map_of(world)
+    if wmap is None or index < 0 or index >= wmap.width * wmap.height:
+        return ""
+    biome = int(_value(wmap, wm.L_BIOME, index))
+    name = BIOME_NAMES[biome] if biome < len(BIOME_NAMES) else "неведомая земля"
+    marks = []
+    if wmap.is_river(index):
+        flow = _value(wmap, wm.L_ACCUM, index)
+        marks.append("у большой реки" if flow >= 120 else "у реки")
+    if wmap.is_coast(index):
+        marks.append("на берегу")
+    elif any(wmap.is_lake(near) for near in wmap.neighbors(index)):
+        marks.append("у озера")
+    if not marks and wmap.is_land(index):
+        # Высота говорит о месте только тогда, когда о нём больше нечего
+        # сказать: город у реки в горах — это прежде всего город у реки.
+        height = round(wmap.elevation_m(index))
+        if height >= 1500:
+            marks.append("высоко в горах")
+        elif height >= 700:
+            marks.append("на высоте")
+    return ", ".join([name.lower()] + marks[:2])
+
+
 def brief(world, index: int, year: int = 0) -> list:
     """Коротко: что это за место и стоит ли тут что-нибудь. Для карточки."""
     wmap = _map_of(world)

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from . import creatures as creature_sys
 from . import tongues as tongues_mod
 from .. import folk as folk_mod
 from .. import mapworld
@@ -78,6 +79,7 @@ def plan_awakenings(ctx) -> None:
     era_count = len(world.eras)
 
     homeless = []
+    feral = []
     for race in races_mod.RACES:
         if ctx.map is not None and mapworld.homeland_score(ctx.map, race) <= 0.0:
             homeless.append(race.name)
@@ -90,6 +92,13 @@ def plan_awakenings(ctx) -> None:
         if index == 0 and race.first_era == 0:
             # Древнейшие расы приходят в мир почти сразу.
             year = era.start_year + rng.randint(0, max(1, int(era.length * 0.35)))
+        if creature_sys.is_feral_race(world, race.id):
+            # В этом мире они не народ, а зверьё: ни языка, ни племён, ни
+            # держав у них не будет. Бросок при этом делается всё равно —
+            # иначе один одичавший народ сдвинул бы годы пробуждения всех
+            # прочих, и два мира разошлись бы там, где ничего не менялось.
+            feral.append(race.name)
+            continue
         ctx.schedule.setdefault(year, []).append(race.id)
 
     # Порядок внутри года фиксирован — детерминированность превыше всего.
@@ -98,6 +107,20 @@ def plan_awakenings(ctx) -> None:
 
     if homeless:
         world.notes["не пробудились"] = sorted(homeless)
+    if feral:
+        world.notes["не народ, а зверьё"] = sorted(feral)
+
+
+def awaken_now(ctx, race, year: int) -> None:
+    """Разбудить расу вне расписания.
+
+    Так просыпаются те, кому разум дали посреди истории: до этого года
+    они были зверьём, а с него у них есть язык, племена и всё прочее.
+    Расписание тут ни при чём — его составили, когда они были зверьём.
+    """
+    if race.id in ctx.world.race_awakening:
+        return
+    _awaken(ctx, race, year)
 
 
 def tick_awakening(ctx, year: int) -> None:

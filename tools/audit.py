@@ -743,6 +743,119 @@ def m_beast_end_kinds(world):
     return len({item for item in named if item in own})
 
 
+def _species(world):
+    return list(world.species.values())
+
+
+def m_kin_count(world):
+    """Сколько видов водится в мире: не все и не два.
+
+    Если водится весь справочник, встреча с драконом перестаёт быть
+    событием; если водятся три вида — мир пуст.
+    """
+    return len(_species(world)) or None
+
+
+def m_kin_minds(world):
+    """Разных ступеней разумности в ходу: мир не делится на зверей и людей."""
+    kinds = _species(world)
+    if not kinds:
+        return None
+    return len({item.mind for item in kinds})
+
+
+def m_kin_feral(world):
+    """Доля видов-народов, оставшихся в этом мире зверьём.
+
+    Ноль во всяком мире значит, что рычаг не работает вовсе; половина —
+    что справочник рас переписан молча. И то, и другое плохо, поэтому
+    мера считается по многим мирам, а не по одному.
+    """
+    from worldgen import creatures as cr
+    folk = [item for item in _species(world) if cr.can_be_folk(item.kind)]
+    if not folk:
+        return None
+    return _share(sum(1 for item in folk if not item.is_people), len(folk))
+
+
+def m_kin_mind_moved(world):
+    """Сколько видов переменили разум за историю — обретя его или потеряв."""
+    return sum(1 for item in _species(world) if item.mind_marks)
+
+
+def m_kin_origins(world):
+    """Происхождений в ходу: виды взялись по-разному, а не все «сами»."""
+    kinds = _species(world)
+    if not kinds:
+        return None
+    return len({item.origin for item in kinds})
+
+
+def m_kin_top_origin(world):
+    """И ни одно происхождение не забивает прочие."""
+    kinds = _species(world)
+    if not kinds:
+        return None
+    counts = {}
+    for item in kinds:
+        counts[item.origin] = counts.get(item.origin, 0) + 1
+    return _share(max(counts.values()), len(kinds))
+
+
+def m_kin_variants(world):
+    """Доля видов, у которых завелась хоть одна ветвь.
+
+    Ноль значит, что вид — это строка справочника: пещерных троллей в
+    мире не бывает, бывают просто тролли.
+    """
+    kinds = _species(world)
+    if not kinds:
+        return None
+    return _share(sum(1 for item in kinds if item.variants), len(kinds))
+
+
+def _tiers(world):
+    return [item.tier for item in world.monsters.values() if item.species]
+
+
+def m_beast_tier_great(world):
+    """Доля великих среди именованных тварей.
+
+    Если каждый третий дракон великий, слово «великий» не значит ничего.
+    """
+    from worldgen import creatures as cr
+    tiers = _tiers(world)
+    if not tiers:
+        return None
+    return _share(sum(1 for value in tiers if value >= cr.TIER_GREAT),
+                  len(tiers))
+
+
+def m_beast_tier_spread(world):
+    """Сколько разных ступеней в ходу: все на одной — значит, ступени нет."""
+    tiers = _tiers(world)
+    if not tiers:
+        return None
+    return len(set(tiers))
+
+
+def m_beast_tier_earned(world):
+    """Доля тварей, чья ступень записана ростом, а не поставлена сразу."""
+    rows = [item for item in world.monsters.values()
+            if item.species and item.tier]
+    if not rows:
+        return None
+    return _share(sum(1 for item in rows if item.tier_marks), len(rows))
+
+
+def m_beast_powers(world):
+    """Сколько разных источников силы: без них высокая ступень — везение."""
+    rows = [item.source for item in world.monsters.values() if item.source]
+    if not rows:
+        return None
+    return len(set(rows))
+
+
 def m_sub_kinds(world):
     """В своде не одни люди: дракон и бог проходят ту же систему."""
     return len({item.kind for item in _subjects(world)})
@@ -1582,6 +1695,31 @@ MEASURES = (
             "доля", "из остатков через века растут новые беды"),
     Measure("нашествия", "отвечали врозь", m_inv_answers, 0.2, None, "доля",
             "кто воевал, не простит тому, кто заплатил"),
+    Measure("существа", "видов в мире", m_kin_count, 7, 22, "видов",
+            "водится не весь справочник и не три вида"),
+    Measure("существа", "ступеней разума в ходу", m_kin_minds, 3, None,
+            "из 6", "мир не делится на зверей и людей"),
+    Measure("существа", "народов осталось зверьём", m_kin_feral, 0.0, 0.45,
+            "доля", "орки бывают и народом, и зверьём, но не всегда вторым"),
+    Measure("существа", "видов переменили разум", m_kin_mind_moved, 0, None,
+            "видов", "разум приходит и уходит, и это история, а не графа",
+            min_years=3000),
+    Measure("существа", "происхождений в ходу", m_kin_origins, 4, None,
+            "из 14", "виды взялись по-разному, а не все сами собой"),
+    Measure("существа", "крупнейшее происхождение", m_kin_top_origin, None,
+            0.6, "доля", ""),
+    Measure("существа", "видов с ветвями", m_kin_variants, 0.1, None, "доля",
+            "пещерный тролль — не то же, что просто тролль",
+            min_years=3000),
+    Measure("существа", "великих среди именованных", m_beast_tier_great,
+            None, 0.2, "доля",
+            "если каждый третий дракон великий, слово ничего не значит"),
+    Measure("существа", "ступеней у тварей", m_beast_tier_spread, 3, None,
+            "видов", "все на одной ступени — значит, ступени нет"),
+    Measure("существа", "ступень заработана", m_beast_tier_earned, 1.0, None,
+            "доля", "великим не рождаются"),
+    Measure("существа", "источников силы", m_beast_powers, 5, None, "из 16",
+            "откуда сила — это и есть разница между двумя драконами"),
     Measure("субъекты", "конец по своей графе", m_beast_own_end, 0.2, None,
             "доля", "демон не гибнет в обвале в горах"),
     Measure("субъекты", "разных концов у небывалых", m_beast_end_kinds, 4,

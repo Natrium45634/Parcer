@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from . import creatures as creature_sys
 from .. import artifacts as art
 from .. import monsters as mon
 from .. import narrative_artifacts as art_texts
@@ -77,7 +78,9 @@ def _spawn(ctx, year: int, rng) -> None:
     if not pairs:
         return
     region = rng.weighted(pairs)
-    breed = mon.breed_for(rng, region.terrain, era_index, family=mon.BEAST)
+    allowed, banned = _breeds_here(world)
+    breed = mon.breed_for(rng, region.terrain, era_index, family=mon.BEAST,
+                          allowed=allowed, banned=banned)
     if breed is None:
         return
     monster = _make(ctx, breed, region, year, rng)
@@ -101,8 +104,9 @@ def _spawn_night(ctx, year: int, era_index: int, rng) -> None:
         return
     city = rng.weighted([(item, float(item.population)) for item in cities])
     region = world.regions.get(city.region_id)
+    allowed, banned = _breeds_here(world)
     breed = mon.breed_for(rng, region.terrain if region else "", era_index,
-                          family=mon.NIGHT)
+                          family=mon.NIGHT, allowed=allowed, banned=banned)
     if breed is None:
         return
     monster = _make(ctx, breed, region, year, rng)
@@ -115,15 +119,48 @@ def _spawn_night(ctx, year: int, era_index: int, rng) -> None:
         region_id=city.region_id)
 
 
+def _breeds_here(world):
+    """Породы, чьи виды в этом мире водятся, и те, которых тут быть не может.
+
+    Мир, в котором нет драконов, не должен заводить дракона с именем:
+    иначе «драконов тут нет» — пустые слова. И обратное: вожак одичавших
+    заводится только там, где его род не стал народом. У народа вождь —
+    это правитель, и место ему в летописи держав, а не в списке
+    чудовищ.
+    """
+    from .. import creatures as cr
+    live, shut = set(), set()
+    for kin in world.species.values():
+        kind = cr.KINDS_BY_KEY.get(kin.kind)
+        if kind is None or not kind.monster_breed:
+            continue
+        if kin.status == "сгинул" or (cr.can_be_folk(kin.kind)
+                                      and kin.is_people):
+            shut.add(kind.monster_breed)
+            continue
+        live.add(kind.monster_breed)
+    # Вожак одичавших не заводится и там, где о таком роде не слыхали.
+    for kind in cr.KINDS:
+        if (cr.can_be_folk(kind.key) and kind.monster_breed
+                and kind.monster_breed not in live):
+            shut.add(kind.monster_breed)
+    return (live or None), shut
+
+
 def _make(ctx, breed, region, year: int, rng):
     world = ctx.world
     race = mon.race_for(breed)
     name = "%s %s" % (ctx.forge.monster(rng, race), mon.epithet_for(rng, breed))
-    return world.add_monster(
+    monster = world.add_monster(
         name=name, breed=breed.key, word=breed.word, gender=breed.gender,
         family=breed.family, born=ctx.date_in(rng, year),
         region_id=region.id if region is not None else "",
         power=round(breed.power * rng.uniform(0.85, 1.25), 2))
+    # Порода говорит, что это за тварь; вид говорит, кто она такая: откуда
+    # её род, какая у неё ветвь и откуда у неё сила. Ступень при этом
+    # нулевая: великим не рождаются.
+    creature_sys.attach(ctx, monster, breed, region, year, rng)
+    return monster
 
 
 def _dig_lair(ctx, monster, breed, region, year: int, rng):
@@ -153,6 +190,9 @@ def _beast_tick(ctx, monster, year: int, period: int, rng) -> None:
         _raid(ctx, monster, year, rng)
     if rng.chance(HUNT_RATE * scale):
         _hunt(ctx, monster, year, rng)
+    # Ступень считается после дел этого десятилетия, а не до них: она и
+    # есть итог прожитого.
+    creature_sys.grow(ctx, monster, year, rng)
 
 
 def _raid(ctx, monster, year: int, rng) -> None:
@@ -333,6 +373,9 @@ def _night_tick(ctx, monster, year: int, period: int, rng) -> None:
                 kind="monster_feeds", title=title, text=text, importance=1,
                 subjects=[monster.id, settlement.id],
                 region_id=settlement.region_id)
+    # Ночная тварь растёт в ступени тем же порядком, что и зверь в
+    # логове: веками и съеденными, — только тише.
+    creature_sys.grow(ctx, monster, year, rng)
     # Чем дольше живёт, тем вернее попадётся: счёт пропавших растёт.
     risk = EXPOSE_RATE * scale * (1.0 + monster.kills / 40.0)
     if rng.chance(min(0.6, risk)):

@@ -1601,11 +1601,16 @@ class Atlas(ttk.Frame):
         self.ask_year.set(str(year))
 
     def look_at(self, year: int = 0, region_id: str = "",
-                hex_index: int = -1) -> None:
+                hex_index: int = -1, close: bool = False) -> None:
         """Показать названное место в названный год.
 
         Этим пользуется «История мира»: человек нашёл запись и хочет
         увидеть, где это было и как тогда выглядел мир.
+
+        `close` — для тех, кто приходит к одному месту, а не к карте
+        вообще: из списка городов. На обзорном размере гекс — точка в
+        три пикселя, и показать на такой карте город значит не показать
+        ничего; поэтому карта сперва приближается до своего размера.
         """
         if self.wmap is None or self.world is None:
             return
@@ -1625,6 +1630,8 @@ class Atlas(ttk.Frame):
             self.redraw()
             return
         self._picked = hex_index
+        if close and self.cell < self.native:
+            self.cell = self.native
         cell, hex_h, step = self._hex_size()
         x, y = self._hex_center(hex_index)
         self.off_x = x - max(50, self.canvas.winfo_width()) / 2.0

@@ -24,6 +24,7 @@ from . import fates
 from . import mortality
 from .rng import normalize_seed, seed_to_int
 from .systems import (aristocracy, artifacts, cabals, calamity, causes,
+                      creatures as creature_sys,
                       disaster as disaster_sys,
                       citylife,
                       crafts, culture,
@@ -134,7 +135,6 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     world.add_event(date=Date(1, 1, 1), era_index=0, kind="world_begin",
                     title=title, text=text, importance=5)
 
-    peoples.plan_awakenings(ctx)
     calamity.prepare(ctx)
     # Склад мира: из каких причин в этом мире вообще растут беды, и
     # насколько земли к ним готовы.
@@ -148,6 +148,15 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
     # ложатся в настоящую землю. Это не вступление к летописи, а первый
     # слой её причин.
     origin_sys.prepare(ctx)
+    # Виды существ — следом за началом мира и до расписания пробуждений.
+    # Следом, потому что мир без магии не заводит магических тварей; до,
+    # потому что в этом мире орки могут оказаться не народом, а зверьём, —
+    # и тогда раса их не просыпается вовсе.
+    creature_sys.prepare(ctx)
+    peoples.plan_awakenings(ctx)
+    # И только теперь виды привязываются к богам: тот, кто их сделал, и
+    # тот, из чьей крови они поднялись, к этому часу уже есть.
+    creature_sys.settle(ctx)
 
     # По настоящей карте ведём ещё и политическую летопись: кто чем владел
     # в такой-то год. Её потом читает вкладка «Страны» картогенератора.
@@ -213,6 +222,10 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             laws.upkeep(ctx, year, UPKEEP_PERIOD)
             citylife.upkeep(ctx, year, UPKEEP_PERIOD)
             monsters.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Виды — после чудовищ: ступень именованной особи считается в
+            # их такте, а тут идёт жизнь всего рода: ветви, разум, уход и
+            # возвращение.
+            creature_sys.upkeep(ctx, year, UPKEEP_PERIOD)
             sites.upkeep(ctx, year, UPKEEP_PERIOD)
             # Сказания идут следом за чудовищами, местами и вещами: к
             # этому часу в мире уже есть и беда, и те, кто на неё пойдёт.

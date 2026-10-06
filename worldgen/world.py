@@ -32,7 +32,8 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Region,
                      Reign,
                      Godhead, Renown,
-                     Relic, Seed, Settlement, Site, Story, Strife, Tale,
+                     Relic, Seed, Settlement, Site, Species, Story, Strife,
+                     Tale,
                      Township,
                      Temple,
                      Tongue,
@@ -87,7 +88,8 @@ _ENTITY_TABLES = {
     "LF": ("lifepaths",), "LK": ("lost_lore",), "ME": ("memories",),
     "MG": ("migrations",), "NV": ("invasions",), "RN": ("renowns",),
     "SB": ("subjects",), "SC": ("scars",), "SF": ("strifes",),
-    "SG": ("tales",), "TR": ("traces",), "TW": ("townships",),
+    "SG": ("tales",), "SP": ("species",), "TR": ("traces",),
+    "TW": ("townships",),
 }
 
 
@@ -175,6 +177,8 @@ class World:
         # правды, и в мире известен только первый.
         self.myths = []
         self._godhead_of = {}          # божество -> id биографии
+        self.species = {}              # виды существ: кто вообще водится в мире
+        self._species_of = {}          # ключ вида -> id записи
         self.townships = {}            # биографии городов
         self._town_of = {}             # поселение -> id биографии
         self._town_watch = {}          # рабочие указатели биографий
@@ -1256,6 +1260,33 @@ class World:
                                 for item in self.godheads.values()}
         head_id = self._godhead_of.get(deity_id)
         return self.godheads.get(head_id) if head_id else None
+
+    def add_species(self, **kwargs) -> Species:
+        kin = Species(id=self.next_id("SP"), **kwargs)
+        self.species[kin.id] = kin
+        self._species_of[kin.kind] = kin.id
+        return kin
+
+    def species_of(self, kind: str):
+        """Запись о виде по ключу справочника — или ничего, если его тут нет.
+
+        Указатель перестраивается, только когда он отстал от реестра: у
+        мира, поднятого из файла, его ещё нет вовсе.
+        """
+        if len(self._species_of) != len(self.species):
+            self._species_of = {item.kind: item.id
+                                for item in self.species.values()}
+        kin_id = self._species_of.get(kind)
+        return self.species.get(kin_id) if kin_id else None
+
+    def species_of_race(self, race_id: str):
+        """Вид, который в этом мире стоит за этой расой."""
+        if not race_id:
+            return None
+        for item in self.species.values():
+            if item.race_id == race_id:
+                return item
+        return None
 
     def add_township(self, **kwargs) -> Township:
         town = Township(id=self.next_id("TW"), **kwargs)

@@ -91,6 +91,35 @@ BREEDS = (
           power=2.4, hoard=0.8, style="void", era_from=1, weight=1.0,
           notes=("к ней ходят за тем, чего не дают жрецы",
                  "плата у неё всегда не та, о которой договаривались")),
+    # Вожаки одичавших. Эти породы заводятся только в том мире, где их
+    # род не стал народом: у народа вождь — правитель, и место ему в
+    # летописи держав, а не в списке чудовищ. Отбор стоит в
+    # ``systems/monsters._breeds_here``.
+    Breed("orc_lord", "Орк", "m", BEAST, ("степь", "горы", "холмы", "пустыня"),
+          power=2.4, hoard=0.8, style="demon", weight=1.0,
+          notes=("за ним идут все, кто не смог его одолеть",
+                 "силу признаёт только в лицо")),
+    Breed("goblin_king", "Гоблин", "m", BEAST,
+          ("подземья", "холмы", "лес", "болото"),
+          power=2.0, hoard=0.9, style="void", weight=1.1,
+          notes=("поодиночке они трусливы, а за ним идут толпой",
+                 "нор под холмами больше, чем кто-либо считал")),
+    Breed("troll_lord", "Тролль", "m", BEAST,
+          ("горы", "подземья", "болото", "тундра"),
+          power=3.2, hoard=1.0, style="demon", weight=0.9,
+          notes=("раны на нём затягиваются быстрее, чем их наносят",
+                 "дорогу через перевал держит он, а не держава")),
+    Breed("ogre_lord", "Огр", "m", BEAST, ("холмы", "горы", "лес", "болото"),
+          power=3.0, hoard=0.7, style="demon", weight=0.9,
+          notes=("ест при всех и не торопится",)),
+    Breed("kobold_chief", "Кобольд", "m", BEAST,
+          ("подземья", "горы", "холмы"),
+          power=1.8, hoard=0.8, style="void", weight=1.0,
+          notes=("ловушек под горой больше, чем он сам помнит",)),
+    Breed("gnoll_chief", "Гнолл", "m", BEAST,
+          ("степь", "пустыня", "холмы", "джунгли"),
+          power=2.2, hoard=0.6, style="demon", weight=1.0,
+          notes=("смеётся перед тем, как броситься",)),
 )
 
 BREEDS_BY_KEY = {item.key: item for item in BREEDS}
@@ -140,9 +169,23 @@ def race_for(breed):
     return races_mod.MONSTERS[0]
 
 
-def breed_for(rng, terrain: str, era_index: int, family: str = ""):
-    """Кто заводится в такой земле в такую эпоху."""
+def breed_for(rng, terrain: str, era_index: int, family: str = "",
+              allowed=None, banned=None):
+    """Кто заводится в такой земле в такую эпоху.
+
+    `allowed` — породы, чьи виды в этом мире вообще водятся. Без этого
+    отбора в мире без драконов заводился бы именованный дракон, и
+    «драконов тут нет» переставало бы что-либо значить. Если не подходит
+    ни одна из дозволенных, берётся любая, кроме запрещённых: пустое
+    логово хуже лишнего вида.
+
+    `banned` — породы, которых тут быть не должно ни при каких условиях.
+    Этим закрыты вожаки одичавших: там, где орки стали народом, вождь
+    орков — правитель, а не чудовище.
+    """
     pairs = []
+    spare = []
+    banned = banned or ()
     for breed in BREEDS:
         if family and breed.family != family:
             continue
@@ -150,7 +193,13 @@ def breed_for(rng, terrain: str, era_index: int, family: str = ""):
             continue
         if breed.terrains and terrain and terrain not in breed.terrains:
             continue
+        if breed.key in banned:
+            continue
+        spare.append((breed, breed.weight))
+        if allowed is not None and breed.key not in allowed:
+            continue
         pairs.append((breed, breed.weight))
+    pairs = pairs or spare
     if not pairs:
         return None
     return rng.weighted(pairs)

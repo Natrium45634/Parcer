@@ -47,6 +47,10 @@ FORGE_SEEDS = ("Своя земля",)
 MAP_SEEDS = ("карта-1", "карта-2")
 SAMPLE_MAP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "maps", "aurora-7.world")
+# Столько великих тварей мир держит разом — то же число, что и в движке
+# (``systems/creatures.GREAT_ALIVE``). Стоит оно тут своей копией нарочно:
+# сторож должен ловить и тот случай, когда потолок в движке подняли молча.
+CREATURE_GREATS = 2
 
 
 def check_lives(world, seed: str) -> list:
@@ -552,6 +556,177 @@ def check_gods(world, seed: str) -> list:
     return problems
 
 
+def check_creatures(world, seed: str) -> list:
+    """Виды существ: сходится ли вид сам с собой и с миром.
+
+    Тут ловится то, что ломается тихо и портит сразу весь мир. Вид,
+    объявленный зверьём, у которого при этом есть народы, язык и
+    державы, — то есть гате, который не сработал. Обратное: вид обрёл
+    разум, а раса так и не проснулась — тогда событие в летописи есть, а
+    в мире ничего не изменилось. Переход разумности без названной
+    причины — это графа справочника, а не история. И ступень: великое
+    чудовище, которое великим **родилось**, а не выросло, — вот с этого
+    и начинается обесценивание слова «великий».
+    """
+    from worldgen import creatures as cr
+    from worldgen import chronicle as chron
+
+    problems = []
+    total = world.total_years
+    for kin in world.species.values():
+        kind = cr.KINDS_BY_KEY.get(kin.kind)
+        if kind is None:
+            problems.append("сид «%s»: вид «%s» не из справочника"
+                            % (seed, kin.kind))
+            break
+        if kin.mind not in cr.MINDS_BY_KEY or kin.base_mind not in cr.MINDS_BY_KEY:
+            problems.append("сид «%s»: у вида %s разумность не из списка: %s"
+                            % (seed, kin.name, kin.mind))
+            break
+        if kin.origin not in cr.ORIGINS_BY_KEY:
+            problems.append("сид «%s»: у вида %s происхождение не из списка: "
+                            "%s" % (seed, kin.name, kin.origin))
+            break
+
+        # Зверьё не держит ни народов, ни держав, ни языков — иначе
+        # сторож пробуждения не сработал, и мир вышел нечестным.
+        if cr.can_be_folk(kin.kind) and not kin.is_people:
+            if kin.race_id in world.race_awakening:
+                problems.append("сид «%s»: %s в этом мире зверьё, а раса их "
+                                "всё же проснулась" % (seed, kin.name))
+                break
+            folks = [item for item in world.folks.values()
+                     if item.race_id == kin.race_id]
+            if folks:
+                problems.append("сид «%s»: %s в этом мире зверьё, а народов "
+                                "у них %d" % (seed, kin.name, len(folks)))
+                break
+
+        # Переход разумности: по порядку, в пределах истории, с причиной.
+        last = 0
+        for mark in kin.mind_marks:
+            year = int(mark.get("год", 0))
+            if not 1 <= year <= total or year < last:
+                problems.append("сид «%s»: у вида %s перемена разума в %d "
+                                "году, а история идёт до %d"
+                                % (seed, kin.name, year, total))
+                break
+            last = year
+            if not mark.get("отчего"):
+                problems.append("сид «%s»: у вида %s разум переменился без "
+                                "названной причины" % (seed, kin.name))
+                break
+            if mark.get("было") == mark.get("стало"):
+                problems.append("сид «%s»: у вида %s разум «переменился» на "
+                                "тот же самый" % (seed, kin.name))
+                break
+            if mark.get("ключ") in cr.RISE_BY_KEY:
+                woke = int(world.race_awakening.get(kin.race_id, 0))
+                if woke != year:
+                    problems.append(
+                        "сид «%s»: %s обрели разум в %d году, а раса их %s"
+                        % (seed, kin.name, year,
+                           ("проснулась в %d" % woke) if woke
+                           else "так и не проснулась"))
+                    break
+        if problems:
+            break
+
+        seen = set()
+        for row in kin.variants:
+            name = row.get("имя", "")
+            if not name or name in seen:
+                problems.append("сид «%s»: у вида %s ветвь без имени или "
+                                "дважды одна и та же: «%s»"
+                                % (seed, kin.name, name))
+                break
+            seen.add(name)
+            if row.get("род") not in cr.VARIANT_KINDS_BY_KEY:
+                problems.append("сид «%s»: у ветви «%s» род не из списка"
+                                % (seed, name))
+                break
+            if not row.get("отчего"):
+                problems.append("сид «%s»: ветвь «%s» завелась без причины"
+                                % (seed, name))
+                break
+            if not 1 <= int(row.get("год", 0)) <= total:
+                problems.append("сид «%s»: ветвь «%s» заведена в %s году"
+                                % (seed, name, row.get("год")))
+                break
+        if problems:
+            break
+
+    # Ступень именованной особи: в пределах, заработана, записана.
+    for monster in world.monsters.values():
+        if not monster.species:
+            continue
+        kin = world.species_of(monster.species)
+        if kin is None:
+            problems.append("сид «%s»: у чудовища по имени %s вид «%s», "
+                            "которого в мире нет"
+                            % (seed, monster.name, monster.species))
+            break
+        cap = cr.rarity_cap(kin.rarity)
+        if not 0 <= monster.tier <= min(cap, cr.TOP_TIER):
+            problems.append("сид «%s»: у чудовища по имени %s ступень %d, а "
+                            "выше %d его род не поднимается"
+                            % (seed, monster.name, monster.tier, cap))
+            break
+        if monster.source and monster.source not in cr.POWERS_BY_KEY:
+            problems.append("сид «%s»: у чудовища по имени %s сила взялась "
+                            "неведомо откуда: «%s»"
+                            % (seed, monster.name, monster.source))
+            break
+        if monster.tier and not monster.tier_marks:
+            problems.append("сид «%s»: чудовище по имени %s стоит на %d "
+                            "ступени, а росло ли оно до неё — не записано"
+                            % (seed, monster.name, monster.tier))
+            break
+        steps = [int(row.get("ступень", 0)) for row in monster.tier_marks]
+        if steps != sorted(steps) or (steps and steps[-1] != monster.tier):
+            problems.append("сид «%s»: у чудовища по имени %s ступени шли "
+                            "не вверх: %s при нынешней %d"
+                            % (seed, monster.name, steps, monster.tier))
+            break
+        for row in monster.tier_marks:
+            year = int(row.get("год", 0))
+            if not 1 <= year <= total or year < monster.born.year:
+                problems.append("сид «%s»: чудовище по имени %s выросло в "
+                                "%d году, а завелось в %d"
+                                % (seed, monster.name, year,
+                                   monster.born.year))
+                break
+            if not row.get("отчего"):
+                problems.append("сид «%s»: чудовище по имени %s выросло без "
+                                "названной причины" % (seed, monster.name))
+                break
+        if problems:
+            break
+
+    # Великих не бывает толпой: иначе слово ничего не значит.
+    if not problems:
+        greats = sum(1 for mid in world.living_monsters
+                     if world.monsters[mid].tier >= cr.TIER_GREAT)
+        if greats > CREATURE_GREATS:
+            problems.append("сид «%s»: великих тварей разом %d — столько в "
+                            "мире не бывает" % (seed, greats))
+
+    # И раздел должен собираться, в том числе на мире без единого вида.
+    if not problems:
+        try:
+            text = chron.render_creatures(world)
+        except Exception as error:
+            problems.append("сид «%s»: раздел о видах не собрался: %s"
+                            % (seed, error))
+        else:
+            wrong = [word for word in re.findall("[A-Za-z]+", text)
+                     if not set(word) <= set("IVXLCDM")]
+            if wrong:
+                problems.append("сид «%s»: в разделе о видах чужое слово: "
+                                "«%s»" % (seed, wrong[0]))
+    return problems
+
+
 def check_land(world, seed: str) -> list:
     """Страница места: собирается ли она и не врёт ли.
 
@@ -602,6 +777,12 @@ def check_land(world, seed: str) -> list:
         if landlore.best_hex(world) != -1 or landlore.notable(world):
             problems.append("сид «%s»: мир без карты, а места в нём "
                             "нашлись" % seed)
+        for item in world.settlements.values():
+            if landlore.spot(world, item.hex_index):
+                problems.append("сид «%s»: мир без карты, а место под "
+                                "городом по имени %s описано"
+                                % (seed, item.name))
+                break
         return problems
 
     size = wmap.width * wmap.height
@@ -694,6 +875,42 @@ def check_land(world, seed: str) -> list:
             problems.append("сид «%s»: у гекса %d нет приговора о весе"
                             % (seed, index))
             break
+
+    # Место под городом — одной короткой строкой: по ней человек в списке
+    # городов понимает, на чём город стоит. Пустая строка, чужое слово и
+    # фраза в полстраницы тут одинаково плохи, но хуже всего молчание о
+    # реке и о береге: из них и растёт причина, по которой город встал
+    # именно здесь, и если строка о них молчит, столбец бесполезен.
+    if not problems:
+        for item in world.settlements.values():
+            if item.hex_index < 0:
+                continue
+            said = landlore.spot(world, item.hex_index)
+            if not said:
+                problems.append("сид «%s»: у города по имени %s (гекс %d) "
+                                "место не описано вовсе"
+                                % (seed, item.name, item.hex_index))
+                break
+            if len(said) > 60 or "\n" in said:
+                problems.append("сид «%s»: место под городом по имени %s "
+                                "описано не строкой, а абзацем: «%s»"
+                                % (seed, item.name, said))
+                break
+            wrong = alien(said)
+            if wrong:
+                problems.append("сид «%s»: в месте под городом по имени %s "
+                                "чужое слово: «%s»" % (seed, item.name, wrong))
+                break
+            if wmap.is_river(item.hex_index) and "рек" not in said:
+                problems.append("сид «%s»: город по имени %s стоит на реке, "
+                                "а место его описано без реки: «%s»"
+                                % (seed, item.name, said))
+                break
+            if wmap.is_coast(item.hex_index) and "берег" not in said:
+                problems.append("сид «%s»: город по имени %s стоит на "
+                                "берегу, а место его описано без берега: "
+                                "«%s»" % (seed, item.name, said))
+                break
 
     # Год на странице соблюдается: в первый год не стоит то, чего ещё нет.
     if not problems:
@@ -3787,6 +4004,7 @@ def main(only: str = "") -> int:
         failures.extend(check_origin(first, seed))
         failures.extend(check_land(first, seed))
         failures.extend(check_gods(first, seed))
+        failures.extend(check_creatures(first, seed))
         failures.extend(check_renown(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
@@ -3860,6 +4078,7 @@ def main(only: str = "") -> int:
             failures.extend(check_origin(first, "карта/" + seed))
             failures.extend(check_land(first, "карта/" + seed))
             failures.extend(check_gods(first, "карта/" + seed))
+            failures.extend(check_creatures(first, "карта/" + seed))
             failures.extend(check_renown(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
@@ -3911,6 +4130,7 @@ def main(only: str = "") -> int:
                       check_tales,
                       check_lives, check_stories, check_towns,
                       check_holidays, check_origin, check_land,
+                      check_creatures,
                       check_gods, check_renown):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge
