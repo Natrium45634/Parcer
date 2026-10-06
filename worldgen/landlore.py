@@ -839,6 +839,365 @@ def timeline(world, index: int) -> list:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Откуда это вообще известно
+# ---------------------------------------------------------------------------
+#
+# Беда, которую это лечит: «первое поселение — 611 год» звучит как факт
+# из справочника, а это не факт, а чьё-то свидетельство. Про живой город
+# год знают точно, потому что его записали в тот же год; про место,
+# брошенное три тысячи лет назад, год дал раскоп — и дал его с запасом в
+# век. Разница между этими двумя «611» и есть то, что отличает историю
+# от таблицы.
+#
+# Поэтому у всякого «первого» названо, откуда оно известно, и у каждого
+# вида свидетельства своя точность: по ней год округляется и по ней же
+# решается, можно ли назвать имя.
+
+RECORD = "запись"       # летопись того же года
+STONE = "камень"        # то, что стоит на земле и датируется само
+DIG = "раскоп"          # слой, кости, черепки
+CHRON = "хроника"       # писал не очевидец
+TALE = "предание"       # так говорят
+GUESS = "вывод"         # никто не записал, но иначе быть не могло
+
+# (ключ, как сказать, чем это плохо, с каким запасом год, бывает ли имя)
+EVIDENCE = (
+    (RECORD, "по записи того года",
+     "это записали тогда же, и год тут стоит твёрдо", 0, True),
+    (STONE, "по тому, что стоит на земле",
+     "само это место говорит свой возраст", 0, True),
+    (DIG, "по раскопу",
+     "дату дал слой, а слой даёт её с запасом в век", 100, False),
+    (CHRON, "по поздней хронике",
+     "писал не очевидец, и год у него может быть чужой", 25, True),
+    (TALE, "по преданию",
+     "так говорят, и проверить это нечем", 250, True),
+    (GUESS, "по выводу",
+     "никто этого не записал, но иначе быть не могло", 50, False),
+)
+
+EVIDENCE_BY_KEY = {key: (said, about, slack, named)
+                   for key, said, about, slack, named in EVIDENCE}
+
+# Сколько веков должно пройти, чтобы запись о месте выцвела. Живой город
+# помнит год своего основания; место, оставленное две тысячи лет назад,
+# помнит его только камнем и раскопом.
+FADE_YEARS = 1200.0
+
+
+def evidence_said(key: str) -> str:
+    return EVIDENCE_BY_KEY.get(key, EVIDENCE_BY_KEY[GUESS])[0]
+
+
+def evidence_about(key: str) -> str:
+    return EVIDENCE_BY_KEY.get(key, EVIDENCE_BY_KEY[GUESS])[1]
+
+
+def _slack(key: str) -> int:
+    return EVIDENCE_BY_KEY.get(key, EVIDENCE_BY_KEY[GUESS])[2]
+
+
+def _says_name(key: str) -> bool:
+    return EVIDENCE_BY_KEY.get(key, EVIDENCE_BY_KEY[GUESS])[3]
+
+
+def _told_year(year: int, key: str) -> str:
+    """Год так, как его называет это свидетельство: точно или «около»."""
+    slack = _slack(key)
+    if slack <= 0:
+        return "%d год" % year
+    step = 100 if slack >= 100 else 10
+    return "около %d года" % (int(round(year / float(step))) * step or step)
+
+
+def _how_known(world, year: int, standing_now: bool, written: bool,
+               index: int, mark: str, allow=None) -> str:
+    """Каким свидетельством это дошло: по записи, по камню, по раскопу.
+
+    Решает не жребий, а три вещи: сохранила ли летопись запись того года,
+    стоит ли тут что-нибудь до сих пор и сколько веков прошло. Жребий
+    выбирает только между равно возможными — раскопом, хроникой и
+    преданием.
+
+    `allow` отсекает то, чего для этого вида «первого» не бывает: границу
+    державы не выкапывают из земли, а прошедшего мимо путника не
+    датируют по слою.
+    """
+    allow = set(allow) if allow else None
+
+    def fits(key: str) -> bool:
+        return allow is None or key in allow
+
+    # Запись того года бьёт всё: если летопись это сохранила, год твёрд,
+    # сколько бы веков ни прошло. Летопись мира — это и есть то, что
+    # дошло; истлевшее в неё просто не попало.
+    if written and fits(RECORD):
+        return RECORD
+    total = max(1, int(getattr(world, "total_years", 1)))
+    age = max(0, total - int(year))
+    if standing_now and fits(STONE):
+        return STONE
+    if age < FADE_YEARS * 0.5 and fits(CHRON):
+        return CHRON
+    rng = _rng(world, index, mark)
+    pairs = [(key, weight) for key, weight in
+             ((DIG, 2.0 if age > FADE_YEARS else 0.8),
+              (CHRON, 1.4 if age < FADE_YEARS * 2 else 0.5),
+              (TALE, 1.6), (GUESS, 0.6)) if fits(key)]
+    if not pairs:
+        return GUESS
+    return rng.weighted(pairs)
+
+
+def first_steps(world, index: int) -> list:
+    """Когда сюда впервые ступила нога — и откуда это известно.
+
+    Пять разных «первых», и путать их нельзя: первым тут прошли одни,
+    первыми осели другие, а первым записал это третий через тысячу лет.
+    Каждое со своим годом, своим свидетельством и, если свидетельство
+    позволяет, с именем. «Кто это был, не записано» — такой же честный
+    ответ, как имя.
+
+    Возвращает список словарей: что, год, как сказан год, кто,
+    свидетельство, и правда — то, что знает сам генератор.
+    """
+    found = _anchors(world, index)
+    region = _region_of(world, index)
+    total = int(getattr(world, "total_years", 0))
+    out = []
+
+    # Годы, за которые о чём-то здешнем сохранилась настоящая запись
+    # летописи. Выведенное из реестров (город основан тогда-то) записью
+    # не считается: реестр знает генератор, а летопись — мир.
+    ids = {item.id for items in found.values() for item in items}
+    written_years = set()
+    if ids:
+        for event in world.events:
+            if ids.intersection(event.subjects or ()):
+                written_years.add(event.date.year)
+
+    def add(what: str, year: int, who: str, written: bool, alive: bool,
+            truth: str, mark: str, about: str = "", allow=None) -> None:
+        if not year or year < 1:
+            return
+        written = bool(written) and int(year) in written_years
+        key = _how_known(world, year, alive, written, index, mark, allow)
+        name = who if (who and _says_name(key)) else ""
+        out.append({
+            "что": what, "год": int(year), "как": _told_year(year, key),
+            "кто": name, "свидетельство": key, "правда": truth,
+            "о чём": about,
+        })
+
+    # --- первые разумные: кто бы ни был первым, хоть на одну зиму -------
+    comers = []
+    for item in found["tribes"]:
+        if item.founded is not None:
+            comers.append((item.founded.year, "племя по имени %s" % item.name,
+                           item.ended is None))
+    for item in found["camps"]:
+        if item.founded is not None:
+            comers.append((item.founded.year,
+                           "%s по имени %s" % (item.word.lower(), item.name),
+                           item.ended is None))
+    for item in found["settlements"]:
+        if item.founded is not None:
+            comers.append((item.founded.year, item.full_name,
+                           item.ended is None))
+    if comers:
+        comers.sort(key=lambda row: (row[0], row[1]))
+        year, who, alive = comers[0]
+        add("первые разумные", year, who, True, alive,
+            "%d год, %s" % (year, who), "sapient")
+    # Если осесть тут никто не осел, строки о первых разумных не будет
+    # вовсе: врать про них нечем, а год открытия всей земли скажет
+    # строка о путнике — это и есть то же самое событие.
+
+    # --- первый путник: тот, кто прошёл и не остался -------------------
+    if region is not None and region.discovered_year:
+        figure = world.figures.get(region.discovered_by_id)
+        who = figure.name if figure is not None else ""
+        add("первый путник", region.discovered_year, who,
+            figure is not None, False,
+            "%d год%s" % (region.discovered_year,
+                          (", %s" % figure.name) if figure is not None
+                          else ", имя не записано"),
+            "walker",
+            "" if figure is not None else "имени его не сохранилось",
+            allow=(RECORD, CHRON, TALE, GUESS))
+
+    # --- первое постоянное поселение -----------------------------------
+    towns = [item for item in found["settlements"] if item.founded is not None]
+    if towns:
+        towns.sort(key=lambda item: (item.founded.year, item.id))
+        first = towns[0]
+        maker = world.figures.get(first.founder_id)
+        truth = "%d год, %s" % (first.founded.year, first.full_name)
+        if maker is not None:
+            truth += ", основал %s" % maker.name
+        add("первое поселение", first.founded.year, first.full_name, True,
+            first.ended is None, truth, "town")
+
+    # --- первая держава, которой это досталось -------------------------
+    rule = holders(world, index)
+    owned = [row for row in rule if row[2]]
+    if owned:
+        begin, _end, name = owned[0]
+        add("первая держава", begin, name, True, False,
+            "%d год, %s" % (begin, name), "realm",
+            allow=(RECORD, CHRON, TALE))
+
+    # --- первая запись о месте -----------------------------------------
+    # Самая ранняя сохранившаяся запись — но только если она не о том
+    # же, о чём уже сказано выше: повторять один год двумя строками
+    # значит делать вид, что это два разных свидетельства.
+    told = timeline(world, index)
+    if told and all(int(row["год"]) != int(told[0][0]) for row in out):
+        year, _kind, line = told[0]
+        out.append({
+            "что": "первая запись", "год": int(year),
+            "как": "%d год" % year, "кто": line,
+            "свидетельство": RECORD, "правда": line, "о чём": "",
+        })
+
+    out.sort(key=lambda row: (row["год"], row["что"]))
+    if total:
+        out = [row for row in out if row["год"] <= total]
+    return out
+
+
+def holders(world, index: int) -> list:
+    """Кто держал это место и когда: (от, до, держава или пусто).
+
+    Берётся из кадров политической карты — тех же, по которым ползунок
+    года двигает границы. Кадры снимаются раз в полвека, поэтому границы
+    отрезков округлены до кадра, а не до года: сказать «с 512 года» тут
+    было бы точностью, которой нет.
+
+    Пусто — ничья земля: это не дыра в данных, а состояние, и в иных
+    местах оно занимает девять десятых истории.
+    """
+    recorder = getattr(world, "map_recorder", None)
+    frames = getattr(recorder, "frames", None) if recorder is not None else None
+    if not frames:
+        return []
+    names = {}
+    for polity_id, slot in (recorder.slots or {}).items():
+        polity = world.polities.get(polity_id)
+        if polity is not None:
+            names[slot] = polity.full_name
+
+    rows = []
+    for frame in frames:
+        slot = _slot_at(frame.get("rle") or (), index)
+        rows.append((int(frame.get("y", 0)), names.get(slot, "")))
+    if not rows:
+        return []
+
+    out = []
+    begin, who = rows[0]
+    for year, now in rows[1:]:
+        if now == who:
+            continue
+        out.append((begin, year, who))
+        begin, who = year, now
+    out.append((begin, int(getattr(world, "total_years", 0)) or begin, who))
+    return out
+
+
+def _slot_at(rle, index: int) -> int:
+    """Номер державы в этом гексе из сжатого кадра.
+
+    Кадр лежит парами «значение, сколько раз» — так его ждёт и оверлей
+    карты. Разворачивать весь кадр ради одного гекса незачем: идём по
+    парам, пока не дойдём до нужного места.
+    """
+    seen = 0
+    for number in range(0, len(rle) - 1, 2):
+        run = int(rle[number + 1])
+        if seen + run > index:
+            return int(rle[number])
+        seen += run
+    return -1
+
+
+def people(world, index: int) -> list:
+    """Люди, связанные с этим местом: (год, чем связан, имя, что сделал).
+
+    Не «родился в этой земле» — таких на большую землю тысячи, и список
+    станет перекличкой. Только те, кого с этим самым гексом связывает
+    дело: основал, лёг в курган, вскрыл чужую гробницу, бился, убил
+    тут чудовище.
+    """
+    found = _anchors(world, index)
+    rows = []
+    for item in found["settlements"]:
+        maker = world.figures.get(item.founder_id)
+        if maker is not None and item.founded is not None:
+            rows.append((item.founded.year, "основал",
+                         maker.name, "поставил %s" % item.full_name))
+    for item in found["sites"]:
+        made = getattr(item, "created", None)
+        lies = world.figures.get(getattr(item, "figure_id", ""))
+        if lies is not None and made is not None:
+            rows.append((made.year, "лежит тут", lies.name,
+                         "его %s" % item.kind))
+        opened = getattr(item, "opened", None)
+        digger = world.figures.get(getattr(item, "opened_by", ""))
+        if digger is not None and opened is not None:
+            rows.append((opened.year, "вскрыл", digger.name,
+                         "вошёл в %s по имени %s" % (item.kind, item.name)))
+        beast = world.monsters.get(getattr(item, "monster_id", ""))
+        if beast is not None:
+            slayer = world.figures.get(getattr(beast, "slayer_id", ""))
+            ended = getattr(beast, "ended", None)
+            if slayer is not None and ended is not None:
+                rows.append((ended.year, "убил тут", slayer.name,
+                             "прикончил %s" % beast.name))
+    ids = {item.id for items in found.values() for item in items}
+    for battle in world.battles.values():
+        if battle.settlement_id not in ids or battle.date is None:
+            continue
+        for figure_id in ([battle.attacker_id] + list(battle.defender_ids)):
+            figure = world.figures.get(figure_id)
+            if figure is not None:
+                rows.append((battle.date.year, "бился тут", figure.name,
+                             battle.name))
+    seen = set()
+    out = []
+    for row in sorted(rows, key=lambda row: (row[0], row[2], row[1])):
+        if row in seen:
+            continue
+        seen.add(row)
+        out.append(row)
+    return out
+
+
+def known_and_true(world, index: int) -> tuple:
+    """Два слоя: что об этом месте знают и как оно было на самом деле.
+
+    У живого места слои сходятся: год основания города записан, и спорить
+    не о чем. У старого и забытого расходятся: раскоп даёт век вместо
+    года, предание даёт имя, которого не было, а генератор знает и год, и
+    имя. Разница между слоями и есть то, за чем сюда идут.
+    """
+    steps = first_steps(world, index)
+    known, truth = [], []
+    for row in steps:
+        line = "%s: %s" % (cap(row["что"]), row["как"])
+        if row["кто"]:
+            line += " — %s" % row["кто"]
+        line += " (%s)" % evidence_said(row["свидетельство"])
+        if row["о чём"]:
+            line += "; %s" % row["о чём"]
+        known.append(line)
+        if row["свидетельство"] in (RECORD, STONE) and not row["о чём"]:
+            continue        # тут и спорить не о чем: слои сошлись
+        truth.append("%s: %s" % (cap(row["что"]), row["правда"]))
+    return known, truth
+
+
 def around(world, index: int) -> list:
     """Что было по всей этой земле — то, что место пережило вместе с ней."""
     region = _region_of(world, index)
@@ -932,6 +1291,11 @@ def brief(world, index: int, year: int = 0) -> list:
     region = _region_of(world, index)
     if region is not None:
         rows.append("земля .......... %s" % region.name)
+    # Главный вопрос о месте человек задаёт первым: когда сюда вообще
+    # впервые пришли. В карточке на это есть одна строка.
+    steps = first_steps(world, index)
+    if steps:
+        rows.append("первые ......... %s" % steps[0]["как"])
     score, verdict, _ = weight(world, index)
     rows.append("")
     rows.append("## ЧЕМ ЭТО МЕСТО ВАЖНО")
@@ -1028,6 +1392,24 @@ def blocks(world, index: int, year: int = 0) -> list:
         out.append(("line", "  %s" % line))
     out.append(("line", ""))
 
+    known, truth = known_and_true(world, index)
+    out.append(("head", "КОГДА СЮДА ВПЕРВЫЕ СТУПИЛА НОГА"))
+    out.append(("line", ""))
+    if not known:
+        out.append(("line", "  Ни одного следа: сюда, похоже, никто и не "
+                            "заходил."))
+    else:
+        for line in known:
+            out.append(("line", "  %s" % line))
+        if not any(row.startswith("Первые разумные") for row in known):
+            out.append(("dim", "  осесть тут никто так и не осел"))
+    out.append(("line", ""))
+    if truth:
+        out.append(("dim", "  а как было на самом деле:"))
+        for line in truth:
+            out.append(("dim", "    %s" % line))
+        out.append(("line", ""))
+
     score, verdict, why = weight(world, index)
     out.append(("head", "ЧЕМ ЭТО МЕСТО ВАЖНО"))
     out.append(("line", ""))
@@ -1044,6 +1426,29 @@ def blocks(world, index: int, year: int = 0) -> list:
     for line in standing(world, index, year):
         out.append(("line", "  %s" % line))
     out.append(("line", ""))
+
+    rule = holders(world, index)
+    if rule:
+        out.append(("head", "КОМУ ЭТО МЕСТО ПРИНАДЛЕЖАЛО"))
+        out.append(("dim", "  границы сняты раз в полвека, поэтому годы тут "
+                           "округлены до кадра"))
+        out.append(("line", ""))
+        for begin, end, who in rule:
+            out.append(("dated", "  %6d  %s — %s"
+                        % (begin, "%d" % end if end > begin else "тот же год",
+                           who or "ничья земля")))
+        out.append(("line", ""))
+
+    folk = people(world, index)
+    if folk:
+        out.append(("head", "ЛЮДИ ЭТОГО МЕСТА"))
+        out.append(("line", ""))
+        for year_of, role, name, deed in folk[:24]:
+            out.append(("dated", "  %6d  %s — %s: %s"
+                        % (year_of, name, role, deed)))
+        if len(folk) > 24:
+            out.append(("dim", "  …и ещё %d" % (len(folk) - 24)))
+        out.append(("line", ""))
 
     told = timeline(world, index)
     out.append(("head", "ЧТО ТУТ БЫЛО, ПО ГОДАМ"))

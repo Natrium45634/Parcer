@@ -788,6 +788,13 @@ def check_land(world, seed: str) -> list:
                                 "городом по имени %s описано"
                                 % (seed, item.name))
                 break
+        try:
+            landlore.first_steps(world, 0)
+            landlore.holders(world, 0)
+            landlore.people(world, 0)
+        except Exception as error:
+            problems.append("сид «%s»: мир без карты, а спрос о первых "
+                            "следах падает: %s" % (seed, error))
         return problems
 
     size = wmap.width * wmap.height
@@ -915,6 +922,77 @@ def check_land(world, seed: str) -> list:
                 problems.append("сид «%s»: город по имени %s стоит на "
                                 "берегу, а место его описано без берега: "
                                 "«%s»" % (seed, item.name, said))
+                break
+
+    # Первое присутствие: год в пределах истории, свидетельство из списка,
+    # и — главное — свидетельство не врёт о своей точности. Запись того
+    # года называет год, а раскоп называет век: если «по раскопу» стоит
+    # точный год, то вид свидетельства перестал что-либо значить.
+    if not problems:
+        look_first = [index for index in look if index >= 0]
+        for index in look_first:
+            try:
+                steps = landlore.first_steps(world, index)
+            except Exception as error:
+                problems.append("сид «%s»: первые следы гекса %d не "
+                                "собрались: %s" % (seed, index, error))
+                break
+            last = 0
+            for row in steps:
+                year = int(row.get("год", 0))
+                if not 1 <= year <= total:
+                    problems.append("сид «%s»: на гексе %d первый след в %d "
+                                    "году, а история идёт до %d"
+                                    % (seed, index, year, total))
+                    break
+                if year < last:
+                    problems.append("сид «%s»: первые следы гекса %d идут не "
+                                    "по порядку: %d после %d"
+                                    % (seed, index, year, last))
+                    break
+                last = year
+                key = row.get("свидетельство", "")
+                if key not in landlore.EVIDENCE_BY_KEY:
+                    problems.append("сид «%s»: на гексе %d свидетельство не "
+                                    "из списка: «%s»" % (seed, index, key))
+                    break
+                said = row.get("как", "")
+                exact = "около" not in said
+                wants = landlore._slack(key) <= 0
+                if exact != wants:
+                    problems.append(
+                        "сид «%s»: на гексе %d след «%s» известен %s, а год "
+                        "назван как «%s»" % (seed, index, row.get("что", ""),
+                                             landlore.evidence_said(key),
+                                             said))
+                    break
+                if not row.get("правда"):
+                    problems.append("сид «%s»: на гексе %d у следа «%s» нет "
+                                    "того, как было на самом деле"
+                                    % (seed, index, row.get("что", "")))
+                    break
+            if problems:
+                break
+
+            # Владельцы: отрезки идут подряд, без дыр и нахлёстов.
+            rule = landlore.holders(world, index)
+            edge = 0
+            for begin, end, _who in rule:
+                if begin < edge or end < begin or end > total:
+                    problems.append("сид «%s»: владение гексом %d идёт "
+                                    "вразнобой: %d–%d после %d"
+                                    % (seed, index, begin, end, edge))
+                    break
+                edge = end
+            if problems:
+                break
+            for year_of, _role, name, _deed in landlore.people(world, index):
+                if not 1 <= int(year_of) <= total or not name:
+                    problems.append("сид «%s»: человек места на гексе %d: "
+                                    "«%s» в %s году"
+                                    % (seed, index, name, year_of))
+                    break
+            if problems:
                 break
 
     # Год на странице соблюдается: в первый год не стоит то, чего ещё нет.

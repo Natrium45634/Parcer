@@ -1349,6 +1349,110 @@ def _land_scores(world):
     return world._audit_land
 
 
+def _land_first(world):
+    """Первые следы на пробе гексов: занятые места и россыпь пустых.
+
+    Считается один раз на мир: спрос о первых следах перебирает летопись,
+    и полсотни таких спросов — это пара секунд, а не миллисекунды.
+    """
+    found = getattr(world, "_audit_first", None)
+    if found is not None:
+        return found
+    from worldgen import landlore
+    link = getattr(world, "map_link", None)
+    wmap = getattr(link, "wmap", None) if link is not None else None
+    if wmap is None:
+        world._audit_first = ()
+        return world._audit_first
+    taken = sorted({item.hex_index for item in world.settlements.values()
+                    if item.hex_index >= 0})
+    step = max(1, len(taken) // 30)
+    picked = list(taken[::step])
+    size = wmap.width * wmap.height
+    empty = [index for index in range(0, size, max(1, size // 400))
+             if wmap.is_land(index) and index not in set(taken)]
+    picked += empty[:20]
+    rows = []
+    for index in picked:
+        rows.append((index, landlore.first_steps(world, index),
+                     landlore.holders(world, index)))
+    world._audit_first = tuple(rows)
+    return world._audit_first
+
+
+def m_first_told(world):
+    """Доля занятых мест, у которых названо, когда сюда впервые пришли.
+
+    Там, где стоит город, ответ должен быть всегда: если его нет, значит
+    страница места молчит о главном вопросе, который ей задают.
+    """
+    rows = _land_first(world)
+    taken = {item.hex_index for item in world.settlements.values()}
+    busy = [row for row in rows if row[0] in taken]
+    if not busy:
+        return None
+    return _share(sum(1 for _index, steps, _rule in busy if steps), len(busy))
+
+
+def m_first_evidence(world):
+    """Сколько разных свидетельств в ходу: всё по записи — значит, их нет."""
+    rows = _land_first(world)
+    if not rows:
+        return None
+    kinds = set()
+    for _index, steps, _rule in rows:
+        kinds.update(row["свидетельство"] for row in steps)
+    return len(kinds) or None
+
+
+def m_first_exact(world):
+    """Доля следов, у которых год назван точно, а не веком.
+
+    Единица значит, что мир помнит всё до года, — а так не бывает; ноль
+    значит, что он не помнит ничего.
+    """
+    from worldgen import landlore
+    rows = _land_first(world)
+    all_rows = [row for _index, steps, _rule in rows for row in steps]
+    if not all_rows:
+        return None
+    exact = sum(1 for row in all_rows
+                if landlore._slack(row["свидетельство"]) <= 0)
+    return _share(exact, len(all_rows))
+
+
+def m_first_gap(world):
+    """Доля мест, где знание и правда расходятся.
+
+    Ноль значит, что два слоя сложили в один и спрашивать о месте нечего:
+    летопись и так всё знает.
+    """
+    rows = _land_first(world)
+    if not rows:
+        return None
+    from worldgen import landlore
+    gap = 0
+    for index, _steps, _rule in rows:
+        _known, truth = landlore.known_and_true(world, index)
+        if truth:
+            gap += 1
+    return _share(gap, len(rows))
+
+
+def m_hex_holders(world):
+    """Сколько раз в среднем менялся хозяин у занятого места.
+
+    Один хозяин за всю историю на всех — значит, границы не ходят; это
+    видно и на карте, но тут оно меряется числом.
+    """
+    rows = _land_first(world)
+    taken = {item.hex_index for item in world.settlements.values()}
+    busy = [rule for index, _steps, rule in rows if index in taken and rule]
+    if not busy:
+        return None
+    return round(sum(len(rule) for rule in busy) / float(len(busy)), 2)
+
+
 def m_land_dull(world):
     """Доля мест, о которых нечего сказать."""
     spread, _top = _land_scores(world)
@@ -1846,6 +1950,16 @@ MEASURES = (
     Measure("мир", "летописей в одну запись", m_thin_codices, None, 0.2,
             "доля", "свод начинают с того, что город ещё помнит",
             min_years=3000),
+    Measure("земля", "первые следы названы", m_first_told, 0.95, None,
+            "доля", "где стоял город, там известно, когда сюда пришли"),
+    Measure("земля", "видов свидетельства", m_first_evidence, 3, None,
+            "из 6", "всё по записи — значит, свидетельств нет вовсе"),
+    Measure("земля", "год известен точно", m_first_exact, 0.1, 0.92, "доля",
+            "мир не помнит всё до года, но и не забыл всё"),
+    Measure("земля", "знание и правда расходятся", m_first_gap, 0.05, None,
+            "доля", "иначе два слоя сложены в один и спрашивать нечего"),
+    Measure("земля", "хозяев у занятого места", m_hex_holders, 2.0, None,
+            "раз", "границы ходят, и место это помнит"),
     Measure("земля", "мест, о которых нечего сказать", m_land_dull, 0.6,
             None, "доля",
             "если весомо всякое место, то весомого в мире нет"),
