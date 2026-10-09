@@ -66,6 +66,14 @@ BUILT_AGE = 120             # и моложе этого она ещё не ус
 # Чудо, которое оставила беда. Редкое: шрамов много, чудес из них мало.
 SCAR_RATE = 0.004
 SCAR_QUIET = 150            # пока беду помнят, это место не чудо, а горе
+SCAR_CAP = 2                # и чудес из шрамов в мире единицы
+
+# Сколько чудес мир заводит всего. Потолок на притязания держал только
+# природные, а чудеса из шрамов и постройки держав шли сверх него — и на
+# своей карте за десять тысяч лет выходило восемнадцать чудес. Это
+# сторож на весь счёт: дойдя до него, мир новых чудес больше не
+# называет, а жизнь уже названных идёт своим чередом.
+WORLD_CAP = 12
 
 # Слава ходит сама. Вверх — пока есть кому рассказывать; вниз — когда
 # рассказывать стало некому.
@@ -675,11 +683,12 @@ def upkeep(ctx, year: int, period: int) -> None:
     rng = ctx.rng("wonders", year)
     scale = period / 10.0
 
-    _name_natural(ctx, year, rng, scale)
-    if rng.chance(SCAR_RATE * scale):
-        _from_scar(ctx, year, rng)
-    if rng.chance(BUILT_RATE * scale):
-        _build(ctx, year, rng)
+    if len(world.wonders) < WORLD_CAP:
+        _name_natural(ctx, year, rng, scale)
+        if rng.chance(SCAR_RATE * scale):
+            _from_scar(ctx, year, rng)
+        if rng.chance(BUILT_RATE * scale):
+            _build(ctx, year, rng)
 
     for wonder in sorted(world.wonders.values(), key=lambda item: item.id):
         _tick(ctx, wonder, year, rng, scale)
@@ -722,6 +731,8 @@ def _from_scar(ctx, year: int, rng) -> None:
     иначе смотреть на него некому.
     """
     world = ctx.world
+    if sum(1 for item in world.wonders.values() if item.scar_id) >= SCAR_CAP:
+        return
     pool = []
     for scar in sorted(world.scars.values(), key=lambda item: item.id):
         if scar.created is None or year - scar.created.year < SCAR_QUIET:
@@ -908,7 +919,19 @@ def _tick(ctx, wonder, year: int, rng, scale: float) -> None:
             return
 
     # --- слава ходит сама ----------------------------------------------
-    if wonder.state in (cat.STANDS, cat.FIXED, cat.FOUND, cat.HURT):
+    if wonder.state in (cat.STANDS, cat.FIXED, cat.FOUND, cat.HURT) \
+            and not _peopled(world, wonder.region_id):
+        # Ушли — и рассказывать стало некому. Это и есть единственный
+        # способ забыть гору, и он не ждёт беды: земля просто опустела.
+        # Без этого стоящее чудо славу только набирало, и мир за десять
+        # тысяч лет мог не потерять ни одного — что смотр и показал.
+        if rng.chance(FORGET_RATE * scale) and wonder.fame > 0:
+            wonder.fame -= 1
+            if wonder.fame == 0:
+                _move_state(ctx, wonder, year, rng, cat.FORGOT,
+                            "в этой земле перестали жить, и рассказывать "
+                            "о нём стало некому")
+    elif wonder.state in (cat.STANDS, cat.FIXED, cat.FOUND, cat.HURT):
         if rng.chance(FAME_RATE * scale) \
                 and wonder.fame < _fame_cap(world, wonder):
             wonder.fame += 1
