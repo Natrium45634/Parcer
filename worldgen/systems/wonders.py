@@ -136,27 +136,50 @@ def prepare(ctx) -> None:
     world.notes["чудеса впереди"] = rows
 
 
+# Мир без карты: гексов в нём нет, но земли есть, и крайности у них
+# тоже. Притязание ищется той же меркой, что на карте, — у кого из
+# земель это выражено сильнее всех, там и чудо.
+#
+# Отбор нарочно шире четырёх родов: иначе в процедурном мире чудеса
+# выходят почти все рукотворными, и природного в нём нет вовсе — а это
+# не мир без карты, это мир без природы.
+FLAT_PICKS = (
+    ("peak", ("горы",), lambda item: item.elev_m or item.richness, "size"),
+    ("canyon", ("горы", "холмы"), lambda item: item.savagery, "riddle"),
+    ("forest", ("лес", "джунгли"), lambda item: item.capacity, "size"),
+    ("tree", ("лес", "джунгли"), lambda item: item.fertility, "age"),
+    ("waste", ("пустыня", "тундра"), lambda item: -item.habitat, "danger"),
+    ("lake", ("болото", "равнина"), lambda item: item.moist, "beauty"),
+    ("river", (), lambda item: item.capacity if item.river else -1.0, "size"),
+    ("isle", ("острова",), lambda item: item.capacity if item.island
+     else -1.0, "alone"),
+    ("cave", ("подземья", "горы"), lambda item: item.richness, "size"),
+    ("anomaly", (), lambda item: abs(item.magic), "magic"),
+)
+
+
 def _prepare_flat(ctx, rng) -> None:
     """Мир без карты: гексов нет, но земли есть, и у них есть крайности."""
     world = ctx.world
     regions = sorted(world.regions.values(), key=lambda item: item.id)
     if not regions:
         return
-    picks = (
-        ("peak", "горы", lambda item: item.richness, "size"),
-        ("forest", "лес", lambda item: item.capacity, "size"),
-        ("anomaly", "", lambda item: abs(item.magic), "magic"),
-        ("waste", "пустыня", lambda item: -item.habitat, "danger"),
-    )
     rows = []
-    for need, terrain, score, ground in picks:
+    taken = set()
+    for need, terrains, score, ground in FLAT_PICKS:
+        if len(rows) >= NATURAL_CAP:
+            break
         pool = [item for item in regions
-                if not terrain or item.terrain == terrain]
+                if (not terrains or item.terrain in terrains)
+                and item.id not in taken and score(item) > 0]
         if not pool or not rng.chance(NATURAL_CHANCE):
             continue
         best = max(pool, key=lambda item: (score(item), item.id))
         if not cat.SHAPES_BY_NEED.get(need):
             continue
+        # Одна земля — одно природное чудо: иначе все крайности мира
+        # сходятся в самой приметной земле, и остальной мир пуст.
+        taken.add(best.id)
         rows.append({"нужда": need, "гекс": -1, "вес": float(score(best)),
                      "имя": "", "мера": "", "основание": ground,
                      "земля": best.id})
@@ -453,7 +476,7 @@ def _add(ctx, rng, shape, ground, region, index, measure, born_year=1,
         # Многословному облику оборот не годится, и имя ему даёт кузница —
         # звучанием тех, кто тут живёт: «башня чародея по имени Эльдарин».
         name = ctx.forge.place_word(rng, _race_near(world, region))
-    access, why = _access_for(rng, world, index, region)
+    access, why = _access_for(rng, world, index, region, shape)
     wonder = world.add_wonder(
         name=name, kind=shape.kind, shape=shape.key, ground=ground,
         born=Date(max(1, int(born_year)), rng.randint(1, 12),
@@ -493,8 +516,34 @@ def _race_near(world, region):
     return races_mod.RACES[0]
 
 
-def _access_for(rng, world, index, region):
-    """Дойти до него легко или нельзя — и отчего."""
+# Насколько до места легко дойти по самой его природе. Поправка эта
+# важнее людности земли: от того, что в земле прибавилось городов,
+# вершина ниже не становится, — но и река не делается непроходимой,
+# сколько бы её ни было: по рекам как раз и селятся.
+#
+# Рукотворное в таблице не стоит: к нему вела дорога ещё на стройке, и
+# поправка ему одна на все облики.
+REACH = {
+    # к этому выходят сами: по нему живут и ходят
+    "river": 2.0, "tree": 1.5, "lake": 1.5, "falls": 1.0, "forest": 1.0,
+    "spring": 1.0,
+    # до этого надо добираться нарочно
+    "mark": -0.5, "seat": -0.5, "canyon": -1.0, "crystal": -1.0,
+    "mage": -1.0, "volcano": -1.5,
+    # а это трудно само по себе, сколько бы народу ни жило вокруг
+    "anomaly": -2.0, "cave": -2.5, "isle": -2.5, "waste": -2.5,
+    "peak": -3.0, "lair": -3.0,
+}
+BUILT_EASE = 2.0
+
+
+def _access_for(rng, world, index, region, shape):
+    """Дойти до него легко или нельзя — и отчего.
+
+    Решает не людность земли, а прежде всего то, **что это такое**: к
+    реке выходят сами, а на вершину всё равно подниматься. Людность и
+    крутизна только поправляют то, что задано обликом.
+    """
     link = getattr(world, "map_link", None)
     wmap = getattr(link, "wmap", None) if link is not None else None
     near = 0
@@ -506,7 +555,10 @@ def _access_for(rng, world, index, region):
         rough = abs(wmap.elevation_m(index)) / 1000.0
         if not wmap.is_land(index):
             rough += 2.0
-    score = near - rough
+    ease = REACH.get(shape.need)
+    if ease is None:
+        ease = BUILT_EASE if shape.kind in (cat.BUILT, cat.MIXED) else 0.0
+    score = near + ease - rough
     if score >= 4:
         return "easy", ""
     if score >= 1:

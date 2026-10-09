@@ -4228,6 +4228,18 @@ def check_catalogues() -> list:
          set(won.ACCESS_BY_KEY))
     miss("состояния, в которые ход легче",
          list(won_sys.EASIER.values()), set(won.ACCESS_BY_KEY))
+    miss("облики в поправке на доступность", list(won_sys.REACH),
+         {item.need for item in won.SHAPES})
+    miss("облики в отборе для мира без карты",
+         [need for need, _t, _s, _g in won_sys.FLAT_PICKS],
+         set(won.SHAPES_BY_NEED))
+    from worldgen import races as races_for_wonders
+    miss("земли в отборе для мира без карты",
+         [land for _n, terrains, _s, _g in won_sys.FLAT_PICKS
+          for land in terrains], set(races_for_wonders.TERRAINS))
+    miss("основания в отборе для мира без карты",
+         [ground for _n, _t, _s, ground in won_sys.FLAT_PICKS],
+         set(won.GROUNDS_BY_KEY))
     for item in won.SHAPES:
         if not item.about:
             problems.append("каталог чудес: у облика «%s» не сказано, чем "
