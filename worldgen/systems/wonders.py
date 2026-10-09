@@ -429,8 +429,13 @@ def _make_natural(ctx, rng, row, year: int, region, witness):
     if wonder is not None:
         wonder.marks.append({
             "год": year, "что": "названо чудом", "кто": witness.id,
-            "отчего": "стояло и прежде, а чудом его назвали те, кто "
-                      "поселился рядом: %s" % witness.name})
+            # Род тут от слова облика: гора стояла, и назвали её.
+            "отчего": "%s и прежде, а чудом %s назвали те, кто поселился "
+                      "рядом: %s"
+                      % (texts.pair(shape.gender, "стоял", "стояла",
+                                    "стояло"),
+                         texts.pair(shape.gender, "его", "её", "его"),
+                         witness.name)})
     return wonder
 
 
@@ -959,6 +964,10 @@ def _holders(world, year: int) -> list:
     расселившийся так широко, что ему есть чем мериться с соседями.
     Поэтому счёт идёт не по одному из них, а по всем, у кого на земле
     нашлось хотя бы три чуда.
+
+    Оборотов о составителе два: один для имени списка («Семь чудес
+    державы по имени X»), другой для самого текста («в державе по имени
+    X» — или «у народа по имени X», потому что народ не держава).
     """
     rows = []
     for polity in world.polities.values():
@@ -968,6 +977,7 @@ def _holders(world, year: int) -> list:
                  if item.polity_id == polity.id and item.region_id}
         rows.append(("держава", polity.id,
                      "державы по имени %s" % polity.full_name,
+                     "в державе по имени %s" % polity.full_name,
                      lands, float(polity.population)))
     for folk in world.folks.values():
         if folk.status != ACTIVE or folk.population < BUILT_SOULS:
@@ -975,8 +985,9 @@ def _holders(world, year: int) -> list:
         lands = {item.region_id for item in world.settlements.values()
                  if item.folk_id == folk.id and item.region_id}
         rows.append(("народ", folk.id, "народа по имени %s" % folk.name,
+                     "у народа по имени %s" % folk.name,
                      lands, float(folk.population)))
-    rows.sort(key=lambda row: (-row[4], row[1]))
+    rows.sort(key=lambda row: (-row[5], row[1]))
     return rows
 
 
@@ -987,7 +998,7 @@ def _compile_list(ctx, year: int, rng) -> None:
     if len(rows) >= LIST_CAP:
         return
     taken = {row.get("чей") for row in rows}
-    for kind, holder_id, said, lands, _souls in _holders(world, year):
+    for kind, holder_id, said, where, lands, _souls in _holders(world, year):
         if holder_id in taken:
             continue
         mine = [wonder for wonder in sorted(world.wonders.values(),
@@ -1010,7 +1021,7 @@ def _compile_list(ctx, year: int, rng) -> None:
             if len(wonder.lists) == 1:
                 wonder.fame = min(_fame_cap(world, wonder), wonder.fame + 1)
                 wonder.peak_fame = max(wonder.peak_fame, wonder.fame)
-        title, text = texts.wonder_list(rng, name, said, count, why)
+        title, text = texts.wonder_list(rng, name, where, count, why)
         world.add_event(
             date=ctx.date_in(rng, year), era_index=world.era_index_at(year),
             kind="wonder_list", title=title, text=text, importance=3,

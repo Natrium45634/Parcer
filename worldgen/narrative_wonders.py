@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from . import wonders as cat
 from .narrative import cap
+from .timeline import plural
 
 
 def _word_of(wonder) -> str:
@@ -35,7 +36,11 @@ def said_of(wonder) -> str:
     """
     if _self_named(wonder):
         return wonder.name
-    return "%s по имени %s" % (_word_of(wonder), wonder.name)
+    word = _word_of(wonder)
+    # «место, где всё не так по имени X» — оборот надо отделить запятой,
+    # иначе он прилипает к придаточному внутри самого слова.
+    glue = ", по имени %s" if "," in word else " по имени %s"
+    return word + glue % wonder.name
 
 
 _of = said_of
@@ -255,15 +260,18 @@ def false_wonder(rng, wonder) -> tuple:
 # Списки чудес
 # ---------------------------------------------------------------------------
 
+# Оборот о составителе приходит готовым («в державе по имени X», «у
+# народа по имени X»): державы и народы считают чудеса по-разному, и
+# подставлять тут слово «держава» нельзя.
 LIST_LINES = (
-    "В державе по имени %(who)s составляют список того, чем эта земля "
-    "стоит перед прочими: %(name)s. Вошло в него %(count)d, и выбирали "
-    "%(why)s.",
-    "%(name_cap)s — так называют то, что в державе по имени %(who)s "
-    "сочли достойным счёта. Вещей в списке %(count)d; про всё прочее "
-    "сказано, что оно не хуже, но считать надо было где-то остановиться.",
+    "%(where_cap)s составляют список того, чем эта земля стоит перед "
+    "прочими: %(name)s. Вошло в него %(count_said)s, и выбирали %(why)s.",
+    "%(name_cap)s — так называют то, что %(where)s сочли достойным "
+    "счёта. В списке %(count_said)s; про всё прочее сказано, что оно не "
+    "хуже, но считать надо было где-то остановиться.",
     "Появляется счёт чудесам: %(name)s. Считали %(why)s, насчитали "
-    "%(count)d, и спор об этом списке переживёт всех, кто его составлял.",
+    "%(count_said)s, и спор об этом списке переживёт всех, кто его "
+    "составлял.",
 )
 
 LIST_WHYS = (
@@ -275,10 +283,12 @@ LIST_WHYS = (
 )
 
 
-def wonder_list(rng, name: str, holder: str, count: int, why: str) -> tuple:
+def wonder_list(rng, name: str, where: str, count: int, why: str) -> tuple:
+    """Текст о списке чудес. `where` — готовый оборот о составителе."""
+    said = "%d %s" % (count, plural(count, "чудо", "чуда", "чудес"))
     text = rng.choice(LIST_LINES) % {
-        "name": name, "name_cap": cap(name), "who": holder,
-        "count": count, "why": why}
+        "name": name, "name_cap": cap(name), "where": where,
+        "where_cap": cap(where), "count_said": said, "why": why}
     return (name, text)
 
 

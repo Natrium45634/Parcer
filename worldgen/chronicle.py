@@ -2748,8 +2748,12 @@ def render_wonders(world) -> str:
         if city is not None:
             where += ", город по имени %s" % city.name
         rows.append(where)
-        rows.append("      %d год — %s" % (wonder.born.year,
-                                           cat.ground_about(wonder.ground)))
+        # Род чуда стоит рядом с годом нарочно: «храм» бывает и
+        # рукотворным, и смешанным — выросшим вокруг чуда постарше, — и
+        # по одному слову облика их не различить.
+        rows.append("      чудо %s; %d год — %s"
+                    % (cat.kind_name(wonder.kind), wonder.born.year,
+                       cat.ground_about(wonder.ground)))
         rows.append("      %s" % wonder.measure)
         made = wonder_texts.made_line(world, wonder)
         if made:
