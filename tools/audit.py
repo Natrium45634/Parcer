@@ -1707,10 +1707,19 @@ def m_wonder_built(world):
 
 
 def m_wonder_lost(world):
-    """Доля утраченных и забытых: старый мир теряет часть своих чудес."""
+    """Доля утраченных: старый мир теряет часть своих чудес.
+
+    Руины тут считаются вместе с утраченным, хотя движок их утратой не
+    зовёт: ему важно, можно ли чудо найти снова, а камень на виду, и
+    искать его не надо. Для смотра же «от него остались стены» — это
+    чудо, которого больше нет; не считать их значило мерить не то.
+    Повреждённое и покинутое при этом стоит, и в счёт не идёт.
+    """
+    from worldgen import wonders as cat
     if not world.wonders:
         return None
-    lost = sum(1 for item in world.wonders.values() if item.lost)
+    lost = sum(1 for item in world.wonders.values()
+               if item.lost or item.state == cat.RUINS)
     return lost / float(len(world.wonders))
 
 
@@ -1766,16 +1775,25 @@ def m_wonder_lists(world):
 
 
 def m_wonder_reach(world):
-    """Доля чудес, до которых дойти не просто.
+    """Доля нерукотворных чудес, до которых дойти не просто.
 
-    Если ко всякому чуду идёт дорога, чудеса стоят в одном ряду с
-    постоялыми дворами.
+    Считается не по всем чудесам, а по тем, что стоят там, где их
+    поставила не рука. Храм в столице обязан быть доступным — к нему
+    дорога шла ещё на стройке, и мерить его этой мерой бессмысленно:
+    мера тогда говорит лишь о том, много ли в мире построили. Ломалось
+    же ровно обратное — гора посреди обжитой земли выходила «дойти
+    легко», — и спрашивать надо про неё.
     """
+    from worldgen import wonders as cat
     if not world.wonders:
         return None
-    far = sum(1 for item in world.wonders.values()
+    wild = [item for item in world.wonders.values()
+            if item.kind not in (cat.BUILT, cat.MIXED)]
+    if not wild:
+        return None
+    far = sum(1 for item in wild
               if item.access in ("hard", "grim", "none"))
-    return far / float(len(world.wonders))
+    return far / float(len(wild))
 
 
 MEASURES = (
@@ -2164,8 +2182,9 @@ MEASURES = (
     Measure("чудеса", "списков чудес", m_wonder_lists, 1, 3, "штук",
             "счёт чудесам ведут, но не всякая держава и не всякий век",
             min_years=3000),
-    Measure("чудеса", "чудес, до которых дойти непросто", m_wonder_reach,
-            0.2, None, "доля", "к чуду не всегда идёт дорога"),
+    Measure("чудеса", "нерукотворных чудес, до которых дойти непросто",
+            m_wonder_reach, 0.4, None, "доля",
+            "к горе и к пещере дорога сама не приходит"),
 )
 
 
