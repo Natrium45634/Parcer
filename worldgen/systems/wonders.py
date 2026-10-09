@@ -117,6 +117,7 @@ def prepare(ctx) -> None:
     found.extend(_from_biomes(world, wmap))
     found.extend(_from_lairs(wmap))
     found.extend(_from_magic(world, wmap))
+    found.extend(_from_origin(world))
 
     # Порядок перебора закреплён: иначе одна и та же карта дала бы разные
     # чудеса от перестановки словаря.
@@ -155,6 +156,9 @@ FLAT_PICKS = (
      else -1.0, "alone"),
     ("cave", ("подземья", "горы"), lambda item: item.richness, "size"),
     ("anomaly", (), lambda item: abs(item.magic), "magic"),
+    ("crystal", ("горы", "подземья"), lambda item: abs(item.magic), "magic"),
+    ("spring", (), lambda item: abs(item.magic) if item.river else -1.0,
+     "rare"),
 )
 
 
@@ -183,6 +187,11 @@ def _prepare_flat(ctx, rng) -> None:
         rows.append({"нужда": need, "гекс": -1, "вес": float(score(best)),
                      "имя": "", "мера": "", "основание": ground,
                      "земля": best.id})
+    # Шрамы творения лежат в землях и без карты: божье чудо берётся
+    # оттуда же, что и на карте.
+    for row in _from_origin(world):
+        if len(rows) < NATURAL_CAP:
+            rows.append(row)
     world.notes["чудеса впереди"] = rows
 
 
@@ -364,21 +373,87 @@ def _from_lairs(wmap) -> list:
              "основание": "age"}]
 
 
+# Волшебное чудо не одно на все случаи: в горах сила выходит камнем, у
+# воды — источником, а на ровном месте стоит то, чего никто не ставил.
+MAGIC_KINDS = {
+    "crystal": ("свет его видно сквозь гору, и растёт он на глазах",
+                "magic"),
+    "spring": ("вода его не иссякает и в самый сухой год", "rare"),
+    "mage": ("её не трогают ни время, ни железо, а кто её ставил — тот "
+             "не сказал зачем", "riddle"),
+    "anomaly": ("сила стоит тут гуще, чем где бы то ни было", "magic"),
+}
+
+MAGIC_LEAST = 0.5           # ниже этого сила не стоит, а просто есть
+MAGIC_PLACES = 3            # и мест таких в мире считаное число
+
+
 def _from_magic(world, wmap) -> list:
-    """Место, где сила стоит гуще всего: его и зовут местом, где всё не так."""
-    best = (0.0, -1)
+    """Места, где сила стоит гуще всего, — и чем она там обернулась.
+
+    Прежде отсюда выходило одно притязание на весь мир, и три
+    волшебных облика из четырёх не выпадали никогда. Теперь берутся
+    несколько самых сильных мест, и каждое читается по себе: в горах
+    сила выходит кристаллом, у воды — вечным источником, а на ровном
+    месте стоит башня, которой никто не ставил.
+    """
+    found = []
     size = wmap.width * wmap.height
     for index in range(0, size, 7):     # не всякий гекс: шаг тут не портит
         if not wmap.is_land(index):
             continue
         value = abs(float(wmap.value(15, index, 0.0))) if wmap.has(15) else 0.0
-        if value > best[0]:
-            best = (value, index)
-    if best[1] < 0 or best[0] < 0.5:
+        if value >= MAGIC_LEAST:
+            found.append((value, index))
+    if not found:
         return []
-    return [{"нужда": "anomaly", "гекс": best[1], "вес": best[0], "имя": "",
-             "мера": "сила стоит тут гуще, чем где бы то ни было",
-             "основание": "magic"}]
+    found.sort(key=lambda row: (-row[0], row[1]))
+    rows = []
+    taken = set()
+    for value, index in found:
+        if len(rows) >= MAGIC_PLACES:
+            break
+        high = wmap.elevation_m(index) >= 1200
+        wet = wmap.is_river(index) or wmap.is_coast(index)
+        need = "crystal" if high else "spring" if wet else \
+            ("mage" if len(rows) else "anomaly")
+        if need in taken:
+            continue
+        taken.add(need)
+        measure, ground = MAGIC_KINDS[need]
+        rows.append({"нужда": need, "гекс": index, "вес": value, "имя": "",
+                     "мера": measure, "основание": ground})
+    return rows
+
+
+def _from_origin(world) -> list:
+    """Шрам творения, до которого можно дойти ногами.
+
+    Божье чудо нельзя найти ни на карте, ни в истории держав: оно есть
+    только там, где мир помнит своё начало. Шрамы творения лежат в
+    настоящих землях (`systems/origin`), и у части из них есть место —
+    вот оно и становится следом бога или местом явления.
+    """
+    origin = getattr(world, "origin", None)
+    if origin is None or not getattr(origin, "scars", None):
+        return []
+    rows = []
+    for row in origin.scars:
+        if len(rows) >= 2:
+            break
+        region_id = row.get("земля")
+        if not region_id or region_id not in world.regions:
+            continue
+        site = world.sites.get(row.get("место") or "")
+        need = "seat" if site is not None else "mark"
+        if any(item["нужда"] == need for item in rows):
+            continue
+        rows.append({"нужда": need, "гекс": -1, "вес": 1.0,
+                     "имя": "", "земля": region_id,
+                     "мера": row.get("что теперь")
+                     or "тут мир помнит своё начало",
+                     "основание": "faith"})
+    return rows
 
 
 def _region_of_row(world, row):
@@ -536,6 +611,12 @@ REACH = {
 }
 BUILT_EASE = 2.0
 
+# Крутизна у мира без карты. Высоты в гексах там нет, но земля знает,
+# какая она: без этой поправки гора в процедурном мире выходила «дойти
+# легко» — ровно та же неправда, которую крутизна убирает на карте.
+FLAT_ROUGH = {"горы": 3.0, "подземья": 2.5, "острова": 2.0, "пустыня": 2.0,
+              "тундра": 2.0, "болото": 1.5, "джунгли": 1.5, "холмы": 1.0}
+
 
 def _access_for(rng, world, index, region, shape):
     """Дойти до него легко или нельзя — и отчего.
@@ -555,6 +636,8 @@ def _access_for(rng, world, index, region, shape):
         rough = abs(wmap.elevation_m(index)) / 1000.0
         if not wmap.is_land(index):
             rough += 2.0
+    elif region is not None:
+        rough = FLAT_ROUGH.get(region.terrain, 0.0)
     ease = REACH.get(shape.need)
     if ease is None:
         ease = BUILT_EASE if shape.kind in (cat.BUILT, cat.MIXED) else 0.0

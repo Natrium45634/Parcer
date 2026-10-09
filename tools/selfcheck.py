@@ -4204,6 +4204,7 @@ def check_catalogues() -> list:
     # без основания не выпадет никогда, а облик без строки выпадет и
     # окажется чудом, о котором нечего сказать.
     from worldgen import wonders as won
+    from worldgen import races as races_for_rough
     from worldgen.systems import wonders as won_sys
     miss("роды у обликов чудес", [item.kind for item in won.SHAPES],
          {key for key, _n, _a in won.KINDS})
@@ -4230,6 +4231,13 @@ def check_catalogues() -> list:
          list(won_sys.EASIER.values()), set(won.ACCESS_BY_KEY))
     miss("облики в поправке на доступность", list(won_sys.REACH),
          {item.need for item in won.SHAPES})
+    miss("земли в крутизне мира без карты", list(won_sys.FLAT_ROUGH),
+         set(races_for_rough.TERRAINS))
+    miss("облики у волшебных мест", list(won_sys.MAGIC_KINDS),
+         set(won.SHAPES_BY_NEED))
+    miss("основания у волшебных мест",
+         [ground for _about, ground in won_sys.MAGIC_KINDS.values()],
+         set(won.GROUNDS_BY_KEY))
     miss("облики в отборе для мира без карты",
          [need for need, _t, _s, _g in won_sys.FLAT_PICKS],
          set(won.SHAPES_BY_NEED))
@@ -4262,6 +4270,23 @@ def check_catalogues() -> list:
         if "нём" in said or "ней" in said:
             problems.append("каталог чудес: в слове о славе осталось "
                             "местоимение: «%s»" % said)
+
+    # Досягаемость обликов чуда: облик, которого не найдёт ни один
+    # искатель, — та же мёртвая запись, что и след, не достающийся
+    # никакой беде. Ровно так пять обликов из тридцати одного и лежали
+    # мёртвыми: все волшебные, кроме одного, и оба божьих.
+    reach = set(won_sys.MAGIC_KINDS)
+    reach |= {need for need, _t, _s, _g in won_sys.FLAT_PICKS}
+    reach |= {item.need for item in won.SHAPES
+              if item.kind in (won.BUILT, won.MIXED)}
+    reach |= {key for key, _about in won_sys.SCAR_SHAPES.values()}
+    reach |= {"peak", "volcano", "lake", "isle", "falls", "canyon", "river",
+              "forest", "waste", "lair", "mark", "seat"}
+    dead_shapes = sorted({item.key for item in won.SHAPES
+                          if item.need not in reach})
+    if dead_shapes:
+        problems.append("каталог чудес: облик, который никто не найдёт — %s"
+                        % ", ".join(dead_shapes))
 
     # Имена нашествий привязаны к роду пришедших: ссылка на несуществующий
     # род сделала бы имя общим, и рой снова звался бы «Разбитой Короной».
