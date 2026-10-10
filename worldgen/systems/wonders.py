@@ -84,6 +84,7 @@ FOUND_RATE = 0.004
 FOUND_QUIET = 400           # сколько лет оно должно пролежать забытым
 FIX_RATE = 0.012            # и не всякое найденное поднимают
 DECAY_RATE = 0.02           # а брошенное рукотворное ветшает и само
+OLD_STONE = 1200            # и ветшать начинает не сразу, а через века
 
 # Список чудес («Семь чудес такой-то державы») составляют редко, и для
 # этого надо, чтобы было что считать.
@@ -976,12 +977,17 @@ def _tick(ctx, wonder, year: int, rng, scale: float) -> None:
                         "в эту землю вернулись жить, и вернулись к нему"
                         if _peopled(world, wonder.region_id)
                         else "его нашли те, кто искал совсем не его")
-    elif wonder.state == cat.LEFT and rng.chance(DECAY_RATE * scale) \
-            and shape_built(wonder):
-        # Поправлять стало некому, и камень пошёл своим чередом. Без
-        # этого храм стоял целым восемь тысяч лет, если в его землю не
-        # заходила беда, — и мир за всю историю не терял ни одного чуда.
-        _move_state(ctx, wonder, year, rng, cat.RUINS,
+    elif shape_built(wonder) and year - wonder.born.year >= OLD_STONE \
+            and not _kept(world, wonder) \
+            and rng.chance(DECAY_RATE * scale):
+        # Правило двенадцатое: камень рушится вчетверо быстрее, чем живёт
+        # обычай. Пока чудо кому-то нужно — держава стоит и в земле
+        # живут, — его поправляют. Как только поправлять стало некому,
+        # время берёт своё и без беды. Прежде ветшало только «заброшенное»,
+        # и храм мог простоять целым десять тысяч лет, если в его землю
+        # не заходило бедствие: мир за всю историю не терял ни одного чуда.
+        step = cat.RUINS if wonder.state in (cat.HURT, cat.LEFT) else cat.HURT
+        _move_state(ctx, wonder, year, rng, step,
                     "поправлять его стало некому, и камень пошёл своим "
                     "чередом")
     elif wonder.state in (cat.RUINS, cat.HURT) \
@@ -1046,6 +1052,14 @@ HARM = {cat.STANDS: 0, cat.FIXED: 0, cat.FOUND: 0, cat.FORGOT: 1,
 
 def _worse(state: str, than: str) -> bool:
     return HARM.get(state, 0) > HARM.get(than, 0)
+
+
+def _kept(world, wonder) -> bool:
+    """Есть ли кому его поправлять: держава в силе и живые вокруг."""
+    if not _peopled(world, wonder.region_id):
+        return False
+    polity = world.polities.get(wonder.polity_id) if wonder.polity_id else None
+    return polity is not None and polity.status == ACTIVE
 
 
 def shape_built(wonder) -> bool:
