@@ -679,7 +679,7 @@ def _access_for(rng, world, index, region, shape):
     # вершина, ни одна пещера и ни одно логово не вышли труднодоступными.
     ease = REACH.get(shape.need)
     if ease is None:
-        ease = BUILT_EASE if shape.kind in (cat.BUILT, cat.MIXED) else 0.0
+        ease = BUILT_EASE if cat.is_made(shape.kind) else 0.0
         lift = float(near)          # к рукотворному дорога и правда есть
     elif ease <= -2.0:
         lift = min(1.0, float(near))
@@ -1074,7 +1074,7 @@ def _kept(world, wonder) -> bool:
 def shape_built(wonder) -> bool:
     """Сделано ли руками: природное ветшать само не умеет."""
     shape = cat.SHAPES_BY_KEY.get(wonder.shape)
-    return shape is not None and shape.kind in (cat.BUILT, cat.MIXED)
+    return shape is not None and cat.is_made(shape.kind)
 
 
 def _peopled(world, region_id: str) -> bool:
@@ -1095,13 +1095,19 @@ def _break(ctx, wonder, year: int, rng, woe) -> None:
     # Гору нельзя «разрушить до основания», а храм можно: у природного
     # чуда свой список концов, и «от него не осталось ничего» в него не
     # входит. Иначе беда сносит реку, и летопись врёт вслух.
-    built = shape is not None and shape.kind == cat.BUILT
+    #
+    # Смешанное чудо — тоже людская работа, и бьётся она как всякая
+    # другая: лестницу, рубленную в камне, беда оставляет ступенями без
+    # верха. Но дотла такое не сгорает — основа под ним природная, и
+    # потому «не осталось ничего» ему не позволено.
+    built = shape is not None and cat.is_made(shape.kind)
     if built:
         pairs = [(cat.HURT, 3.0)]
         if heavy >= 3:
             pairs.append((cat.RUINS, 2.0))
         if heavy >= 4:
-            pairs.append((cat.GONE, 1.0))
+            if cat.can_vanish(shape.kind):
+                pairs.append((cat.GONE, 1.0))
             pairs.append((cat.BURIED, 0.8))
             if shape.need in ("city", "beacon", "canal", "bridge"):
                 pairs.append((cat.SUNK, 1.4))

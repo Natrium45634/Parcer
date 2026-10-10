@@ -814,9 +814,17 @@ def check_wonders(world, seed: str) -> list:
             break
 
         # Природное чудо не «разрушают до основания»: реку нельзя снести.
-        if shape.kind != cat.BUILT and wonder.state in (cat.RUINS, cat.GONE):
+        if not cat.is_made(shape.kind) \
+                and wonder.state in (cat.RUINS, cat.GONE):
             problems.append("сид «%s»: %s по имени %s — природное чудо, а "
                             "состояние у него «%s»"
+                            % (seed, shape.word, wonder.name, wonder.state))
+            break
+        # А у смешанного чуда верх людской, и в руины он лечь может —
+        # но не в пустое место: основа под ним природная и остаётся.
+        if not cat.can_vanish(shape.kind) and wonder.state == cat.GONE:
+            problems.append("сид «%s»: %s по имени %s стоит на природной "
+                            "основе, а состояние у него «%s»"
                             % (seed, shape.word, wonder.name, wonder.state))
             break
         for mark in wonder.marks:
@@ -4261,6 +4269,70 @@ def check_catalogues() -> list:
         problems.append("каталог чудес: состояние вне лестницы порчи — %s"
                         % ", ".join(sorted(set(won.STATES_BY_KEY)
                                            - set(won_sys.HARM))))
+    miss("роды, сделанные руками", list(won.MADE_KINDS),
+         {key for key, _n, _a in won.KINDS})
+    # В руины ложится всё, что сделано руками, и у всякого облика своё
+    # слово о том, что от него осталось. Нового облика без такого слова
+    # быть не должно: иначе от канала «остаются стены».
+    from worldgen import narrative_wonders as won_texts
+    miss("облики у руин", list(won_texts.RUIN_LEFT), set(won.SHAPES_BY_KEY))
+    silent = sorted(item.key for item in won.SHAPES
+                    if won.is_made(item.kind)
+                    and item.key not in won_texts.RUIN_LEFT)
+    if silent:
+        problems.append("каталог чудес: не сказано, что остаётся от руин "
+                        "облика — %s" % ", ".join(silent))
+    # Снести до основания можно только то, что целиком поставлено
+    # руками. Если в этот список попадёт род с природной основой, беда
+    # начнёт сносить реки, а летопись — врать вслух.
+    if set(won.RAZED_KINDS) - set(won.MADE_KINDS):
+        problems.append("каталог чудес: род, которого не делали руками, а "
+                        "снести до основания можно — %s"
+                        % ", ".join(sorted(set(won.RAZED_KINDS)
+                                           - set(won.MADE_KINDS))))
+    # Ветшает то, что сделано руками, а портит беда — то же самое.
+    # Разойдись эти два ответа, и выйдет чудо в руинах, которому беда
+    # удара не наносила: ровно так и вышла «лестница в камне в руинах».
+    if not won.is_made(won.MIXED) or won.can_vanish(won.MIXED):
+        problems.append("каталог чудес: смешанное чудо должно ветшать как "
+                        "рукотворное, но не исчезать без следа")
+    # Имя собственное не склоняется, поэтому в косвенном месте фразы
+    # стоит оборот со склоняемым словом («от чуда по имени X»), а не
+    # само имя и не оборот в именительном. Проверяется это по самим
+    # шаблонам: предлог прямо перед подстановкой имени — та ошибка, из
+    # которой выходило «От Белая Твердыня остаются стены».
+    preps = {"о", "об", "от", "с", "со", "к", "ко", "про", "у", "для",
+             "над", "под", "за", "при", "без", "до", "по", "из", "на", "в"}
+    lines = []
+    for pool in (won_texts.FOUND_NATURAL, won_texts.FOUND_BUILT,
+                 won_texts.FOUND_MAGIC, won_texts.FAME_UP,
+                 won_texts.FAME_DOWN, won_texts.FALSE_LINES,
+                 won_texts.LIST_LINES):
+        lines.extend(pool)
+    for both in won_texts.STATE_LINES.values():
+        lines.extend(both)
+    for line in lines:
+        words = line.replace("%(name_cap)s", "%(name)s") \
+                    .replace("%(who_cap)s", "%(who)s").split()
+        for before, after in zip(words, words[1:]):
+            if not (after.startswith("%(name)s")
+                    or after.startswith("%(who)s")):
+                continue
+            if before.strip("«(,.—:;").lower() in preps:
+                problems.append("каталог чудес: имя стоит в косвенном "
+                                "месте без оборота — «%s %s»"
+                                % (before, after))
+    # Фраза, начинающаяся с подстановки, должна подставлять слово с
+    # большой буквы: иначе в летописи выходит «чуда по имени X больше
+    # нет» со строчной посреди абзаца.
+    for line in lines:
+        first = line.split()[0]
+        # Имя собственное и так с большой буквы; всё прочее должно
+        # прийти через подстановку с «_cap».
+        if line.startswith("%(") and "_cap)s" not in first \
+                and not first.startswith("%(name)s"):
+            problems.append("каталог чудес: фраза начинается с малой "
+                            "буквы — «%s…»" % line[:28])
     if len(won.FAME_WORDS) != won.TOP_FAME + 1:
         problems.append("каталог чудес: ступеней славы не столько, сколько "
                         "слов")
@@ -4277,8 +4349,7 @@ def check_catalogues() -> list:
     # мёртвыми: все волшебные, кроме одного, и оба божьих.
     reach = set(won_sys.MAGIC_KINDS)
     reach |= {need for need, _t, _s, _g in won_sys.FLAT_PICKS}
-    reach |= {item.need for item in won.SHAPES
-              if item.kind in (won.BUILT, won.MIXED)}
+    reach |= {item.need for item in won.SHAPES if won.is_made(item.kind)}
     reach |= {key for key, _about in won_sys.SCAR_SHAPES.values()}
     reach |= {"peak", "volcano", "lake", "isle", "falls", "canyon", "river",
               "forest", "waste", "lair", "mark", "seat"}
