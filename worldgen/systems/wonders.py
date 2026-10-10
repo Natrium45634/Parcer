@@ -1003,9 +1003,11 @@ def _tick(ctx, wonder, year: int, rng, scale: float) -> None:
             and rng.chance(FIX_RATE * scale):
         # Поднять заново можно стену и храм. Лес и озеро никто не
         # «восстанавливает» — они оправляются сами, и причина у этого
-        # своя, а не державная.
+        # своя, а не державная. Вечный источник и след бога тут с лесом
+        # в одной графе: их тоже не поднимают державы. Мера та же, что
+        # и везде, — сделано ли это руками.
         shape = cat.SHAPES_BY_KEY.get(wonder.shape)
-        if shape is not None and shape.kind == cat.NATURAL:
+        if shape is not None and not cat.is_made(shape.kind):
             _move_state(ctx, wonder, year, rng, cat.STANDS,
                         "прошло столько лет, что следов беды уже не видно")
         else:
