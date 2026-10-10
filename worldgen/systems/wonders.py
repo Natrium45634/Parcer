@@ -502,17 +502,26 @@ def _witness(world, region, year: int):
     """
     if region is None:
         return None
-    best = None
-    for table in (world.settlements, getattr(world, "tribes", {})):
-        for item in table.values():
-            if getattr(item, "region_id", "") != region.id:
-                continue
-            if item.founded.year > year:
-                continue
-            if best is None or (item.founded.year, item.id) \
-                    < (best.founded.year, best.id):
-                best = item
-    return best
+    # «Рядом» — это и соседняя земля: до чуда в двух днях пути доходят и
+    # те, кто живёт за межой. Без этого крайности процедурного мира —
+    # самая сухая пустыня, самая сильная земля — так и не получали имени:
+    # они лежат там, где не живут, и чудеса такого мира выходили почти
+    # все рукотворными. Своя земля при этом важнее соседней: сперва
+    # спрашиваем её, и только если в ней пусто — соседей.
+    for land in [region.id] + list(region.neighbors or ()):
+        best = None
+        for table in (world.settlements, getattr(world, "tribes", {})):
+            for item in table.values():
+                if getattr(item, "region_id", "") != land:
+                    continue
+                if item.founded.year > year:
+                    continue
+                if best is None or (item.founded.year, item.id) \
+                        < (best.founded.year, best.id):
+                    best = item
+        if best is not None:
+            return best
+    return None
 
 
 def _name_natural(ctx, year: int, rng, scale: float) -> None:
