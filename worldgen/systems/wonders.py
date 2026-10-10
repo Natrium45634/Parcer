@@ -83,6 +83,7 @@ FORGET_RATE = 0.05
 FOUND_RATE = 0.004
 FOUND_QUIET = 400           # сколько лет оно должно пролежать забытым
 FIX_RATE = 0.012            # и не всякое найденное поднимают
+DECAY_RATE = 0.02           # а брошенное рукотворное ветшает и само
 
 # Список чудес («Семь чудес такой-то державы») составляют редко, и для
 # этого надо, чтобы было что считать.
@@ -660,10 +661,21 @@ def _access_for(rng, world, index, region, shape):
             rough += 2.0
     elif region is not None:
         rough = FLAT_ROUGH.get(region.terrain, 0.0)
+    # Людность делает место известным, а не доступным. У того, что
+    # трудно само по себе, она прибавляет самую малость: от того, что в
+    # земле дюжина городов, пещера не становится проходимой, а остров —
+    # ближе. Прежде людность шла в счёт без предела и забивала поправку
+    # по облику — и смотр это поймал: в одном мире из четырёх ни одна
+    # вершина, ни одна пещера и ни одно логово не вышли труднодоступными.
     ease = REACH.get(shape.need)
     if ease is None:
         ease = BUILT_EASE if shape.kind in (cat.BUILT, cat.MIXED) else 0.0
-    score = near + ease - rough
+        lift = float(near)          # к рукотворному дорога и правда есть
+    elif ease <= -2.0:
+        lift = min(1.0, float(near))
+    else:
+        lift = min(4.0, float(near))
+    score = lift + ease - rough
     if score >= 4:
         return "easy", ""
     if score >= 1:
@@ -964,6 +976,14 @@ def _tick(ctx, wonder, year: int, rng, scale: float) -> None:
                         "в эту землю вернулись жить, и вернулись к нему"
                         if _peopled(world, wonder.region_id)
                         else "его нашли те, кто искал совсем не его")
+    elif wonder.state == cat.LEFT and rng.chance(DECAY_RATE * scale) \
+            and shape_built(wonder):
+        # Поправлять стало некому, и камень пошёл своим чередом. Без
+        # этого храм стоял целым восемь тысяч лет, если в его землю не
+        # заходила беда, — и мир за всю историю не терял ни одного чуда.
+        _move_state(ctx, wonder, year, rng, cat.RUINS,
+                    "поправлять его стало некому, и камень пошёл своим "
+                    "чередом")
     elif wonder.state in (cat.RUINS, cat.HURT) \
             and rng.chance(FIX_RATE * scale):
         # Поднять заново можно стену и храм. Лес и озеро никто не
@@ -1026,6 +1046,12 @@ HARM = {cat.STANDS: 0, cat.FIXED: 0, cat.FOUND: 0, cat.FORGOT: 1,
 
 def _worse(state: str, than: str) -> bool:
     return HARM.get(state, 0) > HARM.get(than, 0)
+
+
+def shape_built(wonder) -> bool:
+    """Сделано ли руками: природное ветшать само не умеет."""
+    shape = cat.SHAPES_BY_KEY.get(wonder.shape)
+    return shape is not None and shape.kind in (cat.BUILT, cat.MIXED)
 
 
 def _peopled(world, region_id: str) -> bool:
