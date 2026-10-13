@@ -2788,6 +2788,90 @@ def render_wonders(world) -> str:
     return "\n".join(rows)
 
 
+def render_dominions(world) -> str:
+    """Владения чудовищ: земли, у которых хозяин не человек.
+
+    Раздел начинается не с перечня, а со счёта и с того, сколько душ
+    жило под такой властью: владение, под которым никто не жил, — это
+    опасное место, а не история. Дальше у каждого — чем держал, чем
+    брал, кто под ним жил и чем это кончилось.
+    """
+    from . import dominion as cat
+    from . import narrative_dominion as texts
+
+    rows = ["ВЛАДЕНИЯ ЧУДОВИЩ", ""]
+    if not world.dominions:
+        rows.append("  Ни одна земля в этом мире не досталась нечеловеку.")
+        return "\n".join(rows)
+
+    items = sorted(world.dominions.values(),
+                   key=lambda item: (item.began.year, item.id))
+    standing = [item for item in items if item.alive]
+    peopled = [item for item in items if item.folk]
+    line = "  Владений за всю историю: %d" % len(items)
+    if standing:
+        line += "; к концу летописи стоит %d" % len(standing)
+    if peopled:
+        line += "; под властью жили люди в %d из них" % len(peopled)
+    rows.append(line + ".")
+    rows.append("")
+
+    for hold in items:
+        rows.append("  %s" % texts.head_line(hold).upper())
+        region = world.regions.get(hold.seat_region)
+        where = "      земля по имени %s" % region.name \
+            if region is not None else "      земля неизвестна"
+        if hold.lands > 1:
+            where += "; земель под ним %d" % hold.lands
+        rows.append(where)
+        years = "%d год" % hold.began.year
+        if hold.ended is not None:
+            years += " — %d год" % hold.ended.year
+        else:
+            years += " — и стоит до сих пор"
+        rows.append("      %s; %s" % (years, hold.origin_why))
+        rows.append("      %s" % texts.hold_line(hold))
+        if hold.motive:
+            rows.append("      нужно ему: %s — %s"
+                        % (cat.motive_word(hold.motive),
+                           cat.motive_about(hold.motive)))
+        for row in hold.folk:
+            rows.append("      под ним: %s" % texts.folk_line(world, row))
+        tribute = texts.tribute_line(hold)
+        if tribute:
+            rows.append("      %s" % tribute)
+        for row in hold.edicts:
+            rows.append("      правило: %s" % texts.edict_line(row))
+        need = texts.need_line(hold)
+        if need:
+            rows.append("      живёт этим: %s" % need)
+        tolerated = texts.tolerated_line(hold)
+        if tolerated:
+            rows.append("      отчего терпят: %s" % tolerated)
+        for row in hold.land_marks:
+            land = world.regions.get(row.get("земля", ""))
+            rows.append("      %d год — в земле по имени %s: %s"
+                        % (int(row.get("год", 0)),
+                           land.name if land is not None else "неизвестной",
+                           row.get("что", "")))
+        for row in hold.risings:
+            rows.append("      %s" % texts.rising_line(world, row))
+        for row in hold.wars:
+            rows.append("      %s" % texts.war_line(world, row))
+        for voice in cat.VOICES:
+            if voice in hold.told:
+                rows.append("      %s"
+                            % texts.voice_line(voice, hold.told[voice]))
+        truth = texts.truth_line(hold)
+        if truth:
+            rows.append("      а на деле: %s" % truth)
+        if hold.end:
+            rows.append("      конец: %s — %s"
+                        % (cat.ENDS_BY_KEY[hold.end][0], hold.end_how))
+        rows.append("")
+    return "\n".join(rows)
+
+
 def render_soldiery(world) -> str:
     """Крепости и вольные роты: то, что остаётся от войны между войнами."""
     from .models import ACTIVE as ACTIVE_STATE
@@ -5278,6 +5362,7 @@ def full_text(world) -> str:
         render_creatures(world),
         render_monsters(world),
         render_wonders(world),
+        render_dominions(world),
         render_artifacts(world),
         render_sites(world),
         render_stats(world),

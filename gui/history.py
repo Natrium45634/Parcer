@@ -49,7 +49,10 @@ GROUPS = (
     ("беды", (
         "calamity_", "famine", "dark_age", "crisis_era", "invasion_",
         "monster_", "creature_", "relic_", "scar", "trace_", "land_drowned",
-        "land_sundered", "refuge", "shortage", "dark_errand")),
+        "land_sundered", "refuge", "shortage", "dark_errand",
+        # Владение чудовища стоит тут, а не в «державах»: для людей,
+        # которые под ним оказались, это беда, а не форма правления.
+        "dominion_")),
     ("города, племена и народы", (
         "settlement_", "city", "camp", "tribe", "site", "migration",
         "folk_", "race_awakening", "race_gone", "assimilation",

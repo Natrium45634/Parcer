@@ -27,6 +27,7 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       creatures as creature_sys,
                       wonders as wonder_sys,
                       disaster as disaster_sys,
+                      dominion as dominion_sys,
                       citylife,
                       crafts, culture,
                       diplomacy, divinity, embassy,
@@ -227,6 +228,10 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             laws.upkeep(ctx, year, UPKEEP_PERIOD)
             citylife.upkeep(ctx, year, UPKEEP_PERIOD)
             monsters.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Владения чудовищ — следом за самими чудовищами: хозяином
+            # земли становится тот, за кем уже есть дела, а дела эти
+            # случились тактом выше.
+            dominion_sys.upkeep(ctx, year, UPKEEP_PERIOD)
             # Виды — после чудовищ: ступень именованной особи считается в
             # их такте, а тут идёт жизнь всего рода: ветви, разум, уход и
             # возвращение.

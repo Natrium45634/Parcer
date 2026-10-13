@@ -326,6 +326,203 @@ def check_stories(world, seed: str) -> list:
     return problems
 
 
+def check_dominions(world, seed: str) -> list:
+    """Владения чудовищ: сходится ли власть с тем, кто её держит.
+
+    Тут ловится то, во что эта система ломается тихо. Владение без
+    хозяина — обычно не ничья земля, а потерянная ссылка. Хозяин,
+    заведший владение раньше, чем сам появился на свет. Размах не по
+    силам: дракон с державой в пол-мира. Причина, которой в летописи
+    нет, — «раскол другого владения» там, где раскалываться было
+    нечему. Повинность с тех, кого нет: дань с пустой земли. И записи
+    о владении землёй внахлёст или с дырами — по ним потом отвечают на
+    вопрос, кто тут хозяйничал в таком-то году.
+    """
+    from worldgen import dominion as cat
+    from worldgen import narrative_dominion as texts
+
+    problems = []
+    total = world.total_years
+    for hold in sorted(world.dominions.values(), key=lambda item: item.id):
+        kind = cat.KINDS_BY_KEY.get(hold.kind)
+        if kind is None:
+            problems.append("сид «%s»: у владения по имени %s вид «%s» не из "
+                            "справочника" % (seed, hold.name, hold.kind))
+            break
+        if hold.control not in cat.CONTROLS_BY_KEY:
+            problems.append("сид «%s»: %s держат неведомо чем: «%s»"
+                            % (seed, hold.name, hold.control))
+            break
+        if hold.origin not in cat.ORIGINS_BY_KEY:
+            problems.append("сид «%s»: у владения по имени %s нет причины "
+                            "появиться: «%s»" % (seed, hold.name, hold.origin))
+            break
+        if not hold.origin_why:
+            problems.append("сид «%s»: у владения по имени %s причина не "
+                            "рассказана словами" % (seed, hold.name))
+            break
+        if not 1 <= hold.began.year <= total:
+            problems.append("сид «%s»: владение по имени %s завелось в %d "
+                            "году, а история идёт до %d"
+                            % (seed, hold.name, hold.began.year, total))
+            break
+        if hold.ended is not None and hold.ended.year < hold.began.year:
+            problems.append("сид «%s»: владение по имени %s кончилось раньше, "
+                            "чем началось" % (seed, hold.name))
+            break
+
+        # Хозяин. Его нет только у ничьей земли: во всех прочих случаях
+        # пустая ссылка значит, что владение потеряло того, из-за кого
+        # оно вообще есть.
+        if hold.kind in cat.LORDLESS:
+            if hold.lord_id:
+                problems.append("сид «%s»: у ничьей земли по имени %s "
+                                "объявился хозяин" % (seed, hold.name))
+                break
+        elif not hold.lord_id:
+            problems.append("сид «%s»: у владения по имени %s нет хозяина, "
+                            "а вид его не ничья земля" % (seed, hold.name))
+            break
+        else:
+            lord = world.entity(hold.lord_id)
+            if lord is None:
+                problems.append("сид «%s»: хозяин владения по имени %s не "
+                                "найден в мире" % (seed, hold.name))
+                break
+            came = getattr(lord, "born", None) or getattr(lord, "entered", None)
+            if came is not None and came.year > hold.began.year:
+                problems.append("сид «%s»: владение по имени %s завелось в "
+                                "%d году, а хозяин его явился в %d"
+                                % (seed, hold.name, hold.began.year,
+                                   came.year))
+                break
+
+        # Размах. Предел вида — это и есть мера правдоподобия: сильный
+        # монстр не владеет полумиром только потому, что он сильный.
+        if len(hold.region_ids) > kind.wide:
+            problems.append("сид «%s»: %s держит %d земель при пределе %d "
+                            "для своего вида"
+                            % (seed, hold.name, len(hold.region_ids),
+                               kind.wide))
+            break
+        for land in hold.region_ids:
+            if land not in world.regions:
+                problems.append("сид «%s»: %s держит землю «%s», которой в "
+                                "мире нет" % (seed, hold.name, land))
+                break
+            if land not in hold.claimed_ids:
+                problems.append("сид «%s»: %s держит землю, на которую не "
+                                "притязает" % (seed, hold.name))
+                break
+        if problems:
+            break
+
+        # Подданные. Повинность бывает только там, где есть с кого её
+        # брать, а положение — из справочника.
+        for row in hold.folk:
+            if row.get("как") not in cat.STANDINGS_BY_KEY:
+                problems.append("сид «%s»: под владением по имени %s живут "
+                                "неведомо кем: «%s»"
+                                % (seed, hold.name, row.get("как")))
+                break
+            if row.get("чувство") not in cat.FEELINGS_BY_KEY:
+                problems.append("сид «%s»: у подданных владения по имени %s "
+                                "не названо отношение" % (seed, hold.name))
+                break
+        if problems:
+            break
+        if hold.tribute and not hold.folk:
+            problems.append("сид «%s»: владение по имени %s берёт дань, а "
+                            "брать её не с кого" % (seed, hold.name))
+            break
+        if hold.tribute and hold.tribute not in cat.TRIBUTES_BY_KEY:
+            problems.append("сид «%s»: с подданных владения по имени %s "
+                            "берут неведомо чем: «%s»"
+                            % (seed, hold.name, hold.tribute))
+            break
+        if cat.KINDS_BY_KEY[hold.kind].folk == cat.NO_FOLK and hold.folk:
+            problems.append("сид «%s»: у владения по имени %s есть подданные, "
+                            "хотя вид его их не знает" % (seed, hold.name))
+            break
+
+        # Записи о владении землёй: по ним отвечают, кто тут хозяйничал в
+        # таком-то году, и дыры с нахлёстами делают этот ответ ложью.
+        spans = {}
+        for row in hold.held:
+            land = row.get("земля", "")
+            began = int(row.get("с", 0))
+            over = int(row.get("по", 0))
+            if not 1 <= began <= total or (over and not began <= over <= total):
+                problems.append("сид «%s»: %s держало землю с %d по %d, а "
+                                "история идёт до %d"
+                                % (seed, hold.name, began, over, total))
+                break
+            for other_began, other_over in spans.get(land, ()):
+                last = other_over or total
+                if began <= last and other_began <= (over or total):
+                    problems.append("сид «%s»: %s держит одну землю дважды "
+                                    "разом" % (seed, hold.name))
+                    break
+            spans.setdefault(land, []).append((began, over))
+        if problems:
+            break
+        for land in hold.region_ids:
+            if not any(not row.get("по") for row in hold.held
+                       if row.get("земля") == land):
+                problems.append("сид «%s»: %s держит землю, о которой в "
+                                "записи сказано, что уже не держит"
+                                % (seed, hold.name))
+                break
+        if problems:
+            break
+
+        # Конец: он из справочника, он назван словами, и после конца
+        # владение не держит ничего.
+        if hold.ended is not None:
+            if hold.end not in cat.ENDS_BY_KEY:
+                problems.append("сид «%s»: владение по имени %s кончилось "
+                                "неведомо чем: «%s»"
+                                % (seed, hold.name, hold.end))
+                break
+            if not hold.end_how:
+                problems.append("сид «%s»: у конца владения по имени %s не "
+                                "сказано, как это вышло" % (seed, hold.name))
+                break
+            if any(not row.get("по") for row in hold.held):
+                problems.append("сид «%s»: владение по имени %s кончилось, а "
+                                "землю держит до сих пор" % (seed, hold.name))
+                break
+
+        # Отметки идут в пределах жизни владения.
+        for row in hold.marks:
+            year = int(row.get("год", 0))
+            if not hold.began.year <= year <= total:
+                problems.append("сид «%s»: с владением по имени %s что-то "
+                                "случилось в %d году, а завелось оно в %d"
+                                % (seed, hold.name, year, hold.began.year))
+                break
+        if problems:
+            break
+
+        # По-русски и без заикания: «царство набега по имени Ставка».
+        said = texts.said_of(hold)
+        head = cat.kind_word(hold.kind).split()[-1].lower()
+        words = [part.lower() for part in hold.name.split()]
+        if head in words and "по имени" in said:
+            problems.append("сид «%s»: имя заикается — «%s»" % (seed, said))
+            break
+        for line in (said, texts.head_line(hold), texts.hold_line(hold)):
+            wrong = [word for word in line.split()
+                     if any("a" <= char.lower() <= "z" for char in word)]
+            if wrong:
+                problems.append("сид «%s»: в строке о владении чужое слово: "
+                                "«%s»" % (seed, wrong[0]))
+                break
+        if problems:
+            break
+    return problems
+
+
 def check_renown(world, seed: str) -> list:
     """Вес имён: собран из настоящих следов и не спорит с жизнью.
 
@@ -4371,6 +4568,92 @@ def check_catalogues() -> list:
         problems.append("каталог чудес: облик, который никто не найдёт — %s"
                         % ", ".join(dead_shapes))
 
+    # Владения чудовищ: вид, у которого нет ни одного возможного хозяина,
+    # никогда не выпадет, а значит, его нет вовсе.
+    from worldgen import dominion as dom
+    from worldgen.systems import dominion as dom_sys
+    from worldgen import monsters as mon_cat
+    from worldgen import subject as sub_cat
+    from worldgen import invasion as inv_cat
+    miss("способы власти у видов владений",
+         [key for item in dom.KINDS for key in item.controls],
+         set(dom.CONTROLS_BY_KEY))
+    miss("хозяева у видов владений",
+         [key for item in dom.KINDS for key in item.lords],
+         set(mon_cat.BREEDS_BY_KEY) | set(sub_cat.KINDS))
+    miss("виды у причин", [key for item in dom.ORIGINS for key in item.kinds],
+         set(dom.KINDS_BY_KEY))
+    miss("нужды у причин", [item.needs for item in dom.ORIGINS if item.needs],
+         {dom.NEED_FALL, dom.NEED_INVASION, dom.NEED_WOE, dom.NEED_SLEEPER,
+          dom.NEED_EMPTY, dom.NEED_KIN})
+    miss("виды у целей", list(dom.MOTIVES_BY_KIND), set(dom.KINDS_BY_KEY))
+    miss("цели у видов",
+         [key for keys in dom.MOTIVES_BY_KIND.values() for key in keys],
+         set(dom.MOTIVES_BY_KEY))
+    miss("виды у даней", list(dom.TRIBUTE_BY_KIND), set(dom.KINDS_BY_KEY))
+    miss("дани у видов",
+         [key for keys in dom.TRIBUTE_BY_KIND.values() for key in keys],
+         set(dom.TRIBUTES_BY_KEY))
+    miss("виды у нужд", list(dom.NEEDS_BY_KIND), set(dom.KINDS_BY_KEY))
+    miss("нужды у видов",
+         [key for keys in dom.NEEDS_BY_KIND.values() for key in keys],
+         set(dom.NEEDS_BY_KEY))
+    miss("виды у правил",
+         [key for item in dom.EDICTS for key in item.kinds],
+         set(dom.KINDS_BY_KEY))
+    miss("виды у следов на земле",
+         [key for _k, _w, kinds in dom.LAND_MARKS for key in kinds],
+         set(dom.KINDS_BY_KEY))
+    miss("положения вне владения", list(dom.OUTSIDE), set(dom.STANDINGS_BY_KEY))
+    miss("концы, после которых возвращаются", list(dom.RETURNABLE),
+         set(dom.ENDS_BY_KEY))
+    miss("имена по видам", list(dom.NAME_WORDS), set(dom.KINDS_BY_KEY))
+    miss("роды в именах",
+         [gender for rows in dom.NAME_WORDS.values() for _w, gender in rows],
+         set(dom.ADJ_ORDER))
+    miss("виды владений из нашествий", list(dom_sys.KIND_BY_INVASION.values()),
+         set(dom.KINDS_BY_KEY))
+    miss("роды нашествий у владений", list(dom_sys.KIND_BY_INVASION),
+         set(inv_cat.KINDS))
+    for item in dom.KINDS:
+        if not item.seats:
+            problems.append("каталог владений: у вида «%s» нет ни логова, "
+                            "ни престола" % item.key)
+        if not item.controls:
+            problems.append("каталог владений: вид «%s» нечем держать"
+                            % item.key)
+        if item.folk not in (dom.NEED_FOLK, dom.SOME_FOLK, dom.NO_FOLK):
+            problems.append("каталог владений: у вида «%s» неясно, нужны ли "
+                            "ему подданные" % item.key)
+    # Вид, которого не заведёт ни один хозяин в мире, — мёртвая запись.
+    # Ровно так и лежала «проклятая земля»: ни одна порода чудовищ её не
+    # даёт, и в нашествиях её нет.
+    breeds = set(mon_cat.BREEDS_BY_KEY)
+    from_inv = set(dom_sys.KIND_BY_INVASION.values())
+    dead = []
+    for item in dom.KINDS:
+        if item.key in dom.LORDLESS or item.key in from_inv:
+            continue
+        if set(item.lords) & breeds:
+            continue
+        if item.key == "curse":
+            continue            # заводится от шрама беды, см. _from_scars
+        dead.append(item.key)
+    if dead:
+        problems.append("каталог владений: вид, который некому завести — %s"
+                        % ", ".join(sorted(dead)))
+    for item in dom.ORIGINS:
+        if not item.about:
+            problems.append("каталог владений: у причины «%s» нет объяснения"
+                            % item.key)
+    # Положение подданного должно что-то значить: воля, цена и риск —
+    # это и есть разница между данником и рабом.
+    for item in dom.STANDINGS:
+        if not 0.0 <= item.free <= 1.0 or not 0.0 <= item.cost <= 1.0 \
+                or not 0.0 <= item.risk <= 1.0:
+            problems.append("каталог владений: у положения «%s» мера не в "
+                            "пределах" % item.key)
+
     # Имена нашествий привязаны к роду пришедших: ссылка на несуществующий
     # род сделала бы имя общим, и рой снова звался бы «Разбитой Короной».
     from worldgen import invasion as inv
@@ -4489,6 +4772,7 @@ def main(only: str = "") -> int:
         failures.extend(check_gods(first, seed))
         failures.extend(check_creatures(first, seed))
         failures.extend(check_wonders(first, seed))
+        failures.extend(check_dominions(first, seed))
         failures.extend(check_renown(first, seed))
 
         print("  сид «%-12s» событий %5d | города %4d | страны %3d | роды %4d | "
@@ -4564,6 +4848,7 @@ def main(only: str = "") -> int:
             failures.extend(check_gods(first, "карта/" + seed))
             failures.extend(check_creatures(first, "карта/" + seed))
             failures.extend(check_wonders(first, "карта/" + seed))
+            failures.extend(check_dominions(first, "карта/" + seed))
             failures.extend(check_renown(first, "карта/" + seed))
             failures.extend(check_map_world(first, sample, "карта/" + seed))
 
@@ -4615,7 +4900,7 @@ def main(only: str = "") -> int:
                       check_tales,
                       check_lives, check_stories, check_towns,
                       check_holidays, check_origin, check_land,
-                      check_creatures, check_wonders,
+                      check_creatures, check_wonders, check_dominions,
                       check_gods, check_renown):
             failures.extend(check(first, "своя/" + seed))
         from worldgen import worldforge

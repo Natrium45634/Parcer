@@ -1012,11 +1012,70 @@ def best_wonder(world, out) -> None:
     out("")
 
 
+def worst_dominion(world, out) -> None:
+    """Портрет владения, под которым жило больше всего душ.
+
+    По одному владению видно всю подсистему разом: нашёлся ли ему
+    хозяин в готовом мире, названа ли причина, которую можно показать
+    пальцем в летописи, кто под ним жил и чем платил, поднимались ли
+    против него — и чем всё кончилось. Берётся самое людное, а не
+    самое долгое: владение без подданных — опасное место, а не власть,
+    и портрет из него не выйдет.
+    """
+    from worldgen import dominion as cat
+    from worldgen import narrative_dominion as texts
+
+    out("=" * 78)
+    out("ВЛАДЕНИЕ ЧУДОВИЩА")
+    if not world.dominions:
+        out("  Ни одна земля в этом мире не досталась нечеловеку.")
+        return
+    rows = sorted(world.dominions.values(),
+                  key=lambda item: (-item.souls, -item.lands, item.id))
+    hold = rows[0]
+    out("  %s" % texts.head_line(hold))
+    region = world.regions.get(hold.seat_region)
+    out("  земля: %s; земель под ним %d"
+        % (region.name if region is not None else "неизвестна", hold.lands))
+    years = "%d" % hold.began.year
+    years += " — %d" % hold.ended.year if hold.ended is not None \
+        else " — и стоит до сих пор"
+    out("  годы: %s" % years)
+    out("  отчего: %s" % hold.origin_why)
+    out("  держит: %s" % texts.hold_line(hold))
+    out("  нужно ему: %s — %s" % (cat.motive_word(hold.motive),
+                                  cat.motive_about(hold.motive)))
+    for row in hold.folk:
+        out("    под ним: %s" % texts.folk_line(world, row))
+    tribute = texts.tribute_line(hold)
+    if tribute:
+        out("    %s" % tribute)
+    for row in hold.edicts:
+        out("    правило: %s" % texts.edict_line(row))
+    need = texts.need_line(hold)
+    if need:
+        out("    живёт этим: %s" % need)
+    tolerated = texts.tolerated_line(hold)
+    if tolerated:
+        out("    отчего терпят: %s" % tolerated)
+    for row in hold.risings:
+        out("    %s" % texts.rising_line(world, row))
+    for voice, said in sorted(hold.told.items()):
+        out("    %s" % texts.voice_line(voice, said))
+    truth = texts.truth_line(hold)
+    if truth:
+        out("    а на деле: %s" % truth)
+    if hold.end:
+        out("  конец: %s — %s"
+            % (cat.ENDS_BY_KEY[hold.end][0], hold.end_how))
+
+
 def portraits(world, out) -> None:
-    """Десять портретов мира: имена, ушедшие народы, старый город, злое
-    время, тот, кто людям не ровня, самый долгий праздник, самое громкое
-    за всю историю, самое весомое место, самое громкое чудо и — если мир
-    стоит на гексовой карте — сама эта земля."""
+    """Одиннадцать портретов мира: имена, ушедшие народы, старый город,
+    злое время, тот, кто людям не ровня, самый долгий праздник, самое
+    громкое за всю историю, самое весомое место, самое громкое чудо,
+    самое людное владение чудовища и — если мир стоит на гексовой
+    карте — сама эта земля."""
     great_names(world, out)
     peoples_gone(world, out)
     oldest_town(world, out)
@@ -1026,6 +1085,7 @@ def portraits(world, out) -> None:
     loudest(world, out)
     weightiest_place(world, out)
     best_wonder(world, out)
+    worst_dominion(world, out)
     land_portrait(world, out)
 
 

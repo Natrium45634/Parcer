@@ -522,6 +522,28 @@ def _region_of(world, index: int):
     return world.regions.get(region_id) if region_id else None
 
 
+def dominions_here(world, index: int) -> list:
+    """Кто на деле хозяйничал в этом месте и когда.
+
+    Вопрос этот отдельный от «кому место принадлежало»: границы держав
+    снимаются с карты, а владение чудовища на карте не рисуется вовсе.
+    Поэтому у места бывают два хозяина разом — тот, чья это земля по
+    счёту держав, и тот, кого тут на самом деле слушались.
+    """
+    region = _region_of(world, index)
+    if region is None:
+        return []
+    rows = []
+    for hold in sorted(getattr(world, "dominions", {}).values(),
+                       key=lambda item: item.began.year):
+        for span in hold.held:
+            if span.get("земля") != region.id:
+                continue
+            rows.append((int(span.get("с", 0)), int(span.get("по", 0)), hold))
+    rows.sort(key=lambda row: (row[0], row[2].id))
+    return rows
+
+
 def features(world, index: int) -> list:
     """Что на этом гексе отмечено самой картой: хребет, вершина, логово."""
     wmap = _map_of(world)
@@ -1589,6 +1611,28 @@ def blocks(world, index: int, year: int = 0) -> list:
             out.append(("dated", "  %6d  %s — %s"
                         % (begin, "%d" % end if end > begin else "тот же год",
                            who or "ничья земля")))
+        out.append(("line", ""))
+
+    under = dominions_here(world, index)
+    if under:
+        out.append(("head", "А НА ДЕЛЕ ТУТ ХОЗЯЙНИЧАЛИ"))
+        out.append(("dim", "  держава держит землю границей, а эти — тем, "
+                           "что бывает с тем, кто нарушит правило"))
+        out.append(("line", ""))
+        from . import narrative_dominion as dom_texts
+        for began, over, hold in under:
+            out.append(("dated", "  %6d  %s — %s"
+                        % (began,
+                           "%d" % over if over else "и дальше",
+                           dom_texts.head_line(hold))))
+            out.append(("dim", "          %s" % dom_texts.hold_line(hold)))
+            tribute = dom_texts.tribute_line(hold)
+            if tribute:
+                out.append(("dim", "          %s" % tribute))
+            for row in hold.edicts:
+                out.append(("dim", "          правило: %s — %s"
+                                   % (row.get("что", ""),
+                                      row.get("кара", ""))))
         out.append(("line", ""))
 
     folk = people(world, index)

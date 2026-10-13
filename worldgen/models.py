@@ -2720,3 +2720,125 @@ class Wonder:
         data["full_name"] = self.full_name
         data["lost"] = self.lost
         return data
+
+
+@dataclass
+class Dominion:
+    """Владение чудовища: земля, у которой хозяин не человек.
+
+    Это не держава с нечеловеческим правителем. Держава держится
+    границей, войском и правом; владение держится тем, что случится с
+    тем, кто нарушит правило. Поэтому тут нет ни столицы, ни казны, ни
+    закона — а есть логово, способ держать, повинность и те, кто под
+    этим живёт.
+
+    Три вещи хранятся врозь нарочно. **Хозяин** может смениться или
+    исчезнуть, а владение остаться: дань собирают по привычке, и годами
+    никто не проверяет, кому она идёт. **Притязание** не равно власти:
+    земель, которые он считает своими, всегда больше тех, где его
+    слушаются. И **правда** не равна тому, что о владении знают: соседи
+    считают хозяина мёртвым, беглые рассказывают лишнее, а как оно на
+    самом деле, знает только тот, кто дошёл.
+    """
+
+    id: str
+    name: str
+    kind: str                  # вид владения: ключ справочника
+    began: Date
+    # --- хозяин ---------------------------------------------------------
+    # Владение без хозяина бывает только одно — ничья земля. Хозяин
+    # хранится ссылкой: он живёт своей жизнью в своём реестре и может
+    # умереть раньше владения.
+    lord_id: str = ""
+    lord_kind: str = ""        # чудовище / субъект / божество
+    lord_name: str = ""        # как его звали, когда всё началось
+    lord_word: str = ""        # «дракон», «владыка мёртвых»
+    lord_gender: str = "m"
+    lord_turns: list = field(default_factory=list)  # [{год, было, стало, отчего}]
+    # --- отчего оно есть -------------------------------------------------
+    origin: str = ""           # ключ причины
+    origin_why: str = ""       # та же причина словами, с подробностью мира
+    event_id: str = ""         # событие летописи, из которого всё вышло
+    invasion_id: str = ""
+    calamity_id: str = ""
+    polity_id: str = ""        # чью землю он взял, если чью-то
+    motive: str = ""           # чего он хочет
+    motive_turns: list = field(default_factory=list)
+    # --- как держит -------------------------------------------------------
+    control: str = ""          # ключ способа власти
+    strength: float = 0.5      # насколько крепко, 0…1
+    region_ids: list = field(default_factory=list)      # держит на деле
+    claimed_ids: list = field(default_factory=list)     # считает своими
+    contested_ids: list = field(default_factory=list)   # оспаривают
+    # Что и когда он держал. Нынешнего списка земель мало: владение
+    # расходится и усыхает, и без этой записи нельзя ответить на вопрос,
+    # кто был хозяином этого места в таком-то году, — а это первое, что
+    # спрашивают о месте.
+    held: list = field(default_factory=list)            # [{земля, с, по}]
+    seat_kind: str = ""        # логово, гнездо, некрополь…
+    seat_region: str = ""
+    site_id: str = ""          # если у логова есть запись в местах истории
+    settlement_id: str = ""    # если он сел в готовом городе
+    hex_index: int = -1
+    # --- кто под ним ------------------------------------------------------
+    folk: list = field(default_factory=list)
+    # [{кто, id, род, раса, душ, как, чувство, год}]
+    edicts: list = field(default_factory=list)   # [{что, отчего, кара, год}]
+    ways: list = field(default_factory=list)     # чем принуждает: ключи
+    tribute: str = ""          # чем платят
+    tribute_why: str = ""
+    # --- чем живёт --------------------------------------------------------
+    need: str = ""             # без чего не стоит
+    need_risk: str = ""        # и что будет, если не станет
+    tolerated: str = ""        # отчего соседи это терпят
+    # --- жизнь -------------------------------------------------------------
+    phase: str = "rising"
+    status: str = "стоит"
+    marks: list = field(default_factory=list)    # [{год, что, отчего}]
+    land_marks: list = field(default_factory=list)  # [{год, земля, что}]
+    risings: list = field(default_factory=list)  # [{год, кто, как, чем}]
+    wars: list = field(default_factory=list)     # [{год, с кем, чем}]
+    told: dict = field(default_factory=dict)     # голос -> что говорят
+    lie: str = ""              # в чём именно о нём ошибаются
+    truth: str = ""            # и как на самом деле
+    ended: Date = None
+    end: str = ""              # ключ конца
+    end_how: str = ""          # и как именно
+    heir_id: str = ""          # кому досталось, если досталось
+    notes: list = field(default_factory=list)
+
+    @property
+    def full_name(self) -> str:
+        return self.name
+
+    @property
+    def alive(self) -> bool:
+        return self.ended is None
+
+    @property
+    def lands(self) -> int:
+        """Сколько земель оно держало за всю свою жизнь.
+
+        У кончившегося владения нынешних земель нет вовсе — оно их не
+        держит, — а сказать, насколько оно было велико, надо. Отсюда и
+        два счёта: `region_ids` отвечает «что держит сейчас», а это —
+        «сколько земель прошло через него».
+        """
+        return len({row.get("земля") for row in self.held if row.get("земля")})
+
+    @property
+    def souls(self) -> int:
+        """Сколько душ под ним живёт — не считая ушедших и воюющих."""
+        from .dominion import OUTSIDE
+        return sum(int(row.get("душ", 0)) for row in self.folk
+                   if row.get("как") not in OUTSIDE)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["began"] = _date_out(self.began)
+        data["ended"] = _date_out(self.ended)
+        data["full_name"] = self.full_name
+        data["alive"] = self.alive
+        data["souls"] = self.souls
+        data["lands"] = self.lands
+        return data

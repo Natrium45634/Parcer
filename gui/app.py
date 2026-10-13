@@ -586,6 +586,11 @@ class ChronicleApp(tk.Tk):
         self.wonders_text = self._add_text_tab(
             "Чудеса света", lambda: self._set_text(
                 self.wonders_text, chronicle.render_wonders(self.world)))
+        # Владений в мире единицы, и каждое — со своей страницей жизни:
+        # отбор им не нужен, нужен текст.
+        self.dominions_text = self._add_text_tab(
+            "Владения чудовищ", lambda: self._set_text(
+                self.dominions_text, chronicle.render_dominions(self.world)))
         self.artifacts_text = self._add_text_tab(
             "Вещи", lambda: self._set_text(
                 self.artifacts_text, chronicle.render_artifacts(self.world)))

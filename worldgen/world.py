@@ -17,7 +17,7 @@ from . import township
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Artifact, Battle, Bond, Cabal, Calamity, Camp, Codex,
                      Company,
-                     Deity,
+                     Deity, Dominion,
                      Discovery, Embassy, Event, Expedition, Fact, Faith, Feud,
                      Figure,
                      Folk, Fortress,
@@ -90,7 +90,7 @@ _ENTITY_TABLES = {
     "MG": ("migrations",), "NV": ("invasions",), "RN": ("renowns",),
     "SB": ("subjects",), "SC": ("scars",), "SF": ("strifes",),
     "SG": ("tales",), "SP": ("species",), "TR": ("traces",),
-    "WN": ("wonders",),
+    "WN": ("wonders",), "DN": ("dominions",),
     "TW": ("townships",),
 }
 
@@ -180,6 +180,7 @@ class World:
         self.myths = []
         self._godhead_of = {}          # божество -> id биографии
         self.wonders = {}              # чудеса света
+        self.dominions = {}            # владения чудовищ: у земли хозяин не человек
         self.species = {}              # виды существ: кто вообще водится в мире
         self._species_of = {}          # ключ вида -> id записи
         self.townships = {}            # биографии городов
@@ -1268,6 +1269,16 @@ class World:
         wonder = Wonder(id=self.next_id("WN"), **kwargs)
         self.wonders[wonder.id] = wonder
         return wonder
+
+    def add_dominion(self, **kwargs) -> Dominion:
+        item = Dominion(id=self.next_id("DN"), **kwargs)
+        self.dominions[item.id] = item
+        return item
+
+    @property
+    def standing_dominions(self) -> list:
+        """Владения, которые на этот час ещё стоят."""
+        return [item for item in self.dominions.values() if item.alive]
 
     def add_species(self, **kwargs) -> Species:
         kin = Species(id=self.next_id("SP"), **kwargs)

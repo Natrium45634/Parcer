@@ -1659,6 +1659,140 @@ def m_town_urban(world):
 # значит, и всё остальное о них мерить незачем.
 
 
+# ---------------------------------------------------------------------------
+# Владения чудовищ
+# ---------------------------------------------------------------------------
+#
+# Мера тут одна главная: владение — это власть, а не опасное пятно.
+# Поэтому спрашивается не «сколько их», а есть ли под ними люди, менялось
+# ли что-нибудь за их век и расходятся ли правда и слухи. Мир, где все
+# владения пусты и одинаковы, пройдёт по счёту и провалится по смыслу.
+
+
+def m_dom_count(world):
+    """Сколько владений было за всю историю."""
+    return len(world.dominions) or None
+
+
+def m_dom_standing(world):
+    """Сколько их стоит разом к концу летописи."""
+    if not world.dominions:
+        return None
+    return len([item for item in world.dominions.values() if item.alive])
+
+
+def m_dom_kinds(world):
+    """Сколько видов владений в ходу: драконье, демоново, гнездовье…"""
+    if not world.dominions:
+        return None
+    return len({item.kind for item in world.dominions.values()})
+
+
+def m_dom_controls(world):
+    """И сколько способов держать землю."""
+    if not world.dominions:
+        return None
+    return len({item.control for item in world.dominions.values()})
+
+
+def m_dom_peopled(world):
+    """Доля владений, под которыми кто-то жил.
+
+    Главная мера всей системы. Владение, под которым никого нет, — это
+    опасное место, а не власть; если таких все, система выродилась в
+    раскраску карты.
+    """
+    if not world.dominions:
+        return None
+    rows = [item for item in world.dominions.values()]
+    return _share(sum(1 for item in rows if item.folk), len(rows))
+
+
+def m_dom_lordless(world):
+    """Доля ничьих земель среди владений."""
+    if not world.dominions:
+        return None
+    from worldgen import dominion as cat
+    rows = list(world.dominions.values())
+    return _share(sum(1 for item in rows if item.kind in cat.LORDLESS),
+                  len(rows))
+
+
+def m_dom_long(world):
+    """Доля проживших больше века.
+
+    Владение, которое рассыпается за десятилетие, — это набег. История
+    начинается тогда, когда под такой властью успевает смениться
+    поколение.
+    """
+    if not world.dominions:
+        return None
+    total = world.total_years
+    rows = list(world.dominions.values())
+    long = 0
+    for item in rows:
+        over = item.ended.year if item.ended is not None else total
+        if over - item.began.year >= 100:
+            long += 1
+    return _share(long, len(rows))
+
+
+def m_dom_lands(world):
+    """Сколько земель держит владение в среднем."""
+    if not world.dominions:
+        return None
+    rows = [item.lands for item in world.dominions.values()]
+    return sum(rows) / float(len(rows))
+
+
+def m_dom_ends(world):
+    """Сколько разных концов в ходу.
+
+    «Пришёл герой и убил» — не единственный способ: владения
+    рассыпаются, засыпают, становятся державами и забываются.
+    """
+    rows = [item.end for item in world.dominions.values() if item.end]
+    if not rows:
+        return None
+    return len(set(rows))
+
+
+def m_dom_risings(world):
+    """Доля владений с подданными, против которых поднимались."""
+    rows = [item for item in world.dominions.values() if item.folk]
+    if not rows:
+        return None
+    return _share(sum(1 for item in rows if item.risings), len(rows))
+
+
+def m_dom_marks(world):
+    """Доля владений, оставивших след на земле."""
+    if not world.dominions:
+        return None
+    rows = list(world.dominions.values())
+    return _share(sum(1 for item in rows if item.land_marks), len(rows))
+
+
+def m_dom_lies(world):
+    """Доля владений, о которых знают неверно.
+
+    Правда и слухи должны расходиться хоть где-то: если о каждом
+    владении всё известно точно, второго слоя нет вовсе.
+    """
+    if not world.dominions:
+        return None
+    rows = list(world.dominions.values())
+    return _share(sum(1 for item in rows if item.lie), len(rows))
+
+
+def m_dom_voices(world):
+    """Доля владений, о которых говорят больше чем на один голос."""
+    if not world.dominions:
+        return None
+    rows = list(world.dominions.values())
+    return _share(sum(1 for item in rows if len(item.told) > 1), len(rows))
+
+
 def m_wonder_count(world):
     """Сколько в мире чудес."""
     return len(world.wonders) or None
@@ -2173,6 +2307,44 @@ MEASURES = (
             "штук", "у весомого места есть что рассказать"),
     Measure("земля", "строк об условиях у скудного места", m_land_words, 3,
             None, "штук", "о всяком месте есть что сказать прозой"),
+    Measure("владения", "владений чудовищ за историю", m_dom_count, 3, 60,
+            "штук", "владение чудовища — событие, а не фон",
+            min_years=3000),
+    Measure("владения", "стоит разом к концу", m_dom_standing, None, 5,
+            "штук", "их в мире единицы, иначе это уже не владения"),
+    Measure("владения", "видов владений в ходу", m_dom_kinds, 2, None,
+            "из 12", "одни драконьи логова — это не власть, а зверинец",
+            min_years=3000),
+    Measure("владения", "способов держать землю в ходу", m_dom_controls, 2,
+            None, "из 13", "страхом держат не всё и не всегда",
+            min_years=3000),
+    Measure("владения", "владений, под которыми жили", m_dom_peopled, 0.25,
+            None, "доля",
+            "владение, под которым никого нет, — опасное место, а не власть",
+            min_years=3000),
+    Measure("владения", "ничьих земель среди владений", m_dom_lordless,
+            None, 0.6, "доля", "у владения обычно есть хозяин",
+            min_years=3000),
+    Measure("владения", "проживших больше века", m_dom_long, 0.3, None,
+            "доля", "то, что рассыпалось за десятилетие, — набег",
+            min_years=3000),
+    Measure("владения", "земель под владением", m_dom_lands, 1.0, 4.0,
+            "в среднем", "сильный монстр не владеет полумиром"),
+    Measure("владения", "концов в ходу", m_dom_ends, 2, None, "из 12",
+            "«пришёл герой и убил» — не единственный способ",
+            min_years=3000),
+    Measure("владения", "владений, против которых поднимались",
+            m_dom_risings, 0.2, None, "доля",
+            "подданные не обязаны быть покорными", min_years=3000),
+    Measure("владения", "оставивших след на земле", m_dom_marks, 0.4, None,
+            "доля", "власть видна по земле, а не только по летописи",
+            min_years=3000),
+    Measure("владения", "о которых знают неверно", m_dom_lies, 0.2, 0.8,
+            "доля", "правда и слухи расходятся, но не во всём",
+            min_years=3000),
+    Measure("владения", "о которых говорят на несколько голосов",
+            m_dom_voices, 0.3, None, "доля",
+            "сосед, беглый и жрец рассказывают разное", min_years=3000),
     Measure("чудеса", "чудес в мире", m_wonder_count, 2, 14, "штук",
             "чудо — то, чего мало: сорок чудес не чудеса, а список"),
     Measure("чудеса", "родов чудес в ходу", m_wonder_kinds, 2, None, "из 5",
