@@ -2807,7 +2807,9 @@ def render_dominions(world) -> str:
     items = sorted(world.dominions.values(),
                    key=lambda item: (item.began.year, item.id))
     standing = [item for item in items if item.alive]
-    peopled = [item for item in items if item.folk]
+    peopled = [item for item in items
+               if any(row.get("как") not in cat.OUTSIDE
+                      for row in item.folk)]
     line = "  Владений за всю историю: %d" % len(items)
     if standing:
         line += "; к концу летописи стоит %d" % len(standing)

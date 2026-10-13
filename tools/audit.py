@@ -1716,11 +1716,18 @@ def m_dom_peopled(world):
     Главная мера всей системы. Владение, под которым никого нет, — это
     опасное место, а не власть; если таких все, система выродилась в
     раскраску карты.
+
+    Считаются те, кто живёт **под** ним: ушедшие и затаившиеся в счёт
+    не идут, иначе мера зачтёт разбежавшуюся округу за подданных.
     """
+    from worldgen import dominion as cat
     if not world.dominions:
         return None
-    rows = [item for item in world.dominions.values()]
-    return _share(sum(1 for item in rows if item.folk), len(rows))
+    rows = list(world.dominions.values())
+    under = sum(1 for item in rows
+                if any(row.get("как") not in cat.OUTSIDE
+                       for row in item.folk))
+    return _share(under, len(rows))
 
 
 def m_dom_lordless(world):
