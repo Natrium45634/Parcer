@@ -150,6 +150,33 @@ def _nodes(ctx, year: int) -> list:
             when, ref=wonder.id, region_id=wonder.region_id,
             weight=0.9 + 0.1 * wonder.peak_fame))
 
+    # --- то, что осталось от владений чудовищ ---------------------------
+    #
+    # Владение, которого больше нет, — узел того же рода, что и
+    # брошенное место: земля помнит, что тут брали дань и за что
+    # вешали, а хозяина никто уже не видел. Берутся только те, под
+    # которыми кто-то жил: быль растёт из людей, а не из пустого
+    # урочища, — и только когда след успел отстояться.
+    for hold in world.dominions.values():
+        if hold.ended is None or not hold.folk:
+            continue
+        if year - hold.ended.year < ECHO_MIN_AGE:
+            continue
+        # Узел ставится не в логово, а туда, где жили подданные: быль
+        # рассказывают люди, и начинается она в их городе. Логово же
+        # чаще всего стоит в глуши, где рассказывать некому, — и узел
+        # оттуда не брался вовсе.
+        where = _folk_home(world, hold)
+        if where is None:
+            continue
+        out.append(Node(
+            cat.YOKE,
+            "земля, которой владел %s по имени %s"
+            % (hold.lord_word or "хозяин", hold.lord_name or hold.name),
+            hold.ended.year, ref=hold.id, region_id=where.region_id,
+            settlement_id=where.id,
+            weight=0.9 + min(1.5, hold.souls / 40000.0)))
+
     # --- вещи, ушедшие из рук ------------------------------------------
     for artifact in world.artifacts.values():
         if artifact.where not in ("потерян", "в кургане", "в логове"):
@@ -455,6 +482,16 @@ def _nodes(ctx, year: int) -> list:
             settlement_id=holiday.settlement_id, weight=weight))
 
     return out
+
+
+def _folk_home(world, hold):
+    """Город, в котором жили подданные владения и живут до сих пор."""
+    for row in sorted(hold.folk, key=lambda item: -int(item.get("душ", 0))):
+        for place_id in row.get("где", ()):
+            place = world.settlements.get(place_id)
+            if place is not None and place.status == ACTIVE:
+                return place
+    return None
 
 
 def _level_out(found: list) -> list:

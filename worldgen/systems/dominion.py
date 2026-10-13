@@ -164,6 +164,7 @@ def _from_monsters(world, year: int, taken: set) -> list:
         region = world.regions.get(monster.region_id)
         if region is None or getattr(region, "drowned", False):
             continue
+        near = _souls_near(world, region)
         for kind in cat.KINDS:
             if monster.breed not in kind.lords:
                 continue
@@ -171,10 +172,17 @@ def _from_monsters(world, year: int, taken: set) -> list:
                 "ключ": "%s:%s" % (monster.id, kind.key),
                 # Владение, под которым никто не живёт, — это опасное
                 # место, а не власть. Поэтому там, где есть кем править,
-                # оно заводится охотнее: истории из этого выходит больше.
+                # оно заводится охотнее, и вид выбирается по тому же:
+                # тролль на пустом перевале — владение одиночки, а
+                # тролль над тремя деревнями берёт с них дань и
+                # становится другим владением вовсе.
+                #
+                # Без этой поправки мир на карте вырождался: земель в
+                # нём много, людей мало, и двадцать два владения из
+                # двадцати восьми выходили логовами в глуши.
                 "вид": kind.key,
                 "вес": kind.weight * monster.power
-                       * (1.0 + _souls_near(world, region)),
+                       * (0.4 + 1.6 * near) * _fits(kind, near),
                 "хозяин": monster.id, "род хозяина": "чудовище",
                 "имя": monster.name, "слово": _monster_word(monster),
                 "пол": monster.gender, "земля": region.id,
@@ -186,15 +194,37 @@ def _from_monsters(world, year: int, taken: set) -> list:
     return rows
 
 
+def _fits(kind, near: float) -> float:
+    """Идёт ли такой вид владения к такому месту.
+
+    Виду, которому подданные нужны, нечего делать в пустой земле;
+    виду, который их не знает, нечего делать посреди деревень.
+    """
+    if kind.folk == cat.NEED_FOLK:
+        return 0.15 + 2.0 * near
+    if kind.folk == cat.SOME_FOLK:
+        return 0.6 + 1.0 * near
+    return 1.0 - 0.6 * near
+
+
 def _souls_near(world, region) -> float:
-    """Насколько тут есть кем владеть: 0 — пусто, 1 — людно."""
-    souls = 0
+    """Насколько тут есть кем владеть: 0 — пусто, 1 — людно.
+
+    Считается не только своя земля, но и соседние — вполовину. Логово
+    стоит в глуши почти всегда, а владение складывается из глуши и той
+    долины, что рядом: по одной своей земле выходило, что людей нет
+    нигде, и мир на карте набивался логовами в пустоте.
+    """
+    lands = {region.id: 1.0}
+    for other in (region.neighbors or ()):
+        lands.setdefault(other, 0.5)
+    souls = 0.0
     for item in world.settlements.values():
-        if item.region_id == region.id and item.status == ACTIVE:
-            souls += item.population
+        if item.status == ACTIVE and item.region_id in lands:
+            souls += item.population * lands[item.region_id]
     for item in world.tribes.values():
-        if item.region_id == region.id and item.status == ACTIVE:
-            souls += item.population
+        if item.status == ACTIVE and item.region_id in lands:
+            souls += item.population * lands[item.region_id]
     return min(1.0, souls / 20000.0)
 
 
@@ -225,19 +255,31 @@ def _from_invasions(world, year: int, taken: set) -> list:
                  if land in world.regions]
         if not lands:
             continue
+        # Хозяин нужен и тут. Сперва ищется субъект истории, выросший
+        # из этого нашествия, потом — его вождь, если у нашествия есть
+        # имя вождя. Нет ни того, ни другого — владения не будет:
+        # «пришли и остались» без того, кто остался, — это не власть,
+        # а запись в летописи бед. Прежде такое проходило, и в мире
+        # заводилось царство набега без хозяина вовсе.
         lord = _subject_of_invasion(world, inv)
-        lord_id = lord.id if lord is not None else ""
-        if lord_id and lord_id in taken:
+        lord_kind = "субъект"
+        if lord is None:
+            lord = world.figures.get(inv.leader_id)
+            lord_kind = "личность"
+        if lord is None:
+            continue
+        lord_id = lord.id
+        if lord_id in taken:
             continue
         if any(hold.invasion_id == inv.id for hold in world.dominions.values()):
             continue
         rows.append({
             "ключ": "%s:%s" % (inv.id, kind_key),
             "вид": kind_key, "вес": 1.6,
-            "хозяин": lord_id, "род хозяина": "субъект" if lord_id else "",
-            "имя": lord.name if lord is not None else inv.full_name,
+            "хозяин": lord_id, "род хозяина": lord_kind,
+            "имя": lord.name,
             "слово": _invasion_word(inv, lord),
-            "пол": lord.sex if lord is not None else "m",
+            "пол": getattr(lord, "sex", "m"),
             "земля": lands[0], "сила": 3.5 + 0.5 * len(lands),
             "логово": "", "гекс": -1,
             "нашествие": inv.id, "беда": inv.calamity_id,
@@ -255,8 +297,10 @@ def _subject_of_invasion(world, inv):
 
 
 def _invasion_word(inv, lord) -> str:
-    if lord is not None and lord.kind:
-        return lord.kind
+    """Как звать хозяина: родом субъекта, а у человека — родом пришедших."""
+    kind = getattr(lord, "kind", "")
+    if kind and kind in sub.KINDS:
+        return kind
     return inv.kind
 
 
