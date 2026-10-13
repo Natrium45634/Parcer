@@ -1695,6 +1695,21 @@ def m_dom_controls(world):
     return len({item.control for item in world.dominions.values()})
 
 
+def m_dom_commonest(world):
+    """Доля самого частого вида владений.
+
+    Видов в ходу может быть восемь, а семь из них — по одному: если
+    половина всех владений в мире одного вида, разнообразие это
+    показное. Мера считает самый частый, а не все.
+    """
+    if not world.dominions:
+        return None
+    counts = {}
+    for item in world.dominions.values():
+        counts[item.kind] = counts.get(item.kind, 0) + 1
+    return _share(max(counts.values()), len(world.dominions))
+
+
 def m_dom_peopled(world):
     """Доля владений, под которыми кто-то жил.
 
@@ -2318,6 +2333,9 @@ MEASURES = (
     Measure("владения", "способов держать землю в ходу", m_dom_controls, 2,
             None, "из 13", "страхом держат не всё и не всегда",
             min_years=3000),
+    Measure("владения", "самого частого вида", m_dom_commonest, None, 0.5,
+            "доля", "восемь видов, из которых семь по одному, — "
+            "это один вид", min_years=3000),
     Measure("владения", "владений, под которыми жили", m_dom_peopled, 0.25,
             None, "доля",
             "владение, под которым никого нет, — опасное место, а не власть",

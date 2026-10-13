@@ -115,6 +115,12 @@ def upkeep(ctx, year: int, period: int) -> None:
         _rise(ctx, year, rng)
 
     for hold in sorted(world.dominions.values(), key=lambda item: item.id):
+        # Заведённое в этот самый такт не проживает десятилетие сразу:
+        # иначе владение успевает родиться, разойтись вширь, схватить
+        # восстание и кончиться в одном году, и в летописи остаётся
+        # владение сроком в ноль лет.
+        if hold.began.year >= year:
+            continue
         if hold.alive:
             _live(ctx, hold, year, period, rng)
         elif hold.end in cat.RETURNABLE:
