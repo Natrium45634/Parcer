@@ -3852,18 +3852,11 @@ def check_review(world, seed: str) -> list:
             problems.append("сид «%s»: в разборе нет части «%s»"
                             % (seed, about))
 
-    # Чужое слово. Римское число в имени государя — не латиница, а число:
-    # «Нилаиэль II» написано по-русски. Всё прочее латинское — забытый
-    # ключ справочника, и в русском выводе ему места нет.
-    latin = []
-    for row in rows:
-        for word in row.replace("(", " ").replace(")", " ").split():
-            bare = word.strip(".,;:«»—…!?")
-            if not any("a" <= char.lower() <= "z" for char in bare):
-                continue
-            if all(char in "IVXLCDM" for char in bare):
-                continue
-            latin.append(bare)
+    # Чужое слово. Что им считать, решает сам разбор (review.foreign_words):
+    # римское число в имени государя — не латиница, а число, и знак
+    # градуса «°C» по-русски пишется именно так. Спрашивается это в одном
+    # месте, иначе сторож придирается к тому, что разбор считает законным.
+    latin = review.foreign_words(rows)
     if latin:
         problems.append("сид «%s»: в разборе чужое слово: %s"
                         % (seed, ", ".join(sorted(set(latin))[:6])))

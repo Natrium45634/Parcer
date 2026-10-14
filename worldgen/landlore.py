@@ -605,14 +605,21 @@ def standing(world, index: int, year: int = 0) -> list:
     gone = [item for item in found["settlements"]
             if item not in alive and item.ended is not None
             and item.ended.year <= year]
+    now = year >= int(getattr(world, "total_years", 0) or 0)
     for item in alive:
-        polity = world.polities.get(item.polity_id)
+        # Людность и хозяин — на спрошенный год, а не нынешние: страница
+        # места спрашивается по годам, и город, взятый соседом в
+        # последнем веке, не был его все восемь тысяч лет. Отвечает на
+        # это мир по своим записям — кривой переписи и отрезкам владения.
+        souls = world.souls_at(item, year)
+        polity = world.town_owner_at(item, year)
         line = "Тут стоит %s — %s" % (
             item.full_name,
-            plural(item.population, "%d житель" % item.population,
-                   "%d жителя" % item.population,
-                   "%d жителей" % item.population))
-        if item.is_capital:
+            plural(souls, "%d житель" % souls, "%d жителя" % souls,
+                   "%d жителей" % souls))
+        # Про столицу в летописи записано только нынешнее: в прошлом веке
+        # о ней молчим, чтобы не выдать нынешний престол за тогдашний.
+        if item.is_capital and now:
             line += ", и это столица"
         if polity is not None:
             line += "; держава — %s" % polity.full_name

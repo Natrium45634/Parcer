@@ -2033,6 +2033,35 @@ def snapshot(world, year: int, out) -> None:
 # Разбор: что обычно ломается
 # ---------------------------------------------------------------------------
 
+# Латинское, которое в русском выводе законно. Знак градуса пишется
+# «°C» и по-русски (ГОСТ 8.417) — это мера тепла, а не забытый
+# английский корень; римское число в имени государя — тоже число, а не
+# слово. Всё прочее латинское в летописи — ключ справочника, забытый в
+# тексте, и ловить его надо.
+OK_LATIN = ("°C",)
+
+
+def foreign_words(lines) -> list:
+    """Чужие слова в русском выводе: то, чего в летописи быть не должно.
+
+    Отвечает на это одно место: и сам разбор проверяет себя этим, и
+    сторож в самопроверке — иначе «чужое слово» значило бы в двух местах
+    разное, и одно из них придиралось бы к знаку градуса.
+    """
+    found = []
+    for line in lines:
+        for word in str(line).replace("(", " ").replace(")", " ").split():
+            bare = word.strip(".,;:«»—…!?")
+            if not any("a" <= char.lower() <= "z" for char in bare):
+                continue
+            if bare in OK_LATIN or bare.rstrip(".,") in OK_LATIN:
+                continue
+            if all(char in "IVXLCDM" for char in bare):
+                continue          # римское число — это число
+            found.append(bare)
+    return found
+
+
 def _souls(value) -> str:
     """«1 240 000 душ» — число с пробелами и правильным словом."""
     value = int(value)
@@ -2085,11 +2114,7 @@ def audit(world) -> list:
     except Exception as error:                            # noqa: BLE001
         bad("приговор миру не собрался: %s" % error)
     else:
-        latin = []
-        for line in verdict:
-            for word in line.split():
-                if any("a" <= char.lower() <= "z" for char in word):
-                    latin.append(word)
+        latin = foreign_words(verdict)
         if latin:
             bad("в приговоре миру чужое слово: %s" % ", ".join(latin[:4]))
         if len([line for line in verdict if line.strip()]) < 8:
