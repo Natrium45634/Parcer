@@ -2744,6 +2744,99 @@ class Wonder:
 
 
 @dataclass
+class Custom:
+    """Обычай: как в этом народе поступают, когда случается то-то.
+
+    Три записи о смысле держатся врозь нарочно (`why`, `said`,
+    `folk_why`). Первая — отчего обычай завёлся на самом деле; вторая —
+    что о нём говорит власть или храм; третья — что говорят между собой
+    люди. Они расходятся, и расхождение тут не ошибка, а работа памяти:
+    настоящая причина может забыться вовсе, и тогда в `why` стоит
+    «неизвестно», а год забвения — в `forgot_year`.
+
+    Так же врозь держатся **обязательность** (`bind` — чего от тебя
+    ждут) и **охват** (`reach` — докуда обычай дошёл): обязательный
+    обычай соблюдают через раз, а добровольный держат всем народом.
+    """
+
+    id: str
+    name: str                      # «Камень имён»
+    case: str                      # случай жизни: рождение, смерть, дорога…
+    need: str                      # какой задаче служит
+    form: str                      # ключ формы из customs.FORMS
+    folk_id: str                   # народ, у которого он завёлся
+    race_id: str
+    born: Date
+    doing: str = ""                # что именно делают
+    gear: str = ""                 # что для этого нужно
+    bind: str = ""                 # насколько обязателен
+    reach: str = ""                # докуда дошёл
+    state: str = ""                # держится, запрещён, забыт…
+    why: str = ""                  # настоящая причина или «неизвестно»
+    why_event: str = ""            # событие, из которого он вырос
+    said: str = ""                 # что говорит власть или храм
+    folk_why: str = ""             # что говорят люди
+    husk: str = ""                 # во что выродился, когда смысл забыли
+    forgot_year: int = 0           # когда забылась настоящая причина
+    roots: list = field(default_factory=list)      # условия, при которых завёлся
+    holder: str = ""               # кто его держит: держава, храм, цех…
+    holder_id: str = ""
+    region_ids: list = field(default_factory=list)
+    folk_ids: list = field(default_factory=list)   # у кого он ещё есть
+    spread: list = field(default_factory=list)     # [{год, народ, как}]
+    marks: list = field(default_factory=list)      # повороты судьбы по годам
+    variants: list = field(default_factory=list)   # изводы: где и чем иной
+    taboo: str = ""                # если это запрет — на чём он стоит
+    story_id: str = ""             # быль, выросшая из него
+    ended: Date = None
+    end_reason: str = ""
+    notes: list = field(default_factory=list)
+
+    @property
+    def alive(self) -> bool:
+        return self.ended is None
+
+    @property
+    def full_name(self) -> str:
+        return "обычай «%s»" % self.name
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["born"] = _date_out(self.born)
+        data["ended"] = _date_out(self.ended)
+        return data
+
+
+@dataclass
+class CultureProfile:
+    """Культурный облик одной личности: чей он и как он с этим живёт.
+
+    Заводится не всякому: у рядового жителя довольно народа и места
+    рождения. Подробный облик нужен тем, чьи решения видны в летописи, —
+    и тут важнее всего, что **культура рождения не равна нынешней
+    принадлежности**: родиться можно в одном народе, вырасти в другом,
+    выучиться у третьего и держать при этом обычай, который в родном
+    народе уже бросили.
+    """
+
+    id: str
+    figure_id: str
+    born_folk: str = ""            # народ, в котором родился
+    raised_folk: str = ""          # народ, в котором вырос
+    now_folk: str = ""             # к кому себя причисляет теперь
+    influences: list = field(default_factory=list)  # [{чем, отчего, год}]
+    attitudes: list = field(default_factory=list)   # [{обычай, вид, отчего}]
+    habits: list = field(default_factory=list)      # запоминающиеся привычки
+    rites: list = field(default_factory=list)       # личные обряды
+    broke: list = field(default_factory=list)       # нарушенные обычаи
+    made: list = field(default_factory=list)        # заведённые и изменённые
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
 class Dominion:
     """Владение чудовища: земля, у которой хозяин не человек.
 

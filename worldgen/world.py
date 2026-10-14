@@ -16,7 +16,7 @@ from . import races as races_mod
 from . import township
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Artifact, Battle, Bond, Cabal, Calamity, Camp, Codex,
-                     Company,
+                     Company, Custom, CultureProfile,
                      Deity, Dominion,
                      Discovery, Embassy, Event, Expedition, Fact, Faith, Feud,
                      Figure,
@@ -119,6 +119,7 @@ _ENTITY_TABLES = {
     "SB": ("subjects",), "SC": ("scars",), "SF": ("strifes",),
     "SG": ("tales",), "SP": ("species",), "TR": ("traces",),
     "WN": ("wonders",), "DN": ("dominions",),
+    "CU": ("customs",), "CP": ("culture_profiles",),
     "TW": ("townships",),
 }
 
@@ -212,6 +213,9 @@ class World:
         self.species = {}              # виды существ: кто вообще водится в мире
         self._species_of = {}          # ключ вида -> id записи
         self.townships = {}            # биографии городов
+        self.customs = {}              # обычаи народов
+        self.culture_profiles = {}     # культурный облик значимых личностей
+        self._profile_of = {}          # личность -> её культурный облик
         self._town_of = {}             # поселение -> id биографии
         self._town_watch = {}          # рабочие указатели биографий
         self.story_marks = {}          # чего и сколько уже рассказано
@@ -1398,6 +1402,39 @@ class World:
         item = Dominion(id=self.next_id("DN"), **kwargs)
         self.dominions[item.id] = item
         return item
+
+    def add_custom(self, **kwargs) -> Custom:
+        item = Custom(id=self.next_id("CU"), **kwargs)
+        self.customs[item.id] = item
+        return item
+
+    def customs_of(self, folk_id: str, kept_only: bool = True) -> list:
+        """Обычаи народа — и свои, и перенятые.
+
+        Перенятые тут равноправны со своими нарочно: для человека,
+        который в этом народе живёт, нет разницы, откуда его порядок
+        пришёл двести лет назад.
+        """
+        rows = []
+        for custom in self.customs.values():
+            if custom.folk_id != folk_id and folk_id not in custom.folk_ids:
+                continue
+            if kept_only and not custom.alive:
+                continue
+            rows.append(custom)
+        rows.sort(key=lambda item: (item.born.ordinal, item.id))
+        return rows
+
+    def add_culture_profile(self, **kwargs) -> CultureProfile:
+        item = CultureProfile(id=self.next_id("CP"), **kwargs)
+        self.culture_profiles[item.id] = item
+        if item.figure_id:
+            self._profile_of[item.figure_id] = item.id
+        return item
+
+    def profile_of(self, figure_id: str):
+        """Культурный облик личности, если он для неё заведён."""
+        return self.culture_profiles.get(self._profile_of.get(figure_id, ""))
 
     @property
     def standing_dominions(self) -> list:

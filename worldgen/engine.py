@@ -30,6 +30,7 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       dominion as dominion_sys,
                       citylife,
                       crafts, culture,
+                      customs as customs_sys,
                       diplomacy, divinity, embassy,
                       era_events,
                       exploration, founding, geography, guilds,
@@ -261,6 +262,12 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             # поставленный храм), а быль из них растёт сразу: обряд, у
             # которого отняли причину, — готовый исторический узел.
             holidays_sys.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Обычаи — сразу за праздниками, и по той же причине: им
+            # нужен сложившийся мир (земля, ремесло, храм, держава, война
+            # за спиной), а быль растёт уже из них. Праздник и обычай
+            # при этом разные вещи: праздник — день в году, обычай — то,
+            # как поступают, когда случается.
+            customs_sys.upkeep(ctx, year, UPKEEP_PERIOD)
             # Были идут последними из историй: им нужен готовый мир со
             # всеми его руинами, вдовами, тяжбами и закрывшимися трактами.
             localstory.upkeep(ctx, year, UPKEEP_PERIOD)

@@ -13,7 +13,8 @@ import json
 
 from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
                      Camp,
-                     Codex, Company, Deity, Discovery,
+                     Codex, Company, Custom, CultureProfile, Deity,
+                     Discovery,
                      Embassy, EraSpan, Legend, Event, Expedition, Fact, Faith,
                      Feud, Figure,
                      Folk, Fortress, Guild, House, Law, League, Memory,
@@ -197,6 +198,10 @@ def world_to_dict(world: World) -> dict:
                     for item in world.wonders.values()],
         "dominions": [_compact(Dominion, item.to_dict())
                       for item in world.dominions.values()],
+        "customs": [_compact(Custom, item.to_dict())
+                    for item in world.customs.values()],
+        "culture_profiles": [_compact(CultureProfile, item.to_dict())
+                             for item in world.culture_profiles.values()],
         "godheads": [_compact(Godhead, item.to_dict())
                      for item in world.godheads.values()],
         "renowns": [_compact(Renown, item.to_dict())
@@ -440,6 +445,13 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("dominions", ()):
         hold = Dominion(**_clean(Dominion, item))
         world.dominions[hold.id] = hold
+    for item in data.get("customs", ()):
+        custom = Custom(**_clean(Custom, item))
+        world.customs[custom.id] = custom
+    for item in data.get("culture_profiles", ()):
+        profile = CultureProfile(**_clean(CultureProfile, item))
+        world.culture_profiles[profile.id] = profile
+        world._profile_of[profile.figure_id] = profile.id
     for item in data.get("godheads", ()):
         head = Godhead(**_clean(Godhead, item))
         world.godheads[head.id] = head
