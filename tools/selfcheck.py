@@ -3754,6 +3754,209 @@ def check_year_slices(world, seed: str) -> list:
     return problems
 
 
+def check_customs(world, seed: str) -> list:
+    """Обычаи: сходится ли заведённый порядок сам с собой.
+
+    Что тут ловится. Обычай с видом, задачей, формой или состоянием не
+    из справочника — такое не прочтёт ни человек, ни окно. Обычай
+    народа, который в этом мире не просыпался: у зверья обычаев нет (и
+    это правило 22, а не придирка). Повороты судьбы не по годам или
+    раньше, чем обычай завёлся, — по ним отвечают, что с ним было.
+    Забытая причина без года забвения и год забвения при названной
+    причине: «неизвестно» — это состояние записи, а не пустая графа.
+    Два живых обычая одной формы у одного народа — это не два обычая.
+    И культурный облик, который ссылается на несуществующего человека,
+    чужой обычай или вид отношения, которого нет.
+    """
+    from worldgen import customs as cat
+
+    problems = []
+    total = world.total_years
+    cases = {item.key for item in cat.CASES}
+    needs = set(cat.NEEDS_BY_KEY)
+    forms = set(cat.FORMS_BY_KEY)
+    binds = set(cat.BIND_NAMES)
+    reaches = set(cat.REACHES)
+    states = set(cat.STATES)
+    roots = {key for key, _name in cat.ROOTS}
+    taboos = set(cat.TABOO_NAMES.values())
+    turn_names = {turn.name for turn in cat.TURNS} | {"спор", "переделка"}
+    variant_whys = {row.name for row in cat.VARIANT_WHYS}
+
+    seen_form = {}
+    for custom in world.customs.values():
+        where = "сид «%s»: обычай «%s»" % (seed, custom.name)
+        if custom.case not in cases:
+            problems.append("%s: случай «%s» не из справочника"
+                            % (where, custom.case))
+        if custom.need not in needs:
+            problems.append("%s: задача «%s» не из справочника"
+                            % (where, custom.need))
+        if custom.form not in forms:
+            problems.append("%s: форма «%s» не из справочника"
+                            % (where, custom.form))
+        if custom.bind not in binds:
+            problems.append("%s: обязательность «%s» не из справочника"
+                            % (where, custom.bind))
+        if custom.reach not in reaches:
+            problems.append("%s: охват «%s» не из справочника"
+                            % (where, custom.reach))
+        if custom.state not in states:
+            problems.append("%s: состояние «%s» не из справочника"
+                            % (where, custom.state))
+        if custom.taboo and custom.taboo not in taboos:
+            problems.append("%s: основание запрета «%s» не из справочника"
+                            % (where, custom.taboo))
+        bad_roots = [key for key in (custom.roots or ()) if key not in roots]
+        if bad_roots:
+            problems.append("%s: условие «%s» не из справочника"
+                            % (where, bad_roots[0]))
+        if not custom.doing:
+            problems.append("%s: не сказано, что по нему делают" % where)
+
+        folk = world.folks.get(custom.folk_id)
+        if folk is None:
+            problems.append("%s: приписан народу «%s», которого нет"
+                            % (where, custom.folk_id))
+        elif folk.race_id != custom.race_id:
+            problems.append("%s: раса обычая и раса его народа разные"
+                            % where)
+        # Правило 22: у вида, вышедшего зверьём, обычаев не бывает —
+        # он не просыпался, и некому их держать.
+        if custom.race_id and custom.race_id not in world.race_awakening:
+            problems.append("%s: он у расы, которая в этом мире не "
+                            "просыпалась" % where)
+
+        if not 1 <= custom.born.year <= total:
+            problems.append("%s: заведён в %d году, а история идёт 1–%d"
+                            % (where, custom.born.year, total))
+        if custom.ended is not None and custom.ended.year < custom.born.year:
+            problems.append("%s: кончился раньше, чем завёлся" % where)
+        if custom.ended is not None and not custom.end_reason:
+            problems.append("%s: кончился, а отчего — не сказано" % where)
+
+        years = [int(mark.get("год", 0)) for mark in custom.marks]
+        if years != sorted(years):
+            problems.append("%s: повороты судьбы идут не по годам: %s"
+                            % (where, years[:6]))
+        for mark in custom.marks:
+            year = int(mark.get("год", 0))
+            if year < custom.born.year or year > total:
+                problems.append("%s: поворот в %d году, а обычай с %d"
+                                % (where, year, custom.born.year))
+                break
+            if mark.get("что") not in turn_names:
+                problems.append("%s: поворот «%s» не из справочника"
+                                % (where, mark.get("что")))
+                break
+            if not mark.get("отчего"):
+                problems.append("%s: у поворота не названа причина" % where)
+                break
+
+        if cat.is_known(custom.why) and custom.forgot_year:
+            problems.append("%s: причина названа, а год её забвения "
+                            "записан" % where)
+        if not cat.is_known(custom.why) and not custom.forgot_year:
+            problems.append("%s: причина забыта, а год забвения не записан"
+                            % where)
+        if custom.forgot_year and custom.forgot_year < custom.born.year:
+            problems.append("%s: причина забыта раньше, чем обычай завёлся"
+                            % where)
+
+        if custom.folk_id in custom.folk_ids:
+            problems.append("%s: он записан перенятым у самого себя" % where)
+        if len(custom.folk_ids) != len(set(custom.folk_ids)):
+            problems.append("%s: один народ перенял его дважды" % where)
+        for row in custom.spread:
+            if row.get("народ") not in world.folks:
+                problems.append("%s: перенят народом «%s», которого нет"
+                                % (where, row.get("народ")))
+                break
+            if int(row.get("год", 0)) < custom.born.year:
+                problems.append("%s: перенят раньше, чем завёлся" % where)
+                break
+        places = [row.get("где") for row in custom.variants]
+        if len(places) != len(set(places)):
+            problems.append("%s: два извода в одном и том же месте" % where)
+        for row in custom.variants:
+            if row.get("отчего") not in variant_whys:
+                problems.append("%s: извод заведён не по справочной причине"
+                                % where)
+                break
+            if not row.get("в чём"):
+                problems.append("%s: извод есть, а чем он иной — не сказано"
+                                % where)
+                break
+        for region_id in custom.region_ids:
+            if region_id not in world.regions:
+                problems.append("%s: он привязан к земле «%s», которой нет"
+                                % (where, region_id))
+                break
+
+        if custom.ended is None:
+            key = (custom.folk_id, custom.form)
+            if key in seen_form:
+                problems.append("%s: у народа два живых обычая одной формы "
+                                "(второй — «%s»)" % (where, seen_form[key]))
+            seen_form[key] = custom.name
+
+    # --- культурный облик личности -------------------------------------
+    kinds = set(cat.ATTITUDES_BY_KEY)
+    for profile in world.culture_profiles.values():
+        figure = world.figures.get(profile.figure_id)
+        if figure is None:
+            problems.append("сид «%s»: культурный облик приписан человеку "
+                            "«%s», которого нет" % (seed, profile.figure_id))
+            continue
+        where = "сид «%s»: облик %s" % (seed, figure.plain_name)
+        for key in (profile.born_folk, profile.raised_folk, profile.now_folk):
+            if key and key not in world.folks:
+                problems.append("%s: он причислен к народу «%s», которого "
+                                "нет" % (where, key))
+                break
+        for row in profile.attitudes:
+            if row.get("вид") not in kinds:
+                problems.append("%s: отношение «%s» не из справочника"
+                                % (where, row.get("вид")))
+                break
+            if row.get("обычай") not in world.customs:
+                problems.append("%s: отношение к обычаю, которого нет"
+                                % where)
+                break
+        said = [row.get("обычай") for row in profile.attitudes]
+        if len(said) != len(set(said)):
+            problems.append("%s: к одному обычаю записано два отношения"
+                            % where)
+        for row in list(profile.broke) + list(profile.made):
+            if row.get("обычай") not in world.customs:
+                problems.append("%s: поступок с обычаем, которого нет"
+                                % where)
+                break
+            year = int(row.get("год", 0))
+            if not 1 <= year <= total:
+                problems.append("%s: поступок в %d году, а история идёт "
+                                "1–%d" % (where, year, total))
+                break
+            if figure.birth is not None and year < figure.birth.year:
+                problems.append("%s: поступок случился до его рождения"
+                                % where)
+                break
+            if figure.death is not None and year > figure.death.year:
+                problems.append("%s: поступок случился после его смерти"
+                                % where)
+                break
+        for row in profile.habits:
+            if not row.get("что"):
+                problems.append("%s: привычка записана пустой" % where)
+                break
+        for row in profile.rites:
+            if not row.get("отчего"):
+                problems.append("%s: у личного обряда не названа причина"
+                                % where)
+                break
+    return problems
+
+
 def check_review(world, seed: str) -> list:
     """Разбор мира: собирается ли он и не врёт ли о прошлых веках.
 
@@ -4968,6 +5171,7 @@ def main(only: str = "") -> int:
         failures.extend(check_traces(first, seed))
         failures.extend(check_year_slices(first, seed))
         failures.extend(check_review(first, seed))
+        failures.extend(check_customs(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
         failures.extend(check_tongues(first, seed))
@@ -5045,6 +5249,7 @@ def main(only: str = "") -> int:
             failures.extend(check_traces(first, "карта/" + seed))
             failures.extend(check_year_slices(first, "карта/" + seed))
             failures.extend(check_review(first, "карта/" + seed))
+            failures.extend(check_customs(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_tongues(first, "карта/" + seed))
@@ -5112,6 +5317,7 @@ def main(only: str = "") -> int:
                       check_town_bread,
                       check_world_code,
                       check_invasions, check_subjects, check_review,
+                      check_customs,
                       check_traces, check_year_slices,
                       check_faiths, check_nations,
                       check_tongues, check_embassies, check_things,

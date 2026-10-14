@@ -3277,6 +3277,39 @@ def audit(world) -> list:
                     % item.name)
                 break
 
+    # 8б. Обычаи: сколько порядков мир завёл и что с ними сталось.
+    customs = list(world.customs.values())
+    if customs:
+        from . import customs as custom_cat
+        kept = [item for item in customs if item.ended is None]
+        known = [item for item in customs if custom_cat.is_known(item.why)]
+        banned = [item for item in customs
+                  if any(mark.get("что") == "запрет" for mark in item.marks)]
+        cases = Counter(item.case for item in customs)
+        kinds = Counter(row.get("вид")
+                        for profile in world.culture_profiles.values()
+                        for row in profile.attitudes)
+        deeds = sum(len(profile.broke) + len(profile.made)
+                    for profile in world.culture_profiles.values())
+        found.append(("=", "обычаев: %d (держатся %d); случаи: %s; причину "
+                      "помнят у %d, запрещали %d, разошлись к соседям %d, "
+                      "с изводами %d; обликов %d, видов отношения %d, "
+                      "поступков против обычая %d"
+                      % (len(customs), len(kept),
+                         ", ".join("%s — %d" % pair
+                                   for pair in cases.most_common(3)),
+                         len(known), len(banned),
+                         len([item for item in customs if item.spread]),
+                         len([item for item in customs if item.variants]),
+                         len(world.culture_profiles), len(kinds), deeds)))
+        if world.total_years >= 3000 and len(known) == len(customs):
+            note("ни один обычай за всю историю не забыл своей причины")
+        for item in customs:
+            if item.forgot_year and item.forgot_year < item.born.year:
+                bad("обычай «%s» забыл причину раньше, чем завёлся"
+                    % item.name)
+                break
+
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:
         biggest = max((world.polities[p].population

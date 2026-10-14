@@ -1660,6 +1660,193 @@ def m_town_urban(world):
 
 
 # ---------------------------------------------------------------------------
+# Обычаи и традиции
+# ---------------------------------------------------------------------------
+#
+# Главный вопрос тут не «сколько их», а **разные ли они**. Свод, в
+# котором у всех народов одно и то же с переставленными словами, пройдёт
+# по счёту и провалится по смыслу. Поэтому меряется: сколько случаев
+# жизни и форм в ходу, не забивает ли одна форма прочие, расходятся ли
+# культуры народов одной расы, у скольких обычаев причина ещё помнится —
+# и, главное, по-разному ли относятся к одному порядку живые люди.
+
+
+def _customs(world):
+    return list(world.customs.values())
+
+
+def m_cu_count(world):
+    """Сколько заведённых порядков записала летопись."""
+    return len(world.customs) or None
+
+
+def m_cu_kept(world):
+    """Сколько держится к концу истории."""
+    if not world.customs:
+        return None
+    return len([item for item in _customs(world) if item.ended is None])
+
+
+def m_cu_per_folk(world):
+    """Сколько порядков приходится на народ."""
+    if not world.customs or not world.folks:
+        return None
+    folks = {item.folk_id for item in _customs(world)}
+    return len(world.customs) / float(max(1, len(folks)))
+
+
+def m_cu_cases(world):
+    """Сколько случаев жизни в ходу: рождение, смерть, гость, дорога…"""
+    if not world.customs:
+        return None
+    return len({item.case for item in _customs(world)})
+
+
+def m_cu_forms(world):
+    """Сколько разных форм в ходу."""
+    if not world.customs:
+        return None
+    return len({item.form for item in _customs(world)})
+
+
+def m_cu_commonest(world):
+    """Доля самой частой формы: одна форма на весь мир — это не культура."""
+    if len(world.customs) < 8:
+        return None
+    counts = collections.Counter(item.form
+                                 for item in _customs(world))
+    return counts.most_common(1)[0][1] / float(len(world.customs))
+
+
+def m_cu_known(world):
+    """У скольких причина ещё помнится."""
+    if len(world.customs) < 8:
+        return None
+    from worldgen import customs as cat
+    return len([item for item in _customs(world)
+                if cat.is_known(item.why)]) / float(len(world.customs))
+
+
+def m_cu_from_event(world):
+    """Сколько выросло из названного события, а не из того, как живут."""
+    if len(world.customs) < 8:
+        return None
+    return len([item for item in _customs(world)
+                if item.why_event]) / float(len(world.customs))
+
+
+def m_cu_banned(world):
+    """Сколько порядков когда-либо запрещали."""
+    if len(world.customs) < 8:
+        return None
+    return len([item for item in _customs(world)
+                if any(mark.get("что") == "запрет"
+                       for mark in item.marks)]) / float(len(world.customs))
+
+
+def m_cu_spread(world):
+    """Сколько разошлось к соседям."""
+    if len(world.customs) < 8:
+        return None
+    return len([item for item in _customs(world)
+                if item.spread]) / float(len(world.customs))
+
+
+def m_cu_varied(world):
+    """У скольких завелись изводы."""
+    if len(world.customs) < 8:
+        return None
+    return len([item for item in _customs(world)
+                if item.variants]) / float(len(world.customs))
+
+
+def m_cu_binds(world):
+    """Сколько ступеней обязательности в ходу."""
+    if len(world.customs) < 8:
+        return None
+    return len({item.bind for item in _customs(world)})
+
+
+def m_cu_twins(world):
+    """Доля народов одной расы с теми же порядками, что у родни.
+
+    Главная мера раздела: два народа одной расы не должны получать
+    одинаковую культуру. Сравниваются не имена обычаев, а их формы —
+    переименованное одно и то же считается одним и тем же.
+    """
+    by_race = {}
+    for item in _customs(world):
+        by_race.setdefault(item.race_id, {}).setdefault(
+            item.folk_id, set()).add(item.form)
+    pairs = twins = 0
+    for folks in by_race.values():
+        rows = sorted(folks.items())
+        for index, (_first_id, first) in enumerate(rows):
+            for _second_id, second in rows[index + 1:]:
+                if not first or not second:
+                    continue
+                pairs += 1
+                if first == second:
+                    twins += 1
+    if pairs < 3:
+        return None
+    return twins / float(pairs)
+
+
+def m_cu_attitudes(world):
+    """Сколько видов отношения к обычаям в ходу (из пятнадцати)."""
+    rows = [row.get("вид") for profile in world.culture_profiles.values()
+            for row in profile.attitudes]
+    if len(rows) < 20:
+        return None
+    return len(set(rows))
+
+
+def m_cu_top_attitude(world):
+    """Доля самого частого отношения: если все «по привычке», людей нет."""
+    rows = [row.get("вид") for profile in world.culture_profiles.values()
+            for row in profile.attitudes]
+    if len(rows) < 20:
+        return None
+    return collections.Counter(rows).most_common(1)[0][1] \
+        / float(len(rows))
+
+
+def m_cu_split(world):
+    """Сколько разных отношений приходится на один обычай.
+
+    Ради этого всё и заводилось: два человека одной культуры могут
+    относиться к одному обряду по-разному, не переставая быть своими.
+    Доля обычаев «хоть с двумя мнениями» тут не годится — при шести
+    отношениях на обычай она всегда единица и ни о чём не говорит.
+    """
+    rows = {}
+    for profile in world.culture_profiles.values():
+        for row in profile.attitudes:
+            rows.setdefault(row.get("обычай"), set()).add(row.get("вид"))
+    known = [kinds for custom_id, kinds in rows.items()
+             if custom_id in world.customs and kinds]
+    if len(known) < 8:
+        return None
+    return sum(len(kinds) for kinds in known) / float(len(known))
+
+
+def m_cu_deeds(world):
+    """Сколько раз человек нарушил обычай или переделал его."""
+    if not world.culture_profiles:
+        return None
+    return sum(len(profile.broke) + len(profile.made)
+               for profile in world.culture_profiles.values())
+
+
+def m_cu_profiles(world):
+    """Какой доле имён заведён культурный облик: он нужен не всякому."""
+    if not world.figures or not world.culture_profiles:
+        return None
+    return len(world.culture_profiles) / float(len(world.figures))
+
+
+# ---------------------------------------------------------------------------
 # Владения чудовищ
 # ---------------------------------------------------------------------------
 #
@@ -2365,6 +2552,58 @@ MEASURES = (
             "штук", "у весомого места есть что рассказать"),
     Measure("земля", "строк об условиях у скудного места", m_land_words, 3,
             None, "штук", "о всяком месте есть что сказать прозой"),
+    Measure("обычаи", "обычаев за историю", m_cu_count, 8, 260, "штук",
+            "обычай — ответ на случай, а не строка в справочнике",
+            min_years=2000),
+    Measure("обычаи", "держится к концу", m_cu_kept, 3, None, "штук",
+            "мир без единого живого порядка — это не мир"),
+    Measure("обычаи", "обычаев на народ", m_cu_per_folk, 0.8, 7.0, "штук",
+            "у народа их единицы: десяток порядков на случай — это уже "
+            "устав", min_years=2000),
+    Measure("обычаи", "случаев жизни в ходу", m_cu_cases, 5, None, "из 11",
+            "если всё об одном, культура выходит однобокой",
+            min_years=2000),
+    Measure("обычаи", "форм в ходу", m_cu_forms, 8, None, "из 35",
+            "разные народы решают одно и то же по-разному",
+            min_years=2000),
+    Measure("обычаи", "самой частой формы", m_cu_commonest, None, 0.3,
+            "доля", "одна форма на весь мир — это не культура, а шаблон",
+            min_years=2000),
+    Measure("обычаи", "причина ещё помнится", m_cu_known, 0.3, 0.95, "доля",
+            "забывают не всё и не сразу, но забывают",
+            min_years=2000),
+    Measure("обычаи", "выросли из события", m_cu_from_event, 0.1, 0.85,
+            "доля", "не всякая традиция родом из катастрофы: больше их "
+            "родом из того, как народ живёт всегда", min_years=2000),
+    Measure("обычаи", "запрещали", m_cu_banned, 0.005, 0.4, "доля",
+            "запрет — поворот судьбы, а не обычная участь обычая",
+            min_years=3000),
+    Measure("обычаи", "разошлись к соседям", m_cu_spread, 0.05, 0.7, "доля",
+            "народы не живут в культурной изоляции, но и не сливаются",
+            min_years=2000),
+    Measure("обычаи", "обросли изводами", m_cu_varied, 0.05, 0.7, "доля",
+            "один обычай не бывает одинаковым везде — но и не всякий "
+            "обзаводится изводом", min_years=2000),
+    Measure("обычаи", "ступеней обязательности в ходу", m_cu_binds, 3, None,
+            "из 7", "обязательное и добровольное — разные вещи",
+            min_years=2000),
+    Measure("обычаи", "народов-близнецов одной расы", m_cu_twins, None, 0.4,
+            "доля", "два народа одной расы не получают одинаковую "
+            "культуру", min_years=2000),
+    Measure("обычаи", "видов отношения в ходу", m_cu_attitudes, 5, None,
+            "из 15", "к обычаю относятся по-разному, иначе это не люди, "
+            "а исполнители"),
+    Measure("обычаи", "самого частого отношения", m_cu_top_attitude, None,
+            0.55, "доля", "если все соблюдают по привычке, личностей нет"),
+    Measure("обычаи", "мнений об одном обычае", m_cu_split, 1.8, None,
+            "видов", "два человека одной культуры могут относиться к "
+            "обряду по-разному", min_years=2000),
+    Measure("обычаи", "поступков против обычая", m_cu_deeds, 1, None,
+            "штук", "кто-то должен был нарушить или переделать — иначе "
+            "традиции не меняются людьми", min_years=3000),
+    Measure("обычаи", "доля имён с культурным обликом", m_cu_profiles, None,
+            0.5, "доля", "подробный облик нужен не всякому: у рядового "
+            "жителя довольно народа и места рождения"),
     Measure("владения", "владений чудовищ за историю", m_dom_count, 3, 60,
             "штук", "владение чудовища — событие, а не фон",
             min_years=3000),

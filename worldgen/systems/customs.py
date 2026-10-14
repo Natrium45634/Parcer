@@ -142,7 +142,7 @@ EVENT_HINTS = (
     ("city", cat.ROAD, ""),
     ("settlement", cat.ROAD, ""),
     ("tribe", cat.KIN, ""),
-    ("monster", cat.HOME, "fear"),
+    ("monster", cat.HOME, "beast"),
     ("dominion", cat.HOME, "yoke"),
 )
 
@@ -169,6 +169,7 @@ LIFE_WHYS = {
     "few": "людей мало, и каждый на счету",
     "yoke": "землёй правят чужие, и своё приходится держать негромко",
     "magic": "волшебство тут под рукой, и от него больше хлопот, чем пользы",
+    "beast": "по соседству живёт то, с чем не воюют, а уживаются",
 }
 
 
@@ -367,6 +368,7 @@ CASE_WEIGHTS = {
     "open": ((cat.ROAD, 1.8), (cat.GUEST, 1.3)),
     "letters": ((cat.HONOUR, 1.3), (cat.RULE, 1.2)),
     "magic": ((cat.BIRTH, 1.3), (cat.HOME, 1.3)),
+    "beast": ((cat.HOME, 1.4), (cat.ROAD, 1.3), (cat.TRUCE, 1.2)),
 }
 
 
@@ -498,9 +500,36 @@ def _live(ctx, rng, custom, year: int, scale: float, lands) -> None:
     folk = world.folks.get(custom.folk_id)
 
     # Народа не стало — порядок уходит с ним, если его не перенял никто.
+    # А если перенял, то наследник становится хозяином обычая целиком: и
+    # народом, и расой, и из списка перенявших его надо убрать, иначе
+    # выходит, что он перенял порядок сам у себя.
     if folk is not None and folk.status != ACTIVE and custom.state != cat.LOST:
-        if custom.folk_ids:
-            custom.folk_id = custom.folk_ids[0]
+        heir = None
+        for key in custom.folk_ids:
+            other = world.folks.get(key)
+            if other is None or other.status != ACTIVE:
+                continue
+            # Если такой порядок у наследника уже есть, второго не
+            # заводим: он сливается с тем, что они делали и так.
+            if any(item.folk_id == other.id and item.form == custom.form
+                   and item.ended is None and item.id != custom.id
+                   for item in world.customs.values()):
+                continue
+            heir = other
+            break
+        if heir is not None:
+            custom.folk_id = heir.id
+            custom.race_id = heir.race_id
+            custom.folk_ids = [key for key in custom.folk_ids
+                               if key != heir.id]
+            custom.notes.append(
+                "%d: народа, у которого он завёлся, не стало — порядок "
+                "остался у народа по имени %s" % (year, heir.name))
+        elif custom.folk_ids:
+            _end(ctx, rng, custom, year,
+                 "народа, у которого он завёлся, не стало, а у перенявших "
+                 "он слился с их собственным порядком")
+            return
         else:
             _end(ctx, rng, custom, year, "народа, у которого он был, не стало")
             return
