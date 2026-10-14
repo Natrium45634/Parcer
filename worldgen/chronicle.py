@@ -606,7 +606,8 @@ def census_lines(settlement, indent: str = "      ") -> list:
     last_year, last = rows[-1]
     peak = int(getattr(settlement, "peak_population", 0) or 0)
     peak_year = int(getattr(settlement, "peak_year", 0) or 0)
-    parts = ["%d душ в %d году" % (first, first_year)]
+    parts = ["%d %s в %d году"
+             % (first, plural(first, "душа", "души", "душ"), first_year)]
     if peak and peak > max(first, last):
         parts.append("наибольше %d в %d" % (peak, peak_year))
     parts.append("%d в %d" % (last, last_year))
@@ -5027,7 +5028,9 @@ def _year_powers(world, year: int) -> list:
         if marks:
             rows.append("      %s" % "; ".join(marks))
     if len(polities) > 12:
-        rows.append("  ...и ещё %d держав помельче." % (len(polities) - 12))
+        rest = len(polities) - 12
+        rows.append("  ...и ещё %d %s помельче."
+                    % (rest, plural(rest, "держава", "державы", "держав")))
     rows.append("")
     return rows
 
@@ -5075,7 +5078,9 @@ def _year_towns(world, year: int) -> list:
                            "; под рукой державы по имени %s" % polity.name
                            if polity is not None else ""))
         if len(towns) > 10:
-            rows.append("  ...и ещё %d городов помельче." % (len(towns) - 10))
+            rest = len(towns) - 10
+            rows.append("  ...и ещё %d %s помельче."
+                        % (rest, plural(rest, "город", "города", "городов")))
         rows.append("")
 
     beasts = [item for item in world.monsters.values()

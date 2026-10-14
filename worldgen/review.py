@@ -1744,8 +1744,9 @@ def polity_block(world, polity, year: int, population: int, cities: int,
     mine = {town.id for town in towns}
     if seat is not None and not (alive_at(seat, year) and seat.id in mine):
         seat = None                   # в тот год престол был не тут
-    out("   население %d в %d городах%s" % (
+    out("   население %d в %d %s%s" % (
         population, cities,
+        _plural(cities, "городе", "городах", "городах"),
         "; столица: %s" % seat.full_name if seat is not None else ""))
     if towns:
         first = towns[0]
