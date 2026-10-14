@@ -792,11 +792,22 @@ class ChronicleApp(tk.Tk):
             box.pack(side="left", padx=4)
             # Подсказка о части — в строке состояния: место на панели
             # кончается после третьей галочки, а объяснить надо все пять.
-            box.bind("<Enter>",
-                     lambda _event, text=about: self.status_var.set(text))
+            # Уводя мышь, строку возвращаем: иначе подсказка остаётся
+            # висеть вместо того, что строка говорила до неё.
+            box.bind("<Enter>", lambda _event, text=about:
+                     self._hint_review(text))
+            box.bind("<Leave>", lambda _event: self._hint_review(None))
 
         self.review_text = self._make_text(frame)
         self._fillers[str(frame)] = self._fill_review
+
+    def _hint_review(self, text) -> None:
+        """Подсказка в строке состояния — и возврат того, что там было."""
+        if text is None:
+            self.status_var.set(getattr(self, "_status_was", ""))
+            return
+        self._status_was = self.status_var.get()
+        self.status_var.set(text)
 
     def _fill_review(self) -> None:
         """Первый показ вкладки: что это такое и сколько ждать.

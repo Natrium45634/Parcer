@@ -5016,7 +5016,7 @@ def _year_powers(world, year: int) -> list:
             marks.append("правит %s" % ruler)
         mine = held.get(polity.id, ())
         capital = world.settlements.get(polity.capital_id)
-        if capital is not None and capital in tuple(mine):
+        if capital is not None and capital.id in {town.id for town in mine}:
             marks.append("престол в городе по имени %s" % capital.name)
         faith = world.faiths.get(polity.faith_id)
         if faith is not None and faith.founded.year <= year:

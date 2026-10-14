@@ -1567,8 +1567,13 @@ def ruler_line(world, polity, year: int) -> str:
     return "; ".join(parts)
 
 
-def nobility_line(world, polity, year: int) -> str:
-    """Лестница знати державы и самые весомые дома на ней."""
+def nobility_line(world, polity, year: int, now: bool = True) -> str:
+    """Лестница знати державы и самые весомые дома на ней.
+
+    Ступени и титулы домов стоят в летописи с годами, а недовольство —
+    число нынешнее: по годам оно не записано. Поэтому в срезе прошлого
+    века дома названы, а их недовольство — нет.
+    """
     race = RACES_BY_ID.get(polity.race_id)
     if race is None or not race.has_nobility:
         return "знати нет"
@@ -1587,7 +1592,8 @@ def nobility_line(world, polity, year: int) -> str:
     top = ", ".join("%s (%s, %s%s)" % (
         house.full_name, house.style or "без титула",
         arist.alignment_word(house.alignment),
-        ", недовольство %.2f" % house.discontent if house.discontent > 0.3 else "")
+        ", недовольство %.2f" % house.discontent
+        if now and house.discontent > 0.3 else "")
         for house in houses[:3])
     return "%s | верхушка: %s" % (ladder or "ступени не разведены", top)
 
@@ -1629,10 +1635,13 @@ def politics_line(world, polity, year: int, now: bool = True) -> str:
              if now or alive_at(fort, year)]
     if forts:
         parts.append("крепостей %d" % len(forts))
-    ships = warfare.fleet(world, polity, RACES_BY_ID[polity.race_id],
-                          world.era_index_at(year))
-    if ships:
-        parts.append("флот до %d кораблей" % ships)
+    if now:
+        # Флот считается по нынешней державе и её эпохе, а не берётся из
+        # записей: в прошлом веке это было бы число из будущего.
+        ships = warfare.fleet(world, polity, RACES_BY_ID[polity.race_id],
+                              world.era_index_at(year))
+        if ships:
+            parts.append("флот до %d кораблей" % ships)
     return "; ".join(parts) if parts else "ни с кем не связана"
 
 
@@ -1732,8 +1741,8 @@ def polity_block(world, polity, year: int, population: int, cities: int,
     out("   основана %s — держава стоит %d-й год"
         % (polity.founded.long(), year - polity.founded.year + 1))
     seat = world.settlements.get(polity.capital_id)
-    if seat is not None and not (alive_at(seat, year)
-                                 and seat in tuple(towns)):
+    mine = {town.id for town in towns}
+    if seat is not None and not (alive_at(seat, year) and seat.id in mine):
         seat = None                   # в тот год престол был не тут
     out("   население %d в %d городах%s" % (
         population, cities,
@@ -1764,7 +1773,7 @@ def polity_block(world, polity, year: int, population: int, cities: int,
                       and world.reigns[rid].start.ordinal < reign.start.ordinal])
         out("   правит %d-й год; до него правлений %d"
             % (year - reign.start.year + 1, before))
-    out("   знать: %s" % nobility_line(world, polity, year))
+    out("   знать: %s" % nobility_line(world, polity, year, now))
     out("   политика: %s" % politics_line(world, polity, year, now))
     out("   наследование: %s" % SUCCESSION_NAMES.get(polity.succession,
                                                      polity.succession))
@@ -1940,7 +1949,13 @@ def snapshot(world, year: int, out) -> None:
                     len([bid for bid in war.battle_ids
                          if bid in world.battles
                          and world.battles[bid].date.year <= year]),
-                    ", погибло %d" % war.deaths if war.end is not None else ""))
+                    # Счёт павших у войны записан итогом. Пока она идёт,
+                    # он ещё наберётся — и говорить «погибло столько»
+                    # значит назвать число из будущего.
+                    ", погибло %d" % war.deaths
+                    if war.end is not None and war.end.year <= year
+                    else ", всего погибнет %d" % war.deaths
+                    if war.deaths else ""))
     else:
         out("Войн сейчас не идёт.")
 
