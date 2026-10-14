@@ -1882,13 +1882,26 @@ def m_wonder_lost(world):
     искать его не надо. Для смотра же «от него остались стены» — это
     чудо, которого больше нет; не считать их значило мерить не то.
     Повреждённое и покинутое при этом стоит, и в счёт не идёт.
+
+    А на мире, где терять было нечего, мера молчит: см. ниже.
     """
     from worldgen import wonders as cat
+    from worldgen.systems import wonders as won_sys
     if not world.wonders:
         return None
-    lost = sum(1 for item in world.wonders.values()
+    rows = list(world.wonders.values())
+    lost = sum(1 for item in rows
                if item.lost or item.state == cat.RUINS)
-    return lost / float(len(world.wonders))
+    if lost:
+        return lost / float(len(rows))
+    # Ноль утрат значит одно из двух: мир их не допустил или терять
+    # было нечего. Пять чудес, и все они — гора, пустыня и два божьих
+    # следа в землях, откуда никто не уходил: пропасть тут не может
+    # ничто, и ноль говорит не о мире, а о вопросе. Тогда мера молчит,
+    # как молчит доля рукотворных на мире без карты.
+    if not any(won_sys.can_be_lost(world, item) for item in rows):
+        return None
+    return 0.0
 
 
 def m_wonder_named_late(world):
@@ -2384,7 +2397,8 @@ MEASURES = (
             "мир без природы; на мире без карты не считается",
             min_years=3000),
     Measure("чудеса", "чудес утрачено или забыто", m_wonder_lost, 0.1, 0.9,
-            "доля", "старый мир теряет часть чудес, но не все",
+            "доля", "старый мир теряет часть чудес, но не все; на мире, "
+            "где терять было нечего, не считается",
             min_years=3000),
     Measure("чудеса", "названы не в первом веке", m_wonder_named_late, 0.3,
             None, "доля", "чудом место делают люди, а не карта"),
