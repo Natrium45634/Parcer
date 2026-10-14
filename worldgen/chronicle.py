@@ -10,6 +10,7 @@ from . import narrative_creatures as creature_texts
 from . import races as races_mod
 from .models import ACTIVE
 from .timeline import years_text
+from .world import RURAL_FACTOR, alive_at
 
 # Знак важности слева от даты. Вместо звёздочек — отчётливые значки: в
 # длинном столбце «***» и « **» различаются плохо, а эти видны краем глаза.
@@ -4991,14 +4992,17 @@ def _year_powers(world, year: int) -> list:
         rows.append("")
         return rows
 
-    # Порядок — по тому, сколько городов держава успела поставить к этому
-    # году: людность прошлых веков нигде не записана, а города записаны.
-    def held(polity):
-        return sum(1 for town in towns
-                   if town.polity_id == polity.id
-                   or town.id in polity.settlement_ids)
+    # Порядок — по душам того года. Людность записана кривыми переписи, а
+    # владение городом — отрезками, и спрашивается это у мира одним
+    # методом: разбор мира и эта шкала должны называть одну и ту же
+    # крупнейшую державу, иначе у одного вопроса два ответа.
+    held = world.holdings_at(year)
 
-    polities.sort(key=lambda item: (-held(item), item.founded.ordinal,
+    def souls_of(polity):
+        return sum(int(world.souls_at(town, year) * RURAL_FACTOR)
+                   for town in held.get(polity.id, ()))
+
+    polities.sort(key=lambda item: (-souls_of(item), item.founded.ordinal,
                                     item.id))
     for polity in polities[:12]:
         race = races_mod.RACES_BY_ID.get(polity.race_id)
@@ -5010,15 +5014,16 @@ def _year_powers(world, year: int) -> list:
         ruler = _ruler_at(world, polity, year)
         if ruler is not None:
             marks.append("правит %s" % ruler)
+        mine = held.get(polity.id, ())
         capital = world.settlements.get(polity.capital_id)
-        if capital is not None and capital.founded.year <= year:
+        if capital is not None and capital in tuple(mine):
             marks.append("престол в городе по имени %s" % capital.name)
         faith = world.faiths.get(polity.faith_id)
         if faith is not None and faith.founded.year <= year:
             marks.append("вера «%s»" % faith.name)
-        count = held(polity)
-        if count:
-            marks.append("городов %d" % count)
+        if mine:
+            marks.append("городов %d" % len(mine))
+            marks.append("душ %d" % souls_of(polity))
         if marks:
             rows.append("      %s" % "; ".join(marks))
     if len(polities) > 12:
@@ -5047,29 +5052,29 @@ def _ruler_at(world, polity, year: int):
 def _year_towns(world, year: int) -> list:
     """Города, что стояли в этот год, и кто в этот год по земле ходил.
 
-    Людность прошлых веков нигде не записана — записан только год
-    основания. Поэтому города названы по старшинству: те, что к этому
-    году стояли дольше всех, и есть главные имена своего времени.
+    Города названы по людности того года — она записана кривой переписи, —
+    а хозяин по отрезкам владения: кто держал город в этот год, а не кто
+    держит его в последнем году летописи. Прежде ни того, ни другого в
+    записях не было, и города приходилось называть по старшинству.
     """
     towns = [item for item in world.settlements.values()
-             if item.founded.year <= year
-             and (item.ended is None or item.ended.year >= year)]
+             if alive_at(item, year)]
     rows = []
     if towns:
-        towns.sort(key=lambda item: (item.founded.ordinal, item.id))
+        towns.sort(key=lambda item: (-world.souls_at(item, year), item.id))
         rows.extend(["ГОРОДА, ЧТО СТОЯЛИ В ЭТОТ ГОД", ""])
         for town in towns[:10]:
             race = races_mod.RACES_BY_ID.get(town.race_id)
-            polity = world.polities.get(town.polity_id)
-            rows.append("  %s — %s, стоит %s%s"
+            polity = world.town_owner_at(town, year)
+            rows.append("  %s — %s, %d душ, стоит %s%s"
                         % (town.name,
                            race.name if race is not None else "?",
+                           world.souls_at(town, year),
                            years_text(year - town.founded.year + 1),
                            "; под рукой державы по имени %s" % polity.name
-                           if polity is not None
-                           and polity.founded.year <= year else ""))
+                           if polity is not None else ""))
         if len(towns) > 10:
-            rows.append("  ...и ещё %d городов помоложе." % (len(towns) - 10))
+            rows.append("  ...и ещё %d городов помельче." % (len(towns) - 10))
         rows.append("")
 
     beasts = [item for item in world.monsters.values()

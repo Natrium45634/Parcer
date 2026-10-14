@@ -3716,6 +3716,182 @@ def check_year_slices(world, seed: str) -> list:
     return problems
 
 
+def check_review(world, seed: str) -> list:
+    """Разбор мира: собирается ли он и не врёт ли о прошлых веках.
+
+    Разбор — это то, что человек видит кнопкой «Разобрать этот мир», и то
+    же самое, что печатает стандартный тест: один разбор на программу и
+    на инструмент. Отвечает он по записям, а не по живому ходу времени, —
+    и проверяется тут именно это.
+
+    Что ловится. Часть разбора, которая не собралась или вышла пустой.
+    Чужое слово в русском выводе — латинский ключ справочника, забытый в
+    сводке. Дата среза за краем истории. Кривая людности, идущая назад
+    или начинающаяся раньше основания. Отрезки владения городом с дырой,
+    нахлёстом или хвостом, который не сходится с нынешним хозяином: по
+    ним отвечают, чей это был город в таком-то году, и ошибка тут
+    делает из завоевателя древнюю державу. И срез, который считает
+    живыми не тех, кто в этот год жил.
+    """
+    from worldgen import review
+
+    problems = []
+    total = max(1, int(world.total_years))
+
+    # --- даты срезов -----------------------------------------------------
+    dates = review.dates_for(world)
+    if len(dates) < 2:
+        problems.append("сид «%s»: дат срезов вышло %d — разбор смотрит на "
+                        "мир в одну точку" % (seed, len(dates)))
+    if dates != sorted(set(dates)):
+        problems.append("сид «%s»: даты срезов не по порядку или с повтором: "
+                        "%s" % (seed, dates))
+    for date in dates:
+        if not 1 <= date <= total:
+            problems.append("сид «%s»: дата среза %d за краем истории (1–%d)"
+                            % (seed, date, total))
+    if review.dates_for(world) != dates:
+        problems.append("сид «%s»: даты срезов не повторяются на том же "
+                        "мире — разбор не сравнить с прежним" % seed)
+
+    # --- кривая людности -------------------------------------------------
+    for what, table in (("поселения", world.settlements),
+                        ("племени", world.tribes),
+                        ("лагеря", world.camps)):
+        for place in table.values():
+            rows = [[int(row[0]), int(row[1])] for row in (place.census or ())]
+            if not rows:
+                problems.append("сид «%s»: у %s «%s» нет кривой людности — "
+                                "его прошлое не восстановить"
+                                % (seed, what, place.name))
+                break
+            years = [row[0] for row in rows]
+            if years != sorted(years):
+                problems.append("сид «%s»: кривая людности %s «%s» идёт "
+                                "назад: %s" % (seed, what, place.name,
+                                               years[:6]))
+                break
+            if years[0] < place.founded.year:
+                problems.append("сид «%s»: перепись %s «%s» за %d год, а "
+                                "основано оно в %d"
+                                % (seed, what, place.name, years[0],
+                                   place.founded.year))
+                break
+            if place.ended is not None and years[-1] > place.ended.year:
+                problems.append("сид «%s»: перепись %s «%s» за %d год, а "
+                                "кончилось оно в %d"
+                                % (seed, what, place.name, years[-1],
+                                   place.ended.year))
+                break
+            if world.souls_at(place, years[-1]) != rows[-1][1]:
+                problems.append("сид «%s»: людность %s «%s» на %d год "
+                                "отвечается не по своей же кривой"
+                                % (seed, what, place.name, years[-1]))
+                break
+
+    # --- отрезки владения городом ----------------------------------------
+    for town in world.settlements.values():
+        rows = [[int(row[0]), row[1] or ""] for row in (town.owners or ())]
+        if (rows[-1][1] if rows else "") != (town.polity_id or ""):
+            problems.append("сид «%s»: город по имени %s числится за "
+                            "державой «%s», а последний отрезок говорит "
+                            "«%s»" % (seed, town.name, town.polity_id,
+                                      rows[-1][1] if rows else "—"))
+            break
+        years = [row[0] for row in rows]
+        if years != sorted(years):
+            problems.append("сид «%s»: хозяева города по имени %s идут не по "
+                            "годам: %s" % (seed, town.name, years[:6]))
+            break
+        if rows and years[0] < town.founded.year:
+            problems.append("сид «%s»: у города по имени %s хозяин с %d "
+                            "года, а основан он в %d"
+                            % (seed, town.name, years[0], town.founded.year))
+            break
+        doubled = [first[1] for first, second in zip(rows, rows[1:])
+                   if first[1] == second[1]]
+        if doubled:
+            problems.append("сид «%s»: у города по имени %s два отрезка "
+                            "подряд с одним хозяином — смены власти не "
+                            "было" % (seed, town.name))
+            break
+        wrong = [pid for _year, pid in rows
+                 if pid and pid not in world.polities]
+        if wrong:
+            problems.append("сид «%s»: город по имени %s отдан державе «%s», "
+                            "которой в мире нет" % (seed, town.name, wrong[0]))
+            break
+        early = [(year, pid) for year, pid in rows
+                 if pid in world.polities
+                 and world.polities[pid].founded.year > year]
+        if early:
+            problems.append("сид «%s»: город по имени %s отдан державе "
+                            "раньше, чем она появилась: %d год"
+                            % (seed, town.name, early[0][0]))
+            break
+
+    # --- сам разбор ------------------------------------------------------
+    look = dates[:2] or [total]
+    try:
+        text = review.report(world, dates=look)
+    except Exception as error:                  # noqa: BLE001 — сообщаем
+        problems.append("сид «%s»: разбор мира не собрался: %s"
+                        % (seed, error))
+        return problems
+    rows = text.split("\n")
+    if len(rows) < 100:
+        problems.append("сид «%s»: разбор вышел короче сотни строк (%d) — "
+                        "часть его молчит" % (seed, len(rows)))
+    marks = {"ЧТО ЭТО ЗА МИР": "приговор миру",
+             "ГОД %d" % look[0]: "срез года",
+             "ПЯТЬ ВЕЛИЧАЙШИХ ИМЁН": "портреты",
+             "ИТОГ": "итог числами",
+             "серьёзных аномалий": "проверка на поломки"}
+    for mark, about in marks.items():
+        if mark not in text:
+            problems.append("сид «%s»: в разборе нет части «%s»"
+                            % (seed, about))
+
+    # Чужое слово. Римское число в имени государя — не латиница, а число:
+    # «Нилаиэль II» написано по-русски. Всё прочее латинское — забытый
+    # ключ справочника, и в русском выводе ему места нет.
+    latin = []
+    for row in rows:
+        for word in row.replace("(", " ").replace(")", " ").split():
+            bare = word.strip(".,;:«»—…!?")
+            if not any("a" <= char.lower() <= "z" for char in bare):
+                continue
+            if all(char in "IVXLCDM" for char in bare):
+                continue
+            latin.append(bare)
+    if latin:
+        problems.append("сид «%s»: в разборе чужое слово: %s"
+                        % (seed, ", ".join(sorted(set(latin))[:6])))
+
+    # --- срез считает живыми тех, кто в этот год жил ----------------------
+    for year in look:
+        head = "ГОД %d" % year
+        where = next((index for index, row in enumerate(rows)
+                      if row.startswith(head)), -1)
+        if where < 0:
+            continue
+        line = next((row for row in rows[where:where + 8]
+                     if row.startswith("Живых:")), "")
+        if not line:
+            problems.append("сид «%s»: в срезе на %d год не сказано, кто жив"
+                            % (seed, year))
+            continue
+        said = [int(part) for part in re.findall(r"\d+", line)]
+        want = [len([item for item in table.values()
+                     if review.alive_at(item, year)])
+                for table in (world.polities, world.settlements,
+                              world.tribes, world.camps, world.houses)]
+        if said[:5] != want:
+            problems.append("сид «%s»: срез на %d год говорит «%s», а по "
+                            "срокам живых %s" % (seed, year, line, want))
+    return problems
+
+
 def check_causes(world, seed: str) -> list:
     """Причинность: следы, зёрна и цепи событий.
 
@@ -4760,6 +4936,7 @@ def main(only: str = "") -> int:
         failures.extend(check_subjects(first, seed))
         failures.extend(check_traces(first, seed))
         failures.extend(check_year_slices(first, seed))
+        failures.extend(check_review(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
         failures.extend(check_tongues(first, seed))
@@ -4836,6 +5013,7 @@ def main(only: str = "") -> int:
             failures.extend(check_subjects(first, "карта/" + seed))
             failures.extend(check_traces(first, "карта/" + seed))
             failures.extend(check_year_slices(first, "карта/" + seed))
+            failures.extend(check_review(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_tongues(first, "карта/" + seed))
@@ -4902,7 +5080,7 @@ def main(only: str = "") -> int:
                       check_mortality, check_ranks, check_war_cost,
                       check_town_bread,
                       check_world_code,
-                      check_invasions, check_subjects,
+                      check_invasions, check_subjects, check_review,
                       check_traces, check_year_slices,
                       check_faiths, check_nations,
                       check_tongues, check_embassies, check_things,

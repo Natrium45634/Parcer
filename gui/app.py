@@ -19,7 +19,7 @@ from gui.land import LandTab
 from gui.sidetabs import SideTabs
 from gui import wizard as wizard_mod
 from gui.wizard import Wizard
-from worldgen import chronicle, landlore, mapworld, storage
+from worldgen import chronicle, landlore, mapworld, review, storage
 from worldgen.engine import GenerationCancelled, generate
 from worldgen.models import ACTIVE
 from worldgen.races import RACES, RACES_BY_ID, get_race
@@ -194,6 +194,13 @@ class ChronicleApp(tk.Tk):
         self.atlas = None              # живая карта: появляется вместе с миром
         self.progress_queue = queue.Queue()
         self.stop_flag = False
+        # Разбор мира идёт в своём потоке и со своей очередью: он может
+        # занять десятки секунд на большом мире, а окно за это время
+        # должно оставаться живым.
+        self.review_worker = None
+        self.review_queue = queue.Queue()
+        self.review_text_value = ""    # готовый разбор — его и сохраняем
+        self.review_spin = 0           # поворот дат: «другие даты»
 
         self.mono = pick_font(("Consolas", "DejaVu Sans Mono", "Menlo",
                                "Courier New", "TkFixedFont"), 10)
@@ -316,6 +323,14 @@ class ChronicleApp(tk.Tk):
         file_menu.add_separator()
         file_menu.add_command(label="Выход", command=self.destroy)
         menu.add_cascade(label="Файл", menu=file_menu)
+
+        world_menu = tk.Menu(menu, tearoff=0, font=self.ui_font)
+        self._menus.append(world_menu)
+        world_menu.add_command(label="Разобрать этот мир (стандартный тест)",
+                               command=self.show_review)
+        world_menu.add_command(label="Сохранить разбор в текст…",
+                               command=self.save_review)
+        menu.add_cascade(label="Разбор", menu=world_menu)
 
         help_menu = tk.Menu(menu, tearoff=0, font=self.ui_font)
 
@@ -440,6 +455,7 @@ class ChronicleApp(tk.Tk):
         self._build_land_tab()
         self._build_timeline_tab()
         self._build_history_tab()
+        self._build_review_tab()
         self.eras_text = self._add_text_tab("Эпохи")
         self.polity_tree = self._add_tree_tab(
             "Страны",
@@ -735,6 +751,183 @@ class ChronicleApp(tk.Tk):
         self.update_idletasks()
         self._on_tab_changed()
         self.atlas.look_at(year=year, region_id=region_id)
+
+    # ------------------------------------------------------------------
+    # Разбор мира
+    # ------------------------------------------------------------------
+
+    def _build_review_tab(self) -> None:
+        """Разбор мира: стандартный тест генератора одной кнопкой.
+
+        Прежде так посмотреть на мир можно было только из командной
+        строки, запустив `tools/worldtest.py`, — то есть никак, если ты
+        не программист. А вопрос это первый: что это за мир, стоит ли
+        его читать и не вышло ли в нём чего-нибудь нелепого. Теперь на
+        него отвечает кнопка, и отвечает по тому самому миру, который
+        человек сейчас смотрит, — хоть только что созданному, хоть
+        открытому из файла.
+        """
+        frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text="Разбор мира")
+
+        bar = ttk.Frame(frame)
+        bar.pack(fill="x", pady=(6, 2))
+        self.review_button = ttk.Button(bar, text="Разобрать этот мир",
+                                        style="Go.TButton",
+                                        command=self.start_review)
+        self.review_button.pack(side="left", padx=(4, 10))
+        ttk.Button(bar, text="Другие даты",
+                   command=self.respin_review).pack(side="left")
+        ttk.Button(bar, text="Сохранить в файл…",
+                   command=self.save_review).pack(side="left", padx=10)
+
+        parts = ttk.Frame(frame)
+        parts.pack(fill="x", pady=(0, 6))
+        ttk.Label(parts, text="Что разбирать:").pack(side="left", padx=(4, 6))
+        self.review_vars = {}
+        for key, name, about in review.PARTS:
+            var = tk.BooleanVar(value=True)
+            self.review_vars[key] = var
+            box = ttk.Checkbutton(parts, text=name, variable=var)
+            box.pack(side="left", padx=4)
+            # Подсказка о части — в строке состояния: место на панели
+            # кончается после третьей галочки, а объяснить надо все пять.
+            box.bind("<Enter>",
+                     lambda _event, text=about: self.status_var.set(text))
+
+        self.review_text = self._make_text(frame)
+        self._fillers[str(frame)] = self._fill_review
+
+    def _fill_review(self) -> None:
+        """Первый показ вкладки: что это такое и сколько ждать.
+
+        Разбор не запускается сам: на большом мире он идёт десятки
+        секунд, и начинать такую работу только потому, что человек
+        пролистывал разделы, — значит заставить его ждать не спросив.
+        """
+        if self.review_text_value:
+            return
+        world = self.world
+        years = int(world.total_years) if world is not None else 0
+        self._set_text(self.review_text, "\n".join([
+            "РАЗБОР МИРА",
+            "",
+            "Это тот самый стандартный тест, которым проверяют генератор, —",
+            "только по этому миру и без командной строки.",
+            "",
+            "Он отвечает на три вопроса:",
+            "",
+            "  • что это за мир — тепло и влага, много ли суши, какая у него",
+            "    судьба, чем он опасен, сколько в нём волшебства, кто в нём",
+            "    проснулся и как он сделан;",
+            "  • стоит ли его читать — пять срезов по эпохам и одиннадцать",
+            "    портретов: величайшие имена, ушедшие народы, самый старый",
+            "    город, самое злое время, чудо, владение чудовища, земля;",
+            "  • не сломалось ли в нём что-нибудь — сто с лишним мер: падежи,",
+            "    согласование по полу, повторы текста, монополия одного бога.",
+            "",
+            "Нажмите «Разобрать этот мир». Мир на %s разбирается от"
+            % years_text(years),
+            "нескольких секунд до минуты — окно при этом остаётся живым.",
+            "",
+            "Даты срезов берутся от сида: один и тот же мир даёт один и тот",
+            "же разбор, и его можно сравнить с прежним. «Другие даты»",
+            "показывают другие века того же мира.",
+        ]))
+
+    def show_review(self) -> None:
+        """Из меню: перейти на вкладку разбора и сразу начать."""
+        if self.world is None:
+            messagebox.showinfo("Нечего разбирать", "Сначала создайте мир.")
+            return
+        titles = list(self.tabs._titles)
+        if "Разбор мира" in titles:
+            self.show_viewer()
+            self.tabs.select(titles.index("Разбор мира"))
+            self.update_idletasks()
+        self.start_review()
+
+    def respin_review(self) -> None:
+        """Другие даты того же мира — и сразу новый разбор."""
+        self.review_spin += 1
+        self.start_review()
+
+    def start_review(self) -> None:
+        """Считает разбор в отдельном потоке и кладёт его на вкладку."""
+        if self.world is None:
+            messagebox.showinfo("Нечего разбирать", "Сначала создайте мир.")
+            return
+        if self.review_worker is not None and self.review_worker.is_alive():
+            return
+        parts = [key for key in review.ALL_PARTS
+                 if self.review_vars[key].get()]
+        if not parts:
+            messagebox.showinfo(
+                "Нечего разбирать",
+                "Не отмечено ни одной части. Выберите хотя бы одну — "
+                "например, «Что это за мир».")
+            return
+        world = self.world
+        spin = self.review_spin
+        self.review_button.config(state="disabled", text="Идёт разбор…")
+        self.status_var.set("Разбор мира…")
+
+        def work():
+            try:
+                text = review.report(
+                    world, parts, spin=spin,
+                    progress=lambda share, note:
+                        self.review_queue.put(("step", share, note)))
+                self.review_queue.put(("done", 1.0, text))
+            except Exception as error:                  # показать, а не молчать
+                self.review_queue.put(("error", 0.0, human_error(error)))
+
+        self.review_worker = threading.Thread(target=work, daemon=True)
+        self.review_worker.start()
+        self.after(80, self._poll_review)
+
+    def _poll_review(self) -> None:
+        try:
+            while True:
+                kind, share, payload = self.review_queue.get_nowait()
+                if kind == "step":
+                    self.status_var.set("Разбор мира: %s (%.0f%%)"
+                                        % (payload, share * 100))
+                elif kind == "done":
+                    self.review_text_value = payload
+                    self._set_text(self.review_text, payload)
+                    self.review_button.config(state="normal",
+                                              text="Разобрать этот мир")
+                    self.status_var.set(
+                        "Разбор готов: %d строк. Сохранить — «Сохранить в "
+                        "файл…»." % (payload.count("\n") + 1))
+                    return
+                else:
+                    self.review_button.config(state="normal",
+                                              text="Разобрать этот мир")
+                    self.status_var.set("Разбор не сложился.")
+                    messagebox.showerror("Ошибка разбора", payload)
+                    return
+        except queue.Empty:
+            pass
+        self.after(80, self._poll_review)
+
+    def save_review(self) -> None:
+        """Сохранить готовый разбор в текстовый файл."""
+        if not self.review_text_value:
+            messagebox.showinfo(
+                "Нечего сохранять",
+                "Сначала нажмите «Разобрать этот мир» на вкладке «Разбор "
+                "мира».")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Сохранить разбор мира", defaultextension=".txt",
+            initialfile="разбор-%s.txt" % self.world.seed_text,
+            filetypes=[("Текст", "*.txt"), ("Все файлы", "*.*")])
+        if not path:
+            return
+        storage.save_text(self.review_text_value, path)
+        self.status_var.set("Разбор записан: %s" % os.path.basename(path))
 
     def _build_timeline_tab(self) -> None:
         """Временная шкала: весь мир на один названный год.

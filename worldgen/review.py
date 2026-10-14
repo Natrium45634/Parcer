@@ -1,0 +1,3383 @@
+# -*- coding: utf-8 -*-
+"""Разбор мира: тот самый стандартный тест, но внутри программы.
+
+Разбор отвечает на два вопроса о готовом мире — **что это за мир** и
+**стоит ли его читать**, — и попутно на третий: **не сломалось ли в нём
+что-нибудь**. Пять частей, каждую можно спросить отдельно:
+
+* «что это за мир» — приговор целому миру одной страницей: холодный он
+  или жаркий, много ли суши, какая у него судьба, чем он опасен, сколько
+  в нём волшебства, кто в нём проснулся и как он сделан;
+* «пять дат» — срезы мира на пять дат с разбросом по всем эпохам;
+* «портреты» — одиннадцать портретов: величайшие имена, ушедшие народы,
+  самый старый город, самое злое время, тот, кто людям не ровня, и так
+  далее;
+* «итог числами» — сводка реестров мира;
+* «проверка на поломки» — сто с лишним мер и ловушек: падежи, род,
+  повторы текста, монополия одного бога и прочее, на чём мир ломался
+  прежде.
+
+Почему это лежит здесь, а не в `tools/`. Прежде разбор был
+инструментом: он сам создавал мир и печатал отчёт в терминал. Но тот же
+разбор нужен человеку в самой программе — кнопкой, по готовому миру, —
+а два разбора на один вопрос неизбежно разойдутся: один обрастёт мерами,
+другой останется прежним. Поэтому разбор переехал в движок, а
+`tools/worldtest.py` стал тонкой оболочкой: он создаёт мир и зовёт
+отсюда.
+
+Главное следствие переезда: **срезы собираются по записанному, а не по
+живому ходу времени**. Прежде отчёт снимал их во время самого счёта, из
+живого состояния мира, — и потому разбор был возможен только сразу после
+генерации, а мир, загруженный из файла, о своих прошлых веках сказать
+уже ничего не мог. Теперь срез отвечает из кривых людности, отрезков
+владения городами и записанных сроков — и разобрать можно любой мир,
+хоть только что созданный, хоть прочитанный с диска.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import struct
+from collections import Counter
+
+from . import aristocracy as arist
+from . import crafts as crafts_mod
+from . import goods
+from . import names as names_mod
+from . import narrative_tongues
+from . import narrative_town as township_texts
+from . import narrative_war
+from . import nations as pol
+from . import renown as renown_cat
+from . import rulers
+from . import township as township_cat
+from . import warfare
+from . import warfare as wf
+from .catastrophe import KIND_NAMES, SEVERITY_NAMES
+from .models import ACTIVE
+from .morph import genitive_noun
+from .pantheon import ALIGNMENT_NAMES, DOMAINS_BY_KEY, FAITH_KIND_NAMES
+from .races import RACES_BY_ID, SUCCESSION_NAMES
+from .rng import Rng, mix_seed, seed_to_int
+from .systems import war as war_system
+from .systems.upheaval import GREAT as GREAT_KEYS
+from .timeline import years_text
+from .world import RURAL_FACTOR, alive_at
+
+# Даты берутся по одной из каждой полосы истории: так срезы не сбиваются
+# в кучу и охватывают и первобытный мир, и закат.
+BANDS = ((0.01, 0.19), (0.19, 0.38), (0.38, 0.58), (0.58, 0.79), (0.79, 0.999))
+
+MALE_MARKS = ("Младший", "Старший", "Второй", "Третий", "Иной")
+RANK_FORMS = (("импер", ("импер",)), ("герцог", ("герцог",)),
+              ("княж", ("княз", "княг")), ("ханств", ("хан",)))
+
+
+# ---------------------------------------------------------------------------
+# Три портрета: имена, народы, города
+# ---------------------------------------------------------------------------
+
+def great_names(world, out, count: int = 5) -> None:
+    """Кто в этом мире вышел в величайшие — и чем он это заслужил.
+
+    Порядок — по весу в истории, а не по титулу: пахарь, спасший город,
+    стоит впереди государя без дел. Поэтому у каждого имени печатается
+    не должность, а след: державы, города, веры, законы, вещи, сказания
+    и потомки, которые после него остались.
+    """
+    out("=" * 78)
+    out("ПЯТЬ ВЕЛИЧАЙШИХ ИМЁН")
+    out("=" * 78)
+    weights = [item for item in world.renowns.values()
+               if item.figure_id in world.figures]
+    if not weights:
+        out("  За всю историю мир не взвесил ни одного имени.")
+        out("")
+        return
+    weights.sort(key=lambda item: (-item.level, -item.score, -item.peak_level,
+                                   item.born_year))
+    out("  Взвешено имён: %d из %d личностей; в высших ступенях (9–10): %d."
+        % (len(world.renowns), len(world.figures),
+           sum(1 for item in world.renowns.values() if item.level >= 9)))
+    out("")
+    for place, weight in enumerate(weights[:count], start=1):
+        figure = world.figures[weight.figure_id]
+        out("  %d. %s — ступень %d, %s"
+            % (place, figure.name, weight.level,
+               renown_cat.LEVEL_NAMES.get(weight.level, "")))
+        out("       %s" % renown_cat.level_about(weight.level, figure.sex))
+        out("       %s, %s; счёт дел %.1f"
+            % (race_name(figure.race_id), figure.lifespan_text(),
+               weight.score))
+        if weight.peak_level != weight.level:
+            out("       выше всего стоял%s на %d ступени (%d год), потом осел"
+                % ("а" if figure.sex == "f" else "", weight.peak_level,
+                   weight.peak_year))
+        if weight.roles:
+            out("       в историю вош%s как: %s"
+                % ("ла" if figure.sex == "f" else "ёл",
+                   ", ".join(renown_cat.role_names(weight.roles, figure.sex))))
+        if weight.influence:
+            out("       чем повлиял%s: %s"
+                % ("а" if figure.sex == "f" else "",
+                   ", ".join("%s %d" % (name, value) for name, value
+                             in sorted(weight.influence.items(),
+                                       key=lambda pair: (-pair[1], pair[0]))[:5])))
+        if weight.climax:
+            out("       вершина: %d год — %s"
+                % (int(weight.climax.get("год", 0)),
+                   weight.climax.get("что", "")))
+        if weight.destiny:
+            out("       судьба: %s — %s"
+                % (renown_cat.destiny_name(weight.destiny, figure.sex),
+                   renown_cat.destiny_about(weight.destiny, figure.sex)))
+        out("       слава при жизни %d из ста, помнят теперь %d%s"
+            % (weight.fame, weight.memory,
+               " — великого забыли" if weight.forgotten else ""))
+        alive = [item for item in weight.footprint if item.get("жив")]
+        dead = [item for item in weight.footprint if not item.get("жив")]
+        # О потомках говорят иначе: род продолжается или прервался.
+        kin = renown_cat.FOOT_KIN
+        if alive:
+            out("       стоит до сих пор: %s"
+                % "; ".join("%s — %s" % (item.get("вид", ""), item.get("что", ""))
+                            for item in alive[:4]))
+        if dead:
+            out("       этого больше нет: %s"
+                % "; ".join("%s — %s%s"
+                            % (item.get("вид", ""), item.get("что", ""),
+                               " (род прервался)" if item.get("вид") == kin
+                               else "")
+                            for item in dead[:3]))
+        for voice in (renown_cat.AS_WAS, renown_cat.AS_JUDGED):
+            line = (weight.voices or {}).get(voice)
+            if line:
+                out("       %-14s %s" % (voice + ":", line))
+        out("")
+
+
+def peoples_gone(world, out) -> None:
+    """Народы, которых в мире больше нет: кто, когда и как ушёл.
+
+    Уход народа — не строка в сводке, а событие с виновником: одних
+    добила беда, других не добил никто, они просто угасли. Отдельно
+    считаются народы внутри расы: те не вымирают, а растворяются в
+    чужой речи и чужом обычае.
+    """
+    out("=" * 78)
+    out("НАРОДЫ, УШЕДШИЕ ИЗ МИРА")
+    out("=" * 78)
+    gone = world.notes.get("народов больше нет") or {}
+    peaks = world.notes.get("народ в лучший век") or {}
+    told = {}
+    for event in world.events:
+        if event.kind == "race_gone" and event.race_id:
+            told[event.race_id] = event
+    if not gone:
+        out("  Ни один народ не ушёл из мира: все, кто проснулся, дожили "
+            "до конца истории.")
+    for race_id, year in sorted(gone.items(), key=lambda pair: pair[1]):
+        race = RACES_BY_ID.get(race_id)
+        if race is None:
+            continue
+        dawn = world.race_awakening.get(race_id, 0)
+        peak = int(peaks.get(race_id, 0))
+        lived = int(year) - dawn
+        out("  • %s — проснулись в %d году, ушли в %d (прожили %d %s)"
+            % (race.name, dawn, int(year), lived,
+               _plural(lived, "год", "года", "лет")))
+        out("       в лучшую пору их было %s" % _souls(peak))
+        event = told.get(race_id)
+        if event is None:
+            out("       ушли тихо: народом они стать так и не успели, и "
+                "отдельного события летопись им не пишет")
+        else:
+            out("       летопись: %s" % event.title)
+            for line in event.text.split(". "):
+                if line.strip():
+                    out("         %s" % line.strip().rstrip(".") + ".")
+        where = [folk.name for folk in world.folks.values()
+                 if folk.race_id == race_id][:4]
+        if where:
+            out("       их народы: %s" % ", ".join(where))
+        out("")
+
+    dissolved = [folk for folk in world.folks.values()
+                 if folk.status != ACTIVE]
+    if dissolved:
+        dissolved.sort(key=lambda folk: -folk.population)
+        out("  А внутри рас народы не вымирают, а растворяются: таких %d."
+            % len(dissolved))
+        for folk in dissolved[:5]:
+            race = RACES_BY_ID.get(folk.race_id)
+            end = folk.ended.year if folk.ended else world.total_years
+            out("     • %s (%s) — %d—%d, прожили %d %s"
+                % (folk.name, race.name if race else "?", folk.born.year,
+                   end, end - folk.born.year,
+                   _plural(end - folk.born.year, "год", "года", "лет")))
+        out("")
+
+
+def oldest_town(world, out) -> None:
+    """Город, простоявший дольше всех: вся его жизнь от причины до нрава."""
+    out("=" * 78)
+    out("САМЫЙ СТАРЫЙ ГОРОД")
+    out("=" * 78)
+    if not world.settlements:
+        out("  Городов в этом мире не построили.")
+        out("")
+        return
+
+    def span(settlement):
+        end = (settlement.ended.year if settlement.ended is not None
+               else world.total_years)
+        return end - settlement.founded.year
+
+    settlements = sorted(world.settlements.values(),
+                         key=lambda item: (-span(item), item.founded.ordinal))
+    settlement = settlements[0]
+    first = min(world.settlements.values(),
+                key=lambda item: item.founded.ordinal)
+    town = world.town_of(settlement.id)
+
+    region = world.regions.get(settlement.region_id)
+    out("  %s — основан в %d году, %s"
+        % (settlement.full_name, settlement.founded.year,
+           "стоит до сих пор (%d лет)" % span(settlement)
+           if settlement.status == ACTIVE
+           else "стоял %d лет и кончился в %d (%s)"
+           % (span(settlement), settlement.ended.year,
+              settlement.end_reason or "неизвестно от чего")))
+    out("       земля: %s; раса: %s; жителей сейчас: %d"
+        % (region.name if region else "?", race_name(settlement.race_id),
+           settlement.population if settlement.status == ACTIVE else 0))
+    if first.id != settlement.id:
+        out("       (а самый первый город мира — %s, поставлен в %d году)"
+            % (first.full_name, first.founded.year))
+    polity = world.polities.get(settlement.polity_id)
+    if polity is not None:
+        out("       держава: %s%s" % (polity.full_name,
+                                      " (столица)" if settlement.is_capital
+                                      else ""))
+    if settlement.landmarks:
+        out("       приметы: %s" % ", ".join(settlement.landmarks))
+    out("")
+
+    if town is None:
+        out("  Биографии у города нет: он слишком мал, чтобы летопись "
+            "взялась за его жизнь.")
+        out("")
+        return
+
+    origin = township_cat.ORIGINS_BY_KEY.get(town.origin)
+    if origin is not None:
+        out("       встал тут потому, что %s" % origin.about)
+    if town.trades:
+        chain = []
+        for item in town.trades:
+            chain.append("%s (%d—%s)" % (item.get("чем", "?"),
+                                         int(item.get("с", 0)),
+                                         int(item["по"]) if item.get("по")
+                                         else "…"))
+        out("       чем кормился: %s" % " → ".join(chain[:6]))
+    if town.weak:
+        out("       держится на том, что не вечно: %s" % town.weak)
+    if town.districts:
+        out("       концы города: %s"
+            % ", ".join("%s (%d)" % (item.get("конец", "?"),
+                                     int(item.get("год", 0)))
+                        for item in town.districts[:6]))
+    if town.layers:
+        out("       под ногами: %s"
+            % "; ".join("%s (%d)" % (item.get("слой", "?"),
+                                     int(item.get("год", 0)))
+                        for item in town.layers[:4]))
+    if town.troubles:
+        out("       тяготы: %s"
+            % "; ".join("%s (%d—%s)" % (item.get("тягота", "?"),
+                                        int(item.get("с", 0)),
+                                        int(item["по"]) if item.get("по")
+                                        else "до сих пор")
+                        for item in town.troubles[-4:]))
+    for secret in town.secrets:
+        # Тайна живёт на пяти уровнях разом: что знают все, что говорят
+        # и что было на самом деле. Последнее в городе знают редко.
+        out("       тайна «%s»: все знают — %s; говорят — %s"
+            % (secret.get("тайна", "?"), secret.get(township_cat.PUBLIC, "?"),
+               secret.get(township_cat.RUMOUR, "?")))
+        out("           а было: %s%s"
+            % (secret.get(township_cat.TRUTH, "?"),
+               " (вышло наружу в %d году)" % secret["раскрыта"]
+               if secret.get("раскрыта") else " — и этого в городе не знают"))
+    for line in township_texts.temper_lines(town.temper):
+        out("       нрав: %s" % line)
+    out("       людей: %s в лучшую пору (%d год), теперь город %s"
+        % (_souls(town.peak), town.peak_year, town.life))
+    marks = sorted(town.marks, key=lambda item: int(item.get("год", 0)))
+    if marks:
+        out("")
+        out("       ВЕХИ ГОРОДА")
+        for item in marks[:12]:
+            out("         [%5d] %s" % (int(item.get("год", 0)),
+                                       item.get("строка", item.get("вид", ""))))
+    out("")
+
+
+def worst_time(world, out) -> None:
+    """Четвёртый портрет: самое тяжёлое время мира и что от него осталось.
+
+    Числа говорят, не сломалось ли. Портрет говорит другое: стоит ли это
+    читать. Поэтому здесь не сводка по бедам, а одно время целиком — со
+    своими именами у разных народов, шрамами на земле, забытыми умениями
+    и спором о том, что это вообще было.
+    """
+    from . import disaster as dis
+
+    out("=" * 78)
+    out("САМОЕ ТЯЖЁЛОЕ ВРЕМЯ МИРА")
+    out("=" * 78)
+
+    eras = [item for item in world.crisis_eras.values() if item.name]
+    if not eras:
+        out("  Времён бед в этом мире не сложилось: беды приходили порознь.")
+        out("")
+        return
+    era = max(eras, key=lambda item: item.deaths)
+    out("  %s — %d–%d, бед %d, глубина %d" % (
+        era.name, era.start.year, era.end.year if era.end else era.start.year,
+        len(era.calamity_ids), era.depth))
+    if era.deaths:
+        out("       не досчитались за это время: %s" % _souls(era.deaths))
+    lands = [world.regions[rid].name for rid in era.regions
+             if rid in world.regions]
+    if lands:
+        out("       земли: %s" % ", ".join(lands[:8]))
+    for voice in era.voices:
+        out("       %s" % voice["оборот"])
+    out("")
+
+    for calamity_id in era.calamity_ids:
+        calamity = world.calamities.get(calamity_id)
+        if calamity is None:
+            continue
+        out("    %s (%d–%s), тяжесть %d, глубина %d" % (
+            calamity.name, calamity.start.year,
+            calamity.end.year if calamity.end else "—",
+            calamity.severity, calamity.depth))
+        line = "         причина: %s" % (calamity.cause or "не названа")
+        if calamity.cause_year and calamity.cause != dis.UNKNOWN_CAUSE:
+            line += ", тянется с %d года" % calamity.cause_year
+        out(line)
+        if calamity.cause_hidden and not calamity.cause_known:
+            out("         а на деле: %s — и мир этого не узнал"
+                % calamity.cause_hidden)
+        if calamity.trigger:
+            out("         спустило: %s" % calamity.trigger)
+        if calamity.chain_factor:
+            out("         выросло из прежней беды: %s" % calamity.chain_factor)
+        for omen in calamity.omens[:2]:
+            out("         знак (%d): %s — %s" % (
+                int(omen.get("год", 0)), omen.get("знак", ""),
+                omen.get("прочтение", "")))
+        for item in calamity.responses[:3]:
+            out("         решили (%d): %s — %s" % (int(item.get("год", 0)),
+                                                   item.get("решение", ""),
+                                                   item.get("итог", "")))
+        for item in calamity.mistakes[:2]:
+            out("         ошибка (%d): %s" % (int(item.get("год", 0)),
+                                              item.get("что", "")))
+        if calamity.damage:
+            bits = ["%s %d%%" % (kind, round(100 * value))
+                    for kind, value in calamity.damage.items() if value >= 0.05]
+            if bits:
+                out("         ущерб: %s" % ", ".join(bits))
+        if calamity.outcome:
+            out("         исходы: %s" % "; ".join(calamity.outcome.values()))
+        if calamity.gains:
+            out("         поднялись: %s" % "; ".join(calamity.gains[:2]))
+        for row in calamity.front[:8]:
+            region = world.regions.get(row["земля"])
+            line = "         фронт %d: %s — %s" % (
+                int(row.get("год", 0)),
+                region.name if region else row["земля"],
+                row.get("состояние", ""))
+            if row.get("чем"):
+                line += " (%s)" % row["чем"]
+            if row.get("роль"):
+                line += " | %s: %s" % (row["город"], row["роль"])
+            out(line)
+        for voice in dis.VERSIONS:
+            if voice in calamity.versions:
+                out("         %s: %s" % (voice, calamity.versions[voice]))
+        for scar_id in calamity.scar_ids:
+            scar = world.scars.get(scar_id)
+            if scar is None:
+                continue
+            out("         след: %s — %s%s" % (
+                scar.name, scar.state,
+                ("; " + "; ".join(scar.notes)) if scar.notes else ""))
+        for lore_id in calamity.lore_ids:
+            lore = world.lost_lore.get(lore_id)
+            if lore is None:
+                continue
+            out("         утрата: %s — %s (%s)" % (lore.kind, lore.about,
+                                                   lore.state))
+        out("")
+
+
+def nonhuman(world, out) -> None:
+    """Пятый портрет: тяжелейшее имя, которое не принадлежит человеку.
+
+    Летопись мерит людей, и от этого легко решить, что история — дело
+    людское. Этот портрет берёт того, кто людям не ровня: дракона,
+    владыку демонов, бога или зверя, — и показывает его тем же способом,
+    что и человека: откуда взялся, чего хотел, когда молчал, чем кончил
+    и что от него осталось.
+    """
+    from . import subject as sub
+
+    out("=" * 78)
+    out("НЕ ЧЕЛОВЕК, А ИСТОРИЧЕСКОЕ ЛИЦО")
+    out("=" * 78)
+
+    rows = [item for item in world.subjects.values()
+            if item.kind != sub.PEOPLE]
+    if not rows:
+        out("  В этом мире историю делали одни люди.")
+        out("")
+        return
+    weight = {name: index for index, name in enumerate(sub.RUNGS)}
+    item = max(rows, key=lambda one: (weight.get(one.rung, 0),
+                                      one.years_active, one.id))
+    she = getattr(item, "sex", "m") == "f"
+
+    def form(male, female):
+        """Историческим лицом бывает и она: «вернулся» тут не годится."""
+        return female if she else male
+
+    out("  %s — %s, %s" % (item.name, item.kind, item.rung))
+    out("    в летописи с %d года: %s" % (item.entered.year, item.entry_why))
+    line = "    %s: %s" % (
+        form("появился", "появилась"),
+        sub.form(sub.ORIGIN_FORMS.get(item.origin, item.origin),
+                 getattr(item, "sex", "m")) or "неизвестно как")
+    if item.origin_by:
+        line += "; позвал %s %s, ради того чтобы %s" % (
+            form("его", "её"), item.origin_by, item.origin_why)
+    out(line)
+    unclear = ["%s — %s" % (fact, state) for fact, state in item.facts.items()
+               if state not in (sub.FACT_KNOWN, sub.FACT_NONE)]
+    if unclear:
+        out("    о %s неясно: %s" % (form("нём", "ней"), "; ".join(unclear)))
+    out("    %s: %s" % (form("вмешивался", "вмешивалась"),
+        ", ".join("%d–%d" % (int(span.get("с", 0)), int(span.get("по", 0)))
+                  for span in item.spans)))
+    for quiet in item.quiet:
+        out("    %s %d–%s: %s" % (form("молчал", "молчала"),
+                                  int(quiet.get("с", 0)),
+                                  int(quiet.get("по", 0)) or "до конца",
+                                  quiet.get("отчего", "")))
+    # У бога это не желание, а мысль, ради которой он есть.
+    divine = item.kind == sub.GOD
+    out("    %s: %s%s" % ("ради чего %s есть" % form("он", "она")
+                          if divine else form("хотел", "хотела"),
+                          item.wish_first,
+                          (" → %s" % item.wish)
+                          if item.wish != item.wish_first else ""))
+    out("    %s: %s" % ("а мир принял эту мысль так" if divine
+                        else "и вышло из этого", item.wish_state))
+    for turn in item.temper_turns:
+        out("    %d: %s → %s, оттого что %s"
+            % (int(turn.get("год", 0)), turn.get("было", ""),
+               turn.get("стало", ""), turn.get("отчего", "")))
+    for mark in item.marks:
+        if int(mark.get("себе", 0)) > int(mark.get("мир", 0)):
+            out("    %d: %s — миру на %d, %s на %d"
+                % (int(mark.get("год", 0)), mark.get("что", ""),
+                   int(mark.get("мир", 0)), form("ему самому", "ей самой"),
+                   int(mark.get("себе", 0))))
+    out("    %s: %s%s" % (form("кончил", "кончила"),
+                          sub.form(sub.END_FORMS.get(item.end, item.end),
+                                   getattr(item, "sex", "m"))
+                          or item.status,
+                              (" (%d год)" % item.ended.year)
+                              if item.ended else ""))
+    if item.named_year:
+        out("    опознали только в %d году: %s"
+            % (item.named_year, item.named_how))
+    for row in item.legacy:
+        out("    осталось (%s): %s" % (row.get("род", ""), row.get("что", "")))
+    for who, what in item.told.items():
+        out("    %s: %s" % (who, what))
+    out("")
+
+
+def loudest(world, out) -> None:
+    """Шестой портрет: самое громкое, что вообще было в этом мире.
+
+    Срезы показывают, чем мир жил в пять случайных лет. Этот портрет
+    отвечает на другой вопрос — что из десяти тысяч лет человек стал бы
+    пересказывать: самую долгую и самую кровавую войну, державу, которая
+    поднялась выше всех, и беду, которой мир испугался сильнее прочих.
+    """
+    out("=" * 78)
+    out("САМОЕ ГРОМКОЕ В ИСТОРИИ")
+    out("=" * 78)
+
+    wars = [war for war in world.wars.values() if war.end is not None]
+    if not wars:
+        out("  Больших войн в этом мире не было.")
+    else:
+        longest = max(wars, key=lambda war: (war.years, war.deaths, war.id))
+        bloodiest = max(wars, key=lambda war: (war.deaths, war.years, war.id))
+        out("  САМАЯ ДОЛГАЯ ВОЙНА")
+        _war_lines(world, longest, out)
+        if bloodiest.id != longest.id:
+            out("")
+            out("  САМАЯ КРОВАВАЯ ВОЙНА")
+            _war_lines(world, bloodiest, out)
+        else:
+            out("      она же и самая кровавая")
+    out("")
+
+    polities = list(world.polities.values())
+    if not polities:
+        out("  Держав в этом мире не поднялось.")
+    else:
+        # «Величайшая» — не самая многолюдная и не самая долгая порознь:
+        # держава на три города, простоявшая девять тысяч лет, и держава
+        # на миллион душ, прожившая век, весят по-разному в разном. Здесь
+        # считается и то и другое, а рядом называется, чем именно она
+        # взяла.
+        def weight(polity):
+            years = _polity_years(world, polity)
+            return (polity.peak_population * (1.0 + years / 2000.0)
+                    + len(polity.settlement_ids) * 5000.0)
+
+        greatest = max(polities, key=lambda item: (weight(item), item.id))
+        out("  ВЕЛИЧАЙШАЯ ДЕРЖАВА ЗА ВСЮ ИСТОРИЮ")
+        _polity_lines(world, greatest, out)
+        oldest = max(polities, key=lambda item: (_polity_years(world, item),
+                                                 item.id))
+        if oldest.id != greatest.id:
+            out("      а дольше всех стояла другая: %s — %s"
+                % (oldest.full_name,
+                   years_text(_polity_years(world, oldest))))
+    out("")
+
+    calamities = list(world.calamities.values())
+    if not calamities:
+        out("  Больших бед мир не знал.")
+        out("")
+        return
+    worst = max(calamities, key=lambda item: (item.deaths, item.severity,
+                                              item.id))
+    out("  СТРАШНЕЙШАЯ БЕДА")
+    _calamity_lines(world, worst, out)
+    out("")
+
+
+def _war_lines(world, war, out) -> None:
+    """Одна война: кто, из-за чего, сколько лет и чем кончилась."""
+    attacker = world.polities.get(war.attacker_id)
+    defender = world.polities.get(war.defender_id)
+    out("      %s — %s против %s" % (
+        war.name, attacker.full_name if attacker else "?",
+        defender.full_name if defender else "?"))
+    out("      %d–%s, %s; повод: %s, цель: %s" % (
+        war.start.year, war.end.year if war.end else "не кончилась",
+        years_text(war.years), warfare.cause_label(war.cause),
+        warfare.AIM_NAMES.get(war.aim, war.aim)))
+    marks = ["сражений %d" % len(war.battle_ids)]
+    if war.deaths:
+        marks.append("погибло %s" % _souls(war.deaths))
+    if war.sieges:
+        marks.append("осад %d" % len(war.sieges))
+    if war.razed:
+        marks.append("городов сожжено %d" % war.razed)
+    if war.taken_ids:
+        marks.append("городов перешло %d" % len(war.taken_ids))
+    if war.fallen_ids:
+        marks.append("имён легло %d" % len(war.fallen_ids))
+    out("      %s" % "; ".join(marks))
+    if war.outcome:
+        out("      чем кончилась: %s%s" % (
+            war.outcome, ", мир «%s»" % war.peace_name if war.peace_name
+            else ""))
+
+
+def _polity_years(world, polity) -> int:
+    """Сколько лет держава простояла — до гибели или до конца летописи."""
+    end = polity.ended.year if polity.ended else world.total_years
+    return max(0, end - polity.founded.year)
+
+
+def _polity_lines(world, polity, out) -> None:
+    """Одна держава: чем взяла, кто её поднял и чем кончилась."""
+    capital = world.settlements.get(polity.capital_id)
+    faith = world.faiths.get(polity.faith_id)
+    founder = world.figures.get(polity.founder_id)
+    out("      %s — %s, %s" % (polity.full_name, race_name(polity.race_id),
+                               polity.form))
+    # «За всю жизнь» — это held_ids: нынешний список чистят от погибших
+    # городов и от тех, что отошли победителю, и у павшей державы он
+    # пуст, хотя владела она половиной материка.
+    ever = len(polity.held_ids) or len(polity.settlement_ids)
+    out("      %d–%s, %s; городов за всю жизнь %d (сейчас %d), "
+        "в лучшую пору %s" % (
+            polity.founded.year,
+            polity.ended.year if polity.ended else "стоит и поныне",
+            years_text(_polity_years(world, polity)), ever,
+            len(polity.settlement_ids), _souls(polity.peak_population)))
+    marks = []
+    if capital is not None:
+        marks.append("престол в городе по имени %s" % capital.name)
+    if faith is not None:
+        marks.append("вера «%s»" % faith.name)
+    if founder is not None:
+        marks.append("поднял %s" % founder.name)
+    if marks:
+        out("      %s" % "; ".join(marks))
+    wars = "войн выиграно %d, проиграно %d" % (polity.wars_won,
+                                               polity.wars_lost)
+    if polity.conquests:
+        wars += "; завоеваний %d" % len(polity.conquests)
+    out("      %s" % wars)
+    if polity.ended is not None and polity.end_reason:
+        out("      чем кончилась: %s" % polity.end_reason)
+
+
+def _calamity_lines(world, item, out) -> None:
+    """Одна беда: чем была, кого выкосила и чем кончилась."""
+    out("      %s — %s, %s" % (item.name,
+                               KIND_NAMES.get(item.kind, item.kind),
+                               SEVERITY_NAMES.get(item.severity,
+                                                  str(item.severity))))
+    out("      %d–%s, %s" % (
+        item.start.year, item.end.year if item.end else "не кончилась",
+        years_text(max(1, (item.end.year if item.end else world.total_years)
+                       - item.start.year))))
+    lands = [world.regions[rid].name for rid in item.region_ids
+             if rid in world.regions]
+    if lands:
+        out("      земли: %s%s" % (", ".join(lands[:6]),
+                                   " и ещё %d" % (len(lands) - 6)
+                                   if len(lands) > 6 else ""))
+    marks = ["унесло %s" % _souls(item.deaths)]
+    if item.settlements_lost:
+        marks.append("городов потеряно %d" % item.settlements_lost)
+    if item.polities_lost:
+        marks.append("держав пало %d" % item.polities_lost)
+    leader = world.figures.get(item.leader_id)
+    if leader is not None:
+        marks.append("во главе %s" % leader.name)
+    out("      %s" % "; ".join(marks))
+    if item.resolution:
+        out("      чем кончилась: %s" % item.resolution)
+    era = None
+    for crisis in world.crisis_eras.values():
+        if item.id in crisis.calamity_ids and crisis.name:
+            era = crisis
+            break
+    if era is not None:
+        out("      её помнят как часть времени бед: «%s» (%d–%s)"
+            % (era.name, era.start.year,
+               era.end.year if era.end else "не кончилось"))
+
+
+def land_portrait(world, out) -> None:
+    """Разбор самой карты: что это за земля, прежде чем на ней начнётся история.
+
+    Летопись рассказывает, кто где жил, но не говорит главного о мире:
+    холодный он или жаркий, водный или сухой, из одного материка или из
+    россыпи островов. Это читается прямо по слоям карты — и одной
+    страницей объясняет половину того, почему история пошла именно так.
+    """
+    link = getattr(world, "map_link", None)
+    wmap = getattr(link, "wmap", None) if link is not None else None
+    if wmap is None:
+        return          # мир без карты: разбирать нечего
+
+    from . import worldmap as wmod
+    from .mapregions import FEATURE_NOUNS, translit
+
+    out("=" * 78)
+    out("КАРТА МИРА: ЧТО ЭТО ЗА ЗЕМЛЯ")
+    out("=" * 78)
+
+    size = wmap.size
+    land = [i for i in range(size) if wmap.is_land(i)]
+    if not land:
+        out("  Суши на этой карте нет вовсе.")
+        out("")
+        return
+    share = len(land) * 100.0 / max(1, size)
+    out("  %d×%d гексов, суши %.1f%% (%d гексов), %s по долготе" % (
+        wmap.width, wmap.height, share, len(land),
+        "замкнута" if wmap.wrap else "разомкнута"))
+
+    # --- материки и острова ---
+    masses = Counter()
+    for index in land:
+        masses[wmap.value(wmod.L_LANDREG, index, -1)] += 1
+    masses.pop(-1, None)
+    if masses:
+        biggest = masses.most_common(1)[0][1]
+        islands = sum(1 for value in masses.values() if value < 40)
+        out("  Массивов суши %d; крупнейший держит %.0f%% всей земли, "
+            "мелких островов %d" % (len(masses), biggest * 100.0 / len(land),
+                                    islands))
+
+    # --- тепло и влага ---
+    temps = [wmap.value(wmod.L_TEMP, index, 0.0) for index in land]
+    wets = [wmap.value(wmod.L_MOIST, index, 0.0) for index in land]
+    bands = Counter()
+    for value in temps:
+        if value < -5:
+            bands["мороз"] += 1
+        elif value < 5:
+            bands["холод"] += 1
+        elif value < 15:
+            bands["прохлада"] += 1
+        elif value < 25:
+            bands["тепло"] += 1
+        else:
+            bands["зной"] += 1
+    mean_t = sum(temps) / len(temps)
+    mean_w = sum(wets) / len(wets)
+    out("  Тепло: в среднем %+.1f °C (от %+.0f до %+.0f); %s" % (
+        mean_t, min(temps), max(temps),
+        ", ".join("%s %.0f%%" % (name, count * 100.0 / len(land))
+                  for name, count in bands.most_common())))
+    dry = sum(1 for value in wets if value < 0.3)
+    wet = sum(1 for value in wets if value > 0.6)
+    out("  Влага: в среднем %.2f; сухих земель %.0f%%, мокрых %.0f%%" % (
+        mean_w, dry * 100.0 / len(land), wet * 100.0 / len(land)))
+
+    # --- чем это заросло ---
+    biomes = Counter()
+    for index in land:
+        biomes[wmap.biome_name(wmap.value(wmod.L_BIOME, index, 0))] += 1
+    out("  Биомы: %s" % ", ".join(
+        "%s %.0f%%" % (name, count * 100.0 / len(land))
+        for name, count in biomes.most_common(6)))
+
+    # --- вода ---
+    rivers = {wmap.value(wmod.L_RIVERREG, index, -1) for index in land
+              if wmap.is_river(index)}
+    rivers.discard(-1)
+    lakes = sum(1 for index in range(size) if wmap.is_lake(index))
+    coast = sum(1 for index in land if wmap.is_coast(index))
+    out("  Вода: речных бассейнов %d, речных гексов %d, озёрных %d; "
+        "берег у %.0f%% суши" % (
+            len(rivers),
+            sum(1 for index in land if wmap.is_river(index)), lakes,
+            coast * 100.0 / len(land)))
+
+    # --- горы и огонь ---
+    ranges = {wmap.value(wmod.L_RANGEREG, index, -1) for index in land}
+    ranges.discard(-1)
+    highs = sorted(wmap.peaks, key=lambda item: -int(item.get("m", 0)))[:3]
+    line = "  Горы: хребтов %d" % len(ranges)
+    if highs:
+        line += "; выше всех — %s" % ", ".join(
+            "%s (%d м)" % (_map_name(item.get("name", ""), translit),
+                           item.get("m", 0))
+            for item in highs)
+    out(line)
+    live = [item for item in wmap.volcanoes
+            if item.get("status") != "extinct"]
+    if wmap.volcanoes:
+        out("  Вулканов %d, из них живых %d" % (len(wmap.volcanoes),
+                                                len(live)))
+
+    # --- чем эта земля кормит и чем грозит ---
+    fert = [wmap.value(wmod.L_FERTILITY, index, 0.0) for index in land]
+    good = sum(1 for value in fert if value > 0.6)
+    risks = [wmap.value(wmod.L_EVENTCHANCE, index, 0) for index in land]
+    wild = [wmap.value(wmod.L_SAVAGERY, index, 0) for index in land]
+    out("  Земля: плодородие в среднем %.2f, тучных земель %.0f%%; "
+        "дикость %.0f из 255; риск местных бед %.0f из 255" % (
+            sum(fert) / len(fert), good * 100.0 / len(land),
+            sum(wild) / float(len(wild)), sum(risks) / float(len(risks))))
+
+    magic = [wmap.value(wmod.L_MAGIC, index, 0.0) for index in land]
+    light = sum(1 for value in magic if value > 0.35)
+    dark = sum(1 for value in magic if value < -0.35)
+    if light or dark:
+        out("  Магия: светлых мест %.0f%%, тёмных %.0f%%" % (
+            light * 100.0 / len(land), dark * 100.0 / len(land)))
+
+    # --- как карта это назвала ---
+    named = {}
+    for feature in wmap.features:
+        noun = FEATURE_NOUNS.get(feature.get("type"))
+        if not noun:
+            continue
+        named.setdefault(noun, []).append(
+            (int(feature.get("area", 0)), translit(feature.get("name", ""))))
+    for noun in ("океан", "море", "материк", "большой остров", "хребет"):
+        rows = sorted(named.get(noun, ()), reverse=True)[:3]
+        if rows:
+            out("  %s: %s" % (noun.capitalize(),
+                              ", ".join(
+                                  "%s (%d %s)" % (name, area,
+                                                  _plural(area, "гекс",
+                                                          "гекса", "гексов"))
+                                  for area, name in rows)))
+
+    # --- что с этим миром делало время ---
+    events = wmap.climate.get("events") or []
+    if events:
+        rows = sorted(events, key=lambda item: int(item.get("start", 0)))
+        out("  Климат по векам: %d перемен — %s" % (
+            len(rows),
+            ", ".join("%s (%d–%d)" % (item.get("name", "?"),
+                                      int(item.get("start", 0)),
+                                      int(item.get("start", 0))
+                                      + int(item.get("dur", 0)))
+                      for item in rows[:5])))
+
+    out("  Коротко: %s" % _land_verdict(mean_t, mean_w, share, biomes,
+                                        len(land)))
+    out("")
+
+
+def _map_name(name: str, translit) -> str:
+    """Имя с карты по-русски. «г. Stenumark» — это «г.» плюс латынь.
+
+    Готовая кириллица в начале обманывает общий перевод имён: он видит
+    русскую букву и решает, что переводить нечего. Поэтому сокращение
+    отделяется, а переводится только само имя.
+    """
+    text = str(name or "")
+    for mark in ("г. ", "влк. ", "оз. ", "р. "):
+        if text.startswith(mark):
+            return mark + translit(text[len(mark):])
+    return translit(text)
+
+
+def _land_verdict(mean_t: float, mean_w: float, land_share: float,
+                  biomes, land: int) -> str:
+    """Одна строка, по которой мир узнаётся: холодный, сухой, островной."""
+    marks = []
+    if mean_t < 2:
+        marks.append("холодный мир")
+    elif mean_t < 12:
+        marks.append("прохладный мир")
+    elif mean_t < 22:
+        marks.append("умеренный мир")
+    else:
+        marks.append("жаркий мир")
+    if mean_w < 0.3:
+        marks.append("сухой")
+    elif mean_w > 0.55:
+        marks.append("мокрый")
+    if land_share < 20:
+        marks.append("воды на нём вчетверо больше суши")
+    elif land_share > 45:
+        marks.append("суши на нём больше, чем воды")
+    top = biomes.most_common(1)[0] if biomes else None
+    if top is not None:
+        marks.append("больше всего земли занято тем, что зовётся «%s»"
+                     % top[0])
+    return ", ".join(marks)
+
+
+def longest_feast(world, out) -> None:
+    """Портрет дня, который держался дольше всех.
+
+    Числа говорят, не сломалось ли; портрет — стоит ли это читать. У
+    праздника читать стоит одно: разницу между тем, с чего он начался, и
+    тем, чем стал. Поэтому берётся не самый громкий день, а самый
+    долгий — у него этой разницы больше всего.
+    """
+    from . import holidays as cat
+    from . import narrative_holiday as texts
+
+    out("=" * 78)
+    out("ДЕНЬ, КОТОРЫЙ ДЕРЖАЛСЯ ДОЛЬШЕ ВСЕХ")
+    out("=" * 78)
+    if not world.holidays:
+        out("  Этот мир не завёл ни одного дня, к которому стоило бы "
+            "возвращаться.")
+        out("")
+        return
+
+    def span(item):
+        end = item.last_seen or item.born.year
+        return end - item.born.year
+
+    rows = sorted(world.holidays.values(),
+                  key=lambda item: (-span(item), item.id))
+    holiday = rows[0]
+    out("  Держался %d лет: с %d года и до %d."
+        % (span(holiday), holiday.born.year,
+           holiday.last_seen or holiday.born.year))
+    for line in texts.portrait(world, holiday):
+        out("  " + line)
+    if holiday.lost_why:
+        live = holiday.live_rites
+        if live:
+            rite = cat.RITES.get(live[0].get("обряд", ""))
+            if rite is not None:
+                out("")
+                out("  Отчего так делали: %s." % rite.why)
+                out("  Что делают теперь: %s." % (rite.form or rite.what))
+                out("  Чем это объясняют: %s." % rite.lost)
+    out("")
+
+
+def weightiest_place(world, out) -> None:
+    """Портрет места, вокруг которого больше всего всего произошло.
+
+    Числа говорят, не сломалось ли; портрет — стоит ли это читать. У
+    места читать стоит две вещи: каково в нём и что с ним было. Первое
+    объясняет второе — город встал у брода не случайно, а брод никуда
+    не делся.
+
+    Берётся не самый красивый гекс, а самый весомый: тот, у которого
+    длиннее всех летопись. Таких в мире единицы, и это само по себе
+    ответ на вопрос, не объявил ли движок весомым каждый камень.
+    """
+    from . import landlore
+
+    out("=" * 78)
+    out("МЕСТО, ВОКРУГ КОТОРОГО БОЛЬШЕ ВСЕГО ПРОИЗОШЛО")
+    out("=" * 78)
+    best = landlore.best_hex(world)
+    if best < 0:
+        out("  Этот мир построен без карты: мест в нём нет, одни земли.")
+        out("")
+        return
+    rows = landlore.chapter(world, best)
+    # Летопись места на долгой истории бывает в полтораста строк. Для
+    # портрета довольно начала: условия, вес и первые полвека.
+    for line in rows[:70]:
+        out("  " + line if line else "")
+    if len(rows) > 70:
+        out("  … и ещё %d строк — смотрите раздел «Земля»."
+            % (len(rows) - 70))
+    out("")
+
+
+def best_wonder(world, out) -> None:
+    """Портрет самого громкого чуда мира — и того, что с ним стало.
+
+    Чудес в мире единицы, и по одному из них видно сразу всё: нашёл его
+    генератор в готовой земле или выдумал, нашлось ли основание, кроме
+    величины, ходила ли слава и чем это кончилось. Берётся не нынешнее
+    первое, а то, о котором знали дальше всех за всю историю: чудо,
+    которое уже забыли, рассказывает о мире больше целого.
+    """
+    from . import wonders as cat
+    from . import narrative_wonders as texts
+
+    out("=" * 78)
+    out("ЧУДО, О КОТОРОМ ЗНАЛИ ДАЛЬШЕ ВСЕХ")
+    out("=" * 78)
+    if not world.wonders:
+        out("  Чудом в этом мире не назвали ничего — и так бывает.")
+        out("")
+        return
+    rows = sorted(world.wonders.values(),
+                  key=lambda item: (-item.peak_fame, item.born.year, item.id))
+    wonder = rows[0]
+    region = world.regions.get(wonder.region_id)
+    out("  %s" % texts.head_line(wonder))
+    out("  чудо %s; земля по имени %s"
+        % (cat.kind_name(wonder.kind),
+           region.name if region is not None else "неизвестная"))
+    out("  названо чудом в %d году — %s"
+        % (wonder.born.year, cat.ground_about(wonder.ground)))
+    out("  %s" % wonder.measure)
+    made = texts.made_line(world, wonder)
+    if made:
+        out("  %s" % made)
+    out("  слава: %s" % texts.fame_line(wonder))
+    out("  ходить туда: %s" % texts.access_line(wonder))
+    out("  ныне: %s (с %d года)"
+        % (cat.STATES_BY_KEY.get(wonder.state, wonder.state),
+           texts.state_since(wonder)))
+    for mark in wonder.marks:
+        out("    %s" % texts.mark_line(mark))
+    for row in wonder.voices:
+        out("    %s" % texts.voice_line(row))
+    if wonder.lists:
+        out("  в списках: %s" % "; ".join(wonder.lists))
+    if wonder.claimed and wonder.truth:
+        out("  а чудом оно не было: %s" % wonder.truth)
+    out("  всего чудес в мире: %d, из них утрачено или забыто %d"
+        % (len(rows), sum(1 for item in rows if item.lost)))
+    out("")
+
+
+def worst_dominion(world, out) -> None:
+    """Портрет владения, под которым жило больше всего душ.
+
+    По одному владению видно всю подсистему разом: нашёлся ли ему
+    хозяин в готовом мире, названа ли причина, которую можно показать
+    пальцем в летописи, кто под ним жил и чем платил, поднимались ли
+    против него — и чем всё кончилось. Берётся самое людное, а не
+    самое долгое: владение без подданных — опасное место, а не власть,
+    и портрет из него не выйдет.
+    """
+    from . import dominion as cat
+    from . import narrative_dominion as texts
+
+    out("=" * 78)
+    out("ВЛАДЕНИЕ ЧУДОВИЩА")
+    if not world.dominions:
+        out("  Ни одна земля в этом мире не досталась нечеловеку.")
+        return
+    rows = sorted(world.dominions.values(),
+                  key=lambda item: (-item.souls, -item.lands, item.id))
+    hold = rows[0]
+    out("  %s" % texts.head_line(hold))
+    region = world.regions.get(hold.seat_region)
+    out("  земля: %s; земель под ним %d"
+        % (region.name if region is not None else "неизвестна", hold.lands))
+    years = "%d" % hold.began.year
+    years += " — %d" % hold.ended.year if hold.ended is not None \
+        else " — и стоит до сих пор"
+    out("  годы: %s" % years)
+    out("  отчего: %s" % hold.origin_why)
+    out("  держит: %s" % texts.hold_line(hold))
+    out("  нужно ему: %s — %s" % (cat.motive_word(hold.motive),
+                                  cat.motive_about(hold.motive)))
+    for row in hold.folk:
+        out("    под ним: %s" % texts.folk_line(world, row))
+    tribute = texts.tribute_line(hold)
+    if tribute:
+        out("    %s" % tribute)
+    for row in hold.edicts:
+        out("    правило: %s" % texts.edict_line(row))
+    need = texts.need_line(hold)
+    if need:
+        out("    живёт этим: %s" % need)
+    tolerated = texts.tolerated_line(hold)
+    if tolerated:
+        out("    отчего терпят: %s" % tolerated)
+    for row in hold.risings:
+        out("    %s" % texts.rising_line(world, row))
+    for voice, said in sorted(hold.told.items()):
+        out("    %s" % texts.voice_line(voice, said))
+    truth = texts.truth_line(hold)
+    if truth:
+        out("    а на деле: %s" % truth)
+    if hold.end:
+        out("  конец: %s — %s"
+            % (cat.ENDS_BY_KEY[hold.end][0], hold.end_how))
+
+
+def world_verdict(world, out) -> None:
+    """Что это за мир — одной страницей, прежде всего остального.
+
+    Числа в итоге говорят, сколько в мире держав и бед. Но человек,
+    открывший летопись, спрашивает другое: холодно тут или жарко, много
+    ли суши, можно ли вообще тут жить, чем этот мир опасен, есть ли в
+    нём волшебство и кто его населяет. Всё это в генераторе уже решено
+    — судьбой мира, картой, складом бед, началом, — но лежит порознь, и
+    собрать это в приговор никто не брался.
+
+    Раздел нарочно стоит первым и говорит словами, а не числами: числа
+    о той же земле есть ниже, в разборе карты. И он собирается даже у
+    мира без карты — там, где слоёв нет, приговор выносится по тому,
+    из каких земель мир составлен.
+    """
+    out("=" * 78)
+    out("ЧТО ЭТО ЗА МИР")
+    out("=" * 78)
+    for line in _climate_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _life_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _danger_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _magic_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _folk_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _origin_lines(world):
+        out("  %s" % line)
+    out("")
+
+
+def wm_magic() -> int:
+    """Номер слоя магии — из самого читателя карт, а не числом в коде."""
+    from . import worldmap as wm
+    return wm.L_MAGIC
+
+
+def _wmap_of(world):
+    link = getattr(world, "map_link", None)
+    return getattr(link, "wmap", None) if link is not None else None
+
+
+def _climate_lines(world) -> list:
+    """Холодный он или жаркий, мокрый или сухой, много ли в нём суши."""
+    wmap = _wmap_of(world)
+    if wmap is None:
+        return _climate_by_terrain(world)
+
+    size = wmap.size
+    land = [index for index in range(size) if wmap.is_land(index)]
+    if not land:
+        return ["Суши в этом мире нет вовсе."]
+    temps = [wmap.value(1, index) for index in land]
+    wets = [wmap.value(2, index) for index in land]
+    mean_t = sum(temps) / len(temps)
+    mean_w = sum(wets) / len(wets)
+    frozen = sum(1 for value in temps if value < 0) * 100.0 / len(temps)
+    hot = sum(1 for value in temps if value > 25) * 100.0 / len(temps)
+    dry = sum(1 for value in wets if value < 0.3) * 100.0 / len(wets)
+    share = len(land) * 100.0 / max(1, size)
+
+    said = []
+    if mean_t < 2:
+        said.append("Мир холодный")
+    elif mean_t < 12:
+        said.append("Мир прохладный")
+    elif mean_t < 22:
+        said.append("Мир умеренный")
+    else:
+        said.append("Мир жаркий")
+    said.append("в среднем на суше %+.1f °C" % mean_t)
+    if frozen >= 20:
+        said.append("пятая часть земли и больше лежит под морозом (%.0f%%)"
+                    % frozen)
+    elif frozen < 3 and hot >= 25:
+        said.append("мороза тут не знают вовсе, а зной стоит на %.0f%% земли"
+                    % hot)
+    lines = [", ".join(said) + "."]
+
+    wet_said = "сухой" if mean_w < 0.3 else \
+        ("мокрый" if mean_w > 0.55 else "ни сухой, ни мокрый")
+    lines.append("По воде он %s: влага в среднем %.2f, сухих земель %.0f%%."
+                 % (wet_said, mean_w, dry))
+
+    if share < 15:
+        about = "воды тут впятеро больше суши"
+    elif share < 25:
+        about = "воды втрое больше суши"
+    elif share < 42:
+        about = "воды заметно больше суши"
+    elif share < 55:
+        about = "воды и суши примерно поровну"
+    elif share < 70:
+        about = "суши больше, чем воды"
+    else:
+        about = "это мир суши, а не моря"
+    masses = _land_masses(world)
+    lines.append("Суши %.0f%% карты — %s." % (share, about))
+    if masses:
+        biggest, count = masses
+        if count == 1:
+            lines.append("Вся земля собрана в один материк.")
+        elif biggest >= 70:
+            lines.append("Земля собрана в один большой материк (%.0f%% всей "
+                         "суши) и ещё %d %s вокруг."
+                         % (biggest, count - 1,
+                            _plural(count - 1, "клочок", "клочка",
+                                    "клочков")))
+        elif biggest >= 40:
+            lines.append("Есть главный материк (%.0f%% суши), а остальное "
+                         "раздроблено на %d %s."
+                         % (biggest, count - 1,
+                            _plural(count - 1, "массив", "массива",
+                                    "массивов")))
+        else:
+            lines.append("Единого материка нет: земля разбита на %d %s, и "
+                         "крупнейший держит лишь %.0f%% её."
+                         % (count,
+                            _plural(count, "массив", "массива", "массивов"),
+                            biggest))
+    return lines
+
+
+def _land_masses(world):
+    """Доля крупнейшего массива суши и сколько их всего.
+
+    Считается по номерам земель карты (слой 20): они и есть связные
+    куски суши, которые картогенератор уже разобрал.
+    """
+    wmap = _wmap_of(world)
+    if wmap is None:
+        return None
+    masses = Counter()
+    try:
+        layer = wmap.layer(20)
+    except Exception:                                     # noqa: BLE001
+        return None
+    for index in range(wmap.size):
+        if not wmap.is_land(index):
+            continue
+        masses[layer[index]] += 1
+    if not masses:
+        return None
+    total = sum(masses.values())
+    return masses.most_common(1)[0][1] * 100.0 / total, len(masses)
+
+
+def _climate_by_terrain(world) -> list:
+    """Приговор миру без карты: по тому, из каких земель он составлен.
+
+    Слоёв тут нет, и выдумывать их нельзя. Зато есть сами земли, и по
+    их смеси видно то же самое: мир из тундры и льдов студёный, мир из
+    пустынь и джунглей жаркий.
+    """
+    kinds = Counter(region.terrain for region in world.regions.values())
+    total = max(1, sum(kinds.values()))
+    cold = (kinds["тундра"]) * 100.0 / total
+    hot = (kinds["пустыня"] + kinds["джунгли"]) * 100.0 / total
+    wet = (kinds["болото"] + kinds["джунгли"] + kinds["побережье"]) \
+        * 100.0 / total
+    water = (kinds["острова"] + kinds["побережье"]) * 100.0 / total
+    lines = ["Карты у этого мира нет — он собран из %d %s, и говорить о нём "
+             "можно только по ним."
+             % (total, _plural(total, "земли", "земель", "земель"))]
+    if cold >= 25:
+        said = "Мир студёный: тундры в нём %.0f%%" % cold
+    elif hot >= 35:
+        said = "Мир жаркий: пустынь и джунглей в нём %.0f%%" % hot
+    else:
+        said = "Мир умеренный: ни тундра, ни пустыня в нём не главные"
+    lines.append(said + ".")
+    lines.append("Мокрых земель — болот, джунглей и побережий — %.0f%%; "
+                 "морем и островами тронуто %.0f%%." % (wet, water))
+    top = ", ".join("%s (%d)" % (name, count)
+                    for name, count in kinds.most_common(4))
+    lines.append("Чаще всего тут встречается: %s." % top)
+    return lines
+
+
+def _life_lines(world) -> list:
+    """Можно ли в нём жить: сколько народу он прокормил и когда."""
+    fate = world.notes.get("судьба") or {}
+    peak = int(world.notes.get("людей в лучший век") or 0)
+    now = world.world_population()
+    towns = [item for item in world.settlements.values()]
+    alive = [item for item in towns if item.status == ACTIVE]
+    lines = []
+    if fate.get("имя"):
+        lines.append("Судьба мира — «%s»: %s." % (fate["имя"],
+                                                  fate.get("как было", "")))
+    if peak:
+        lines.append("Больше всего душ он держал %s, а к концу летописи "
+                     "осталось %s — это %.0f%% от лучшего века."
+                     % (_souls(peak), _souls(now), now * 100.0 / peak))
+    else:
+        lines.append("К концу летописи в мире %s." % _souls(now))
+    lines.append("Поселений за всю историю %d, стоит к концу %d; "
+                 "держав %d, живых %d."
+                 % (len(towns), len(alive), len(world.polities),
+                    len(world.active_polities)))
+    peopled = len({item.region_id for item in alive})
+    lines.append("Обжито к концу %d %s из %d: %s."
+                 % (peopled,
+                    _plural(peopled, "земля", "земли", "земель"),
+                    len(world.regions),
+                    "мир заселён целиком" if peopled >= len(world.regions) - 1
+                    else ("людные края тут скорее исключение"
+                          if peopled * 3 < len(world.regions)
+                          else "обжитое и пустое поделили мир пополам")))
+    return lines
+
+
+def _danger_lines(world) -> list:
+    """Чем этот мир опасен — и отчего беды в нём берутся."""
+    from . import catastrophe as cat
+
+    total = max(1, world.total_years)
+    woes = list(world.calamities.values())
+    per_century = len(woes) * 100.0 / total
+    lines = ["Бед в нём %d — это %.1f на век; тёмных веков %d."
+             % (len(woes), per_century, len(world.dark_ages))]
+    nature = world.notes.get("нрав мира") or ()
+    titles = [cat.CATALOG_BY_KEY[key].title.lower() for key in nature
+              if key in cat.CATALOG_BY_KEY]
+    if titles:
+        lines.append("Склонен он к такому: %s." % ", ".join(titles))
+    profile = world.notes.get("склад мира") or ()
+    if profile:
+        lines.append("А причины бед тут берутся прежде всего отсюда: %s."
+                     % ", ".join(profile))
+    deaths = sum(item.deaths for item in woes)
+    if deaths:
+        lines.append("Всего беды унесли %s." % _souls(deaths))
+    return lines
+
+
+def _magic_lines(world) -> list:
+    """Сколько в этом мире волшебства — и есть ли оно вовсе."""
+    from . import origin as ocat
+
+    origin = next(iter(world.origins.values()), None)
+    missing = list(getattr(origin, "missing", ()) or ())
+    if ocat.MAGIC in missing:
+        return ["Магии в этом мире нет вовсе: такого слоя ему не положили, "
+                "и ни чар, ни чудес от чар тут не бывает."]
+    lines = []
+    wmap = _wmap_of(world)
+    if wmap is not None:
+        land = [index for index in range(wmap.size) if wmap.is_land(index)]
+        if land:
+            # Магия на карте — величина знаковая: минус тёмная, плюс
+            # светлая. Простое среднее по ней всегда около нуля, потому
+            # что тьма со светом взаимно гасятся, — и мир с кипящей
+            # магией читался бы как мир без неё. Поэтому считается, где
+            # её вообще много (по модулю) и куда она склоняется.
+            values = [wmap.value(wm_magic(), index) for index in land]
+            count = float(len(values))
+            strong = sum(1 for value in values if abs(value) > 0.05) \
+                * 100.0 / count
+            dark = sum(1 for value in values if value < -0.05) * 100.0 / count
+            light = sum(1 for value in values if value > 0.05) * 100.0 / count
+            if strong < 1.0:
+                said = "Волшебство в этой земле — редкость: на него натыкаются"
+            elif strong < 5.0:
+                said = "Волшебных мест тут немного, но они есть"
+            else:
+                said = "Волшебных мест в этой земле много"
+            lines.append("%s: их %.1f%% земли." % (said, strong))
+            if dark > light * 2 and dark > 0.2:
+                lines.append("И склоняется оно к тёмному: таких мест %.1f%% "
+                             "против %.1f%% светлых." % (dark, light))
+            elif light > dark * 2 and light > 0.2:
+                lines.append("И склоняется оно к светлому: таких мест %.1f%% "
+                             "против %.1f%% тёмных." % (light, dark))
+            elif strong >= 1.0:
+                lines.append("Тёмного и светлого в нём примерно равно.")
+    profile = world.notes.get("склад мира") or ()
+    if "чары" in profile:
+        lines.append("И беды тут часто идут от чар, а не от погоды.")
+    if not lines:
+        lines.append("О волшебстве этого мира сказать по слоям нечего: "
+                     "карты у него нет.")
+    return lines
+
+
+def _folk_lines(world) -> list:
+    """Кто его населяет: сколько народов проснулось, кто остался, кто зверьём."""
+    from .races import RACES, get_race
+
+    awoke = sorted(world.race_awakening.items(), key=lambda row: row[1])
+    alive = Counter()
+    for item in world.settlements.values():
+        if item.status == ACTIVE:
+            alive[item.race_id] += item.population
+    for item in world.tribes.values():
+        if item.status == ACTIVE:
+            alive[item.race_id] += item.population
+    lines = ["Проснулось в нём %d %s, до конца дожило %d."
+             % (len(awoke), _plural(len(awoke), "раса", "расы", "рас"),
+                len(alive))]
+    if alive:
+        total = max(1, sum(alive.values()))
+        top = ", ".join("%s (%.0f%%)" % (race_name(race), souls * 100.0 / total)
+                        for race, souls in alive.most_common(3))
+        lines.append("Больше всего на свете их: %s." % top)
+    beasts = world.notes.get("не народ, а зверьё") or ()
+    if beasts:
+        # Заметку кладут в начале мира: это то, какими они вышли. Кто из
+        # них потом поумнел, в мире уже проснулся и успел стать народом —
+        # и сказать об этом надо отдельно, иначе одна и та же раса стоит
+        # в двух строках подряд: зверьём и ушедшим из мира народом.
+        woke = {}
+        for race in RACES:
+            if race.name in beasts and race.id in world.race_awakening:
+                woke[race.name] = world.race_awakening[race.id]
+        still = [name for name in beasts if name not in woke]
+        if still:
+            lines.append("А эти в этом мире вышли не народом, а зверьём: %s."
+                         % ", ".join(still))
+        if woke:
+            lines.append("А эти вышли зверьём, но разум обрели по ходу "
+                         "истории: %s."
+                         % ", ".join("%s (в %d году)" % (name, year)
+                                     for name, year
+                                     in sorted(woke.items(),
+                                               key=lambda row: row[1])))
+    gifts = getattr(world, "race_gifts", {}) or {}
+    for race_id, gift in sorted(gifts.items()):
+        race = get_race(race_id)
+        lines.append("Особенность мира: %s — %s."
+                     % (race.name if race is not None else race_id, gift))
+    # Заметка держит ключи рас, а в русском выводе ключам места нет:
+    # «wolfkin, troll» — это не народы, а внутренние имена.
+    gone = world.notes.get("народов больше нет") or ()
+    if gone:
+        lines.append("Ушли из мира совсем: %s."
+                     % ", ".join(sorted(race_name(key) for key in gone)))
+    return lines
+
+
+def _origin_lines(world) -> list:
+    """Как этот мир сделан — и чего в нём нет."""
+    from . import origin as ocat
+
+    origin = next(iter(world.origins.values()), None)
+    if origin is None:
+        return ["О начале этого мира летопись молчит."]
+    lines = []
+    motif = ocat.MOTIFS.get(origin.motif)
+    if motif is not None:
+        lines.append("Сделан он так: %s, и ради этого — «%s»: %s."
+                     % (origin.model, motif.name, motif.about))
+    else:
+        lines.append("Сделан он так: %s." % origin.model)
+    missing = [key for key in (getattr(origin, "missing", ()) or ())]
+    if missing:
+        said = []
+        for key in missing:
+            layer = ocat.LAYERS.get(key)
+            if layer is not None and layer.without:
+                said.append("%s — %s" % (key, layer.without))
+            else:
+                said.append(str(key))
+        lines.append("Чего в нём нет вовсе: %s." % "; ".join(said))
+    else:
+        lines.append("Слои мира положены все до единого.")
+    laws = list(getattr(origin, "laws", ()) or ())
+    if laws:
+        lines.append("Законов начала названо %d — по ним и решается, что в "
+                     "этом мире вообще возможно." % len(laws))
+    certainty = ocat.CERTAINTY.get(getattr(origin, "certainty", ""))
+    if certainty is not None:
+        lines.append("А знают об этом вот сколько — «%s»: %s."
+                     % (certainty.name, certainty.about))
+    return lines
+
+
+def portraits(world, out) -> None:
+    """Одиннадцать портретов мира: имена, ушедшие народы, старый город,
+    злое время, тот, кто людям не ровня, самый долгий праздник, самое
+    громкое за всю историю, самое весомое место, самое громкое чудо,
+    самое людное владение чудовища и — если мир стоит на гексовой
+    карте — сама эта земля."""
+    great_names(world, out)
+    peoples_gone(world, out)
+    oldest_town(world, out)
+    worst_time(world, out)
+    nonhuman(world, out)
+    longest_feast(world, out)
+    loudest(world, out)
+    weightiest_place(world, out)
+    best_wonder(world, out)
+    worst_dominion(world, out)
+    land_portrait(world, out)
+
+
+# ---------------------------------------------------------------------------
+# Срезы
+# ---------------------------------------------------------------------------
+
+def race_name(race_id: str) -> str:
+    race = RACES_BY_ID.get(race_id)
+    return race.name if race else race_id
+
+
+def polity_gen(polity) -> str:
+    """«вольного города Сколгард» — чтобы читалось после «против»."""
+    if polity is None:
+        return "?"
+    return "%s %s" % (genitive_noun(polity.form).lower(), polity.name)
+
+
+def polity_population(world, polity, year: int = 0, towns=None):
+    """Сколько душ и городов было за державой: (душ, городов).
+
+    Без года — по нынешнему состоянию; с годом — по записям этого года.
+    """
+    if not year:
+        total = count = 0
+        for settlement_id in world.active_settlements:
+            settlement = world.settlements[settlement_id]
+            if settlement.polity_id == polity.id:
+                total += int(settlement.population * RURAL_FACTOR)
+                count += 1
+        return total, count
+    if towns is None:
+        towns = world.holdings_at(year).get(polity.id, ())
+    total = sum(int(world.souls_at(town, year) * RURAL_FACTOR)
+                for town in towns)
+    return total, len(towns)
+
+
+def peoples_at(world, towns, year: int) -> dict:
+    """Какие народы жили под этой державой в этом году: раса -> душ.
+
+    Считается по её городам того года, а не по нынешнему списку народов:
+    держава, у которой через тысячу лет отняли половину земель, в свой
+    век была другой.
+    """
+    rows = {}
+    for town in towns:
+        souls = int(world.souls_at(town, year) * RURAL_FACTOR)
+        if souls:
+            rows[town.race_id] = rows.get(town.race_id, 0) + souls
+    return rows
+
+
+def reign_at(world, polity, year: int):
+    best = None
+    for reign_id in polity.reign_ids:
+        reign = world.reigns.get(reign_id)
+        if reign is None or reign.start.year > year:
+            continue
+        if reign.end is not None and reign.end.year < year:
+            continue
+        if best is None or reign.start.ordinal > best.start.ordinal:
+            best = reign
+    return best
+
+
+def ruler_line(world, polity, year: int) -> str:
+    reign = reign_at(world, polity, year)
+    if reign is None:
+        return "престол пуст (междуцарствие)"
+    figure = world.figures.get(reign.ruler_id)
+    if figure is None:
+        return "правитель неизвестен"
+    house = world.houses.get(reign.house_id)
+    parts = ["%s %s" % (reign.title or "правитель", figure.name),
+             "%s, возраст %d" % (race_name(figure.race_id),
+                                 year - figure.birth.year),
+             "на престоле с %d (%s)" % (reign.start.year, reign.legitimacy)]
+    if house is not None:
+        parts.append("род %s" % house.full_name)
+    if reign.regent_id and year < reign.regency_until:
+        regent = world.figures.get(reign.regent_id)
+        parts.append("малолетн%s, при регенте %s"
+                     % ("яя" if figure.sex == "f" else "ий",
+                        regent.plain_name if regent is not None else "—"))
+    if reign.traits or reign.skills:
+        parts.append("нрав: %s" % ", ".join(part for part in (
+            rulers.alignment_label(reign.alignment, figure.sex),
+            rulers.traits_text(reign.traits, figure.sex)) if part))
+    if reign.skills:
+        parts.append("умения: " + "/".join(
+            "%s %d" % (key, reign.skills.get(key, 5)) for key in rulers.SKILLS))
+    return "; ".join(parts)
+
+
+def nobility_line(world, polity, year: int) -> str:
+    """Лестница знати державы и самые весомые дома на ней."""
+    race = RACES_BY_ID.get(polity.race_id)
+    if race is None or not race.has_nobility:
+        return "знати нет"
+    houses = [world.houses[hid] for hid in polity.house_ids
+              if hid in world.houses and alive_at(world.houses[hid], year)
+              and world.houses[hid].id != polity.house_id]
+    if not houses:
+        return "знатных родов нет"
+    steps = {}
+    for house in houses:
+        if house.rung >= 0:
+            steps[house.rung] = steps.get(house.rung, 0) + 1
+    ladder = "; ".join("%s — %d" % (arist.style_text(race, rung, "m"), count)
+                       for rung, count in sorted(steps.items(), reverse=True))
+    houses.sort(key=lambda h: (-h.prestige, h.id))
+    top = ", ".join("%s (%s, %s%s)" % (
+        house.full_name, house.style or "без титула",
+        arist.alignment_word(house.alignment),
+        ", недовольство %.2f" % house.discontent if house.discontent > 0.3 else "")
+        for house in houses[:3])
+    return "%s | верхушка: %s" % (ladder or "ступени не разведены", top)
+
+
+def politics_line(world, polity, year: int, now: bool = True) -> str:
+    """Договоры, союз и лучшие с худшими соседи.
+
+    Договоры и союзы датированы, а вот отношения к соседям нигде по годам
+    не записаны: в них стоит нынешнее число. Поэтому в срезе прошлого года
+    о соседях говорится лишь то, что датировано, — иначе слова «ближе всех
+    такой-то» были бы выдумкой этого самого года.
+    """
+    pacts = [pact for pact in world.pacts_of(polity)
+             if now or alive_at(pact, year)]
+    parts = []
+    if pacts:
+        counts = Counter(pact.kind for pact in pacts)
+        parts.append("договоры: " + ", ".join(
+            "%s %d" % (kind, count) for kind, count in sorted(counts.items())))
+    league = world.leagues.get(polity.league_id)
+    if league is not None and (now or alive_at(league, year)):
+        parts.append("в союзе «%s» (%s, держав %d)"
+                     % (league.name, league.kind, len(league.member_ids)))
+    if now:
+        rows = [(value, other_id) for other_id, value
+                in (polity.relations or {}).items()
+                if other_id in world.polities
+                and world.polities[other_id].status == ACTIVE]
+        if rows:
+            rows.sort(reverse=True)
+            best = world.polities[rows[0][1]]
+            worst = world.polities[rows[-1][1]]
+            parts.append("ближе всех %s (%+.2f), дальше всех %s (%+.2f)"
+                         % (best.name, rows[0][0], worst.name, rows[-1][0]))
+        if polity.tribute_to:
+            lord = world.polities.get(polity.tribute_to)
+            parts.append("платит дань державе %s" % (lord.name if lord else "?"))
+    forts = [fort for fort in world.fortresses_of(polity)
+             if now or alive_at(fort, year)]
+    if forts:
+        parts.append("крепостей %d" % len(forts))
+    ships = warfare.fleet(world, polity, RACES_BY_ID[polity.race_id],
+                          world.era_index_at(year))
+    if ships:
+        parts.append("флот до %d кораблей" % ships)
+    return "; ".join(parts) if parts else "ни с кем не связана"
+
+
+def tongue_line(world, polity, now: bool = True) -> str:
+    """Язык двора: как он зовётся, чем пишет и сколько на нём говорят.
+
+    Число говорящих — нынешнее, по годам оно не записано, поэтому в срезе
+    прошлого века его не называют.
+    """
+    tongue = world.tongues.get(polity.tongue_id)
+    if tongue is None:
+        return "—"
+    parts = [narrative_tongues.quoted(tongue.name)]
+    if tongue.laws:
+        parts.append("законы: %s" % ", ".join(tongue.laws[:3]))
+    if tongue.script:
+        parts.append("письмо: %s" % tongue.script)
+    if now:
+        parts.append("говорящих: %d" % tongue.speakers)
+    return "; ".join(parts)
+
+
+def faith_line(world, faith_id: str, year: int = 0, now: bool = True) -> str:
+    """Вера державы: чья она, кто во главе и сколько верующих.
+
+    Года рождения веры тут хватает, чтобы не соврать: вера, которой ещё
+    не было, в срез не попадает. А вот числа верующих по годам нет, и в
+    прошлом веке оно не называется.
+    """
+    if not faith_id or faith_id not in world.faiths:
+        return "государственной веры нет"
+    faith = world.faiths[faith_id]
+    if year and faith.founded is not None and faith.founded.year > year:
+        return "государственной веры ещё нет"
+    deity = world.deities.get(faith.chief_deity_id)
+    bits = ["«%s» (%s, %s%s)" % (faith.name,
+                                 FAITH_KIND_NAMES.get(faith.kind, faith.kind),
+                                 faith.status,
+                                 ", ЗАПРЕЩЕНА" if faith.forbidden else "")]
+    if deity is not None:
+        domains = ", ".join(DOMAINS_BY_KEY[key].name for key in deity.domains
+                            if key in DOMAINS_BY_KEY)
+        bits.append("глава — %s %s (%s); сферы: %s"
+                    % (deity.title, deity.full_name,
+                       ALIGNMENT_NAMES.get(deity.alignment), domains))
+    if now:
+        bits.append("верующих: %d" % faith.followers)
+    return "; ".join(bits)
+
+
+def _side_name(world, entity_id: str) -> str:
+    """Имя того, о ком след или воспоминание."""
+    if not entity_id:
+        return ""
+    polity = world.polities.get(entity_id)
+    if polity is not None:
+        return polity.name
+    figure = world.figures.get(entity_id)
+    if figure is not None:
+        return figure.plain_name
+    region = world.regions.get(entity_id)
+    if region is not None:
+        return "земля по имени %s" % region.name
+    settlement = world.settlements.get(entity_id)
+    if settlement is not None:
+        return "город по имени %s" % settlement.name
+    return race_name(entity_id)
+
+
+def polity_folk(world, polity, year: int, towns=()) -> str:
+    """Какой народ стоял за державой в этом году.
+
+    У державы записано, с какого года престол у нынешнего народа
+    (`titular_since`). До того года он был другим — а каким, в летописи
+    не сказано; тогда народ называется по её городам того года. Иначе
+    клановый союз дворфов выходит дворфским и за век до того, как дворфы
+    его взяли.
+    """
+    if polity.titular_since <= year:
+        return race_name(polity.race_id)
+    folks = peoples_at(world, towns, year)
+    if folks:
+        return race_name(max(folks.items(), key=lambda kv: kv[1])[0])
+    return race_name(polity.race_id)
+
+
+def polity_block(world, polity, year: int, population: int, cities: int,
+                 out, middle: float = 0.0, towns=(), now: bool = True) -> None:
+    """Держава в подробностях: кто правит, чем правит и во что верит.
+
+    В срезе прошлого года говорится только то, что в летописи
+    датировано: правление, знать, города и души того года, его земли и
+    народы, договоры и обиды. Хозяйство, гильдии и число верующих
+    записаны лишь нынешние — и в прошлом веке их не называют, потому что
+    приписать державе нынешнюю торговлю значит соврать о ней.
+    """
+    out("   основана %s — держава стоит %d-й год"
+        % (polity.founded.long(), year - polity.founded.year + 1))
+    seat = world.settlements.get(polity.capital_id)
+    if seat is not None and not (alive_at(seat, year)
+                                 and seat in tuple(towns)):
+        seat = None                   # в тот год престол был не тут
+    out("   население %d в %d городах%s" % (
+        population, cities,
+        "; столица: %s" % seat.full_name if seat is not None else ""))
+    if towns:
+        first = towns[0]
+        out("   самый людный город: %s (%s)"
+            % (first.full_name, _souls(world.souls_at(first, year))))
+    if now:
+        lands = ", ".join("%s (%s)" % (world.regions[r].name,
+                                       world.regions[r].terrain)
+                          for r in polity.region_ids if r in world.regions)
+    else:
+        seen = []
+        for town in towns:
+            region = world.regions.get(town.region_id)
+            if region is not None and region not in seen:
+                seen.append(region)
+        lands = ", ".join("%s (%s)" % (region.name, region.terrain)
+                          for region in seen)
+    if lands:
+        out("   земли: %s" % lands)
+    out("   правитель: %s" % ruler_line(world, polity, year))
+    reign = reign_at(world, polity, year)
+    if reign is not None:
+        before = len([rid for rid in polity.reign_ids
+                      if rid in world.reigns
+                      and world.reigns[rid].start.ordinal < reign.start.ordinal])
+        out("   правит %d-й год; до него правлений %d"
+            % (year - reign.start.year + 1, before))
+    out("   знать: %s" % nobility_line(world, polity, year))
+    out("   политика: %s" % politics_line(world, polity, year, now))
+    out("   наследование: %s" % SUCCESSION_NAMES.get(polity.succession,
+                                                     polity.succession))
+    folks = peoples_at(world, towns, year) if towns else {}
+    if now and polity.peoples:
+        out("   народы: %s" % pol.describe(polity, world))
+    elif folks:
+        total = float(sum(folks.values())) or 1.0
+        out("   народы: %s" % "; ".join(
+            "%s — %d (%.0f%%)%s"
+            % (race_name(key), value, value * 100.0 / total,
+               " (титульный)" if key == polity.race_id else "")
+            for key, value in sorted(folks.items(), key=lambda kv: -kv[1])[:4]))
+    if polity.policy and polity.policy_since <= year:
+        out("   закон о народах: %s" % pol.POLICY_NAMES.get(polity.policy,
+                                                            polity.policy))
+    if now:
+        out("   хозяйство: %s" % goods.living_line(
+            goods.polity_balance(world, polity),
+            goods.polity_souls(world, polity), middle))
+        if polity.shortages:
+            out("   не хватает: %s" % ", ".join(
+                "%s (%.0f%%)" % (good, value * 100)
+                for good, value in polity.shortages[:4]))
+    # Ремёсла и язык двора записаны у державы только нынешние: когда она
+    # выучилась литью и на каком говоре писала грамоты в таком-то веке,
+    # в летописи не сказано. Поэтому в прошлом веке о них молчат.
+    if now and polity.known:
+        out("   ремёсел освоено: %d из %d" % (len(polity.known),
+                                              len(crafts_mod.CRAFTS)))
+    out("   вера: %s" % faith_line(world, polity.faith_id, year, now))
+    if now:
+        out("   язык двора: %s" % tongue_line(world, polity, now))
+    guilds = [guild for guild in world.guilds_of(polity)
+              if now or alive_at(guild, year)]
+    if guilds:
+        out("   гильдии: %s" % "; ".join(
+            "%s (%s%s)" % (item.name, item.kind,
+                           ", казна %d" % int(item.wealth) if now else "")
+            for item in guilds))
+    union = world.unions.get(polity.union_id)
+    if union is not None and union.started.year <= year:
+        other = world.polities.get(union.other(polity.id))
+        out("   уния с державой: %s (с %d года)"
+            % (other.full_name if other else "?", union.started.year))
+    # Что за державой числится: живые следы её прошлого — по ним видно,
+    # почему она такая и чего от неё ждать.
+    traces = world.facts_of(polity.id, year)[:3]
+    if traces:
+        out("   что за ней числится: %s" % "; ".join(
+            "%s%s (%d год)" % (fact.kind,
+                               (" на " + _side_name(world, fact.about_id))
+                               if fact.about_id else "",
+                               fact.year)
+            for fact in traces))
+    ruler = world.figures.get(reign.ruler_id if reign is not None
+                              else polity.ruler_id)
+    if ruler is not None:
+        rows = [item for item in world.memories_of(ruler.id)
+                if item.year <= year][:3]
+        if rows:
+            out("   что помнит государь: %s" % "; ".join(
+                "%s%s (%d)" % (item.kind,
+                               (" — " + _side_name(world, item.about_id))
+                               if item.about_id else "", item.year)
+                for item in rows))
+
+def snapshot(world, year: int, out) -> None:
+    """Срез мира на один год — по записям, а не по живому ходу времени.
+
+    Прежде этот срез снимался во время самого счёта: тогда у мира было
+    живое состояние, и его хватало. Но тогда же разбор был возможен
+    только сразу после генерации — мир, прочитанный из файла, о своих
+    прошлых веках сказать не мог ничего. Теперь всё, что тут сказано,
+    берётся из записанного: кривых людности, отрезков владения городами,
+    сроков правлений и датированных следов.
+    """
+    year = max(1, min(int(year), int(world.total_years)))
+    now = year >= int(world.total_years)
+    era = world.era_at(year)
+    out("=" * 78)
+    out("ГОД %d — %s (%d–%d)" % (year, era.name if era else "?",
+                                 era.start_year if era else 0,
+                                 era.end_year if era else 0))
+    out("=" * 78)
+
+    by_race = world.population_by_race_at(year)
+    out("Население мира: %d" % world.population_at(year))
+    if by_race:
+        out("  по народам: " + ", ".join(
+            "%s %d" % (race_name(key), value)
+            for key, value in sorted(by_race.items(),
+                                     key=lambda kv: -kv[1])[:10]))
+    held = world.holdings_at(year)
+    polities = [item for item in world.polities.values()
+                if alive_at(item, year)]
+    towns = [item for item in world.settlements.values()
+             if alive_at(item, year)]
+    tribes = [item for item in world.tribes.values() if alive_at(item, year)]
+    camps = [item for item in world.camps.values() if alive_at(item, year)]
+    houses = [item for item in world.houses.values() if alive_at(item, year)]
+    out("Живых: стран %d, городов %d, племён %d, лагерей %d, родов %d"
+        % (len(polities), len(towns), len(tribes), len(camps), len(houses)))
+
+    dark = world.darkness_snapshot(year)
+    if dark:
+        out("Тёмные века: %d земель во мраке%s, тяжесть до %.2f" % (
+            len([key for key in dark if key]),
+            ", по всему миру" if dark.get("") else "", max(dark.values())))
+    else:
+        out("Тёмных веков нет.")
+
+    live = [item for item in world.calamities.values()
+            if item.start.year <= year and (item.end is None
+                                            or item.end.year >= year)]
+    if live:
+        out("ИДУЩИЕ БЕДСТВИЯ (%d):" % len(live))
+        for item in sorted(live, key=lambda c: (-c.severity, c.id))[:6]:
+            out("   • %s [%s, %s], идёт %d-й год" % (
+                item.name, KIND_NAMES.get(item.kind, item.kind),
+                SEVERITY_NAMES.get(item.severity), year - item.start.year + 1))
+            lands = ", ".join(world.regions[rid].name
+                              for rid in item.region_ids[:5]
+                              if rid in world.regions)
+            rest = len(item.region_ids) - 5
+            if rest > 0:
+                lands += " и ещё %d" % rest
+            if lands:
+                out("       земли: %s" % lands)
+            marks = []
+            leader = world.figures.get(item.leader_id)
+            if leader is not None:
+                marks.append("во главе %s" % leader.name)
+            if item.host_size:
+                marks.append("врагов %s" % _souls(item.host_size))
+            # Ущерб беды записан итогом, а не по годам: пока она идёт,
+            # сказать «уже унесло столько» значит назвать число, которое
+            # наберётся только к её концу. Поэтому счёт мёртвых говорится
+            # о кончившихся, а об идущей — то, чем она грозит. «Кончилась»
+            # тут считается на спрошенный год, а не вообще: беда, которой
+            # ещё идти четыре века, в этот год не унесла ничего.
+            over = item.end is not None and item.end.year <= year
+            if over:
+                if item.deaths:
+                    marks.append("унесло %s" % _souls(item.deaths))
+                if item.settlements_lost:
+                    marks.append("городов потеряно %d" % item.settlements_lost)
+            elif item.deaths:
+                marks.append("всего унесёт %s" % _souls(item.deaths))
+            if item.parent_id in world.calamities:
+                marks.append("выросло из беды «%s»"
+                             % world.calamities[item.parent_id].name)
+            if marks:
+                out("       %s" % "; ".join(marks))
+    else:
+        out("Идущих бедствий нет.")
+
+    live_wars = [item for item in world.wars.values()
+                 if item.start.year <= year and (item.end is None
+                                                 or item.end.year >= year)]
+    if live_wars:
+        out("ИДУЩИЕ ВОЙНЫ (%d):" % len(live_wars))
+        for war in sorted(live_wars, key=lambda w: (-w.scale, w.id))[:5]:
+            attacker = world.polities.get(war.attacker_id)
+            defender = world.polities.get(war.defender_id)
+            out("   • %s — %s против %s; с %d г., повод: %s, цель: %s; "
+                "сражений %d%s" % (
+                    war.name,
+                    attacker.full_name if attacker else "?",
+                    polity_gen(defender),
+                    war.start.year, warfare.cause_label(war.cause),
+                    warfare.AIM_NAMES.get(war.aim, war.aim),
+                    len([bid for bid in war.battle_ids
+                         if bid in world.battles
+                         and world.battles[bid].date.year <= year]),
+                    ", погибло %d" % war.deaths if war.end is not None else ""))
+    else:
+        out("Войн сейчас не идёт.")
+
+    running = [item for item in world.expeditions.values()
+               if alive_at(item, year)]
+    if running:
+        out("В пути: %s" % "; ".join("%s (%s)" % (x.name, x.target_name)
+                                     for x in running[:3]))
+
+    active = []
+    for polity in polities:
+        mine = held.get(polity.id, [])
+        population, cities = polity_population(world, polity, year, mine)
+        active.append((population, cities, polity, mine))
+    active.sort(key=lambda row: (-row[0], row[2].id))
+
+    if not active:
+        out("Стран ещё нет — мир племенной.")
+    else:
+        heads = ("КРУПНЕЙШАЯ ДЕРЖАВА", "ВТОРАЯ ДЕРЖАВА МИРА",
+                 "ТРЕТЬЯ ДЕРЖАВА МИРА")
+        middle = goods.middle_wealth(world) if now else 0.0
+        for index, (population, cities, polity, mine) in enumerate(active[:3]):
+            out("")
+            out("%s: %s — %s" % (heads[index], polity.full_name,
+                                 polity_folk(world, polity, year, mine)))
+            polity_block(world, polity, year, population, cities, out,
+                         middle, mine, now)
+        if len(active) > 3:
+            out("")
+            out("ОСТАЛЬНЫЕ ДЕРЖАВЫ (ещё %d из %d):"
+                % (len(active) - 3, len(active)))
+            for population, cities, polity, mine in active[3:9]:
+                out("   • %s (%s) — %d душ, %d %s; %s; вера: %s" % (
+                    polity.full_name,
+                    polity_folk(world, polity, year, mine), population,
+                    cities, _plural(cities, "город", "города", "городов"),
+                    ruler_line(world, polity, year).split(";")[0],
+                    faith_line(world, polity.faith_id, year,
+                               False).split(" (")[0]))
+
+    big = sorted(tribes, key=lambda item: (-world.souls_at(item, year),
+                                           item.id))[:5]
+    if big:
+        out("")
+        out("КРУПНЕЙШИЕ ПЛЕМЕНА (всего %d):" % len(tribes))
+        for tribe in big:
+            region = world.regions.get(tribe.region_id)
+            chief = world.figures.get(tribe.chief_id)
+            folk = world.folks.get(tribe.folk_id)
+            out("   • %s (%s), %d душ, земля %s" % (
+                tribe.full_name, race_name(tribe.race_id),
+                world.souls_at(tribe, year), region.name if region else "?"))
+            marks = ["стоит %d-й год" % (year - tribe.founded.year + 1)]
+            # Вождь нынешний: по годам вожди племён не записаны. Поэтому
+            # в прошлом веке его не называют — вместо имени живого вождя
+            # стояло бы имя того, кто тогда ещё не родился.
+            if chief is not None and now and chief.birth is not None:
+                marks.append("вождь %s, возраст %d"
+                             % (chief.name, year - chief.birth.year))
+            if folk is not None:
+                marks.append("народ «%s»" % folk.name)
+            out("       %s" % "; ".join(marks))
+
+    events = [e for e in world.events
+              if year - 70 <= e.date.year <= year and e.importance >= 4]
+    if events:
+        out("ГРОМКИЕ СОБЫТИЯ ПОСЛЕДНИХ 70 ЛЕТ:")
+        for event in sorted(events, key=lambda e: e.date.ordinal)[-8:]:
+            out("   [%d] %s" % (event.date.year, event.title))
+    out("")
+
+
+# ---------------------------------------------------------------------------
+# Разбор: что обычно ломается
+# ---------------------------------------------------------------------------
+
+def _souls(value) -> str:
+    """«1 240 000 душ» — число с пробелами и правильным словом."""
+    value = int(value)
+    text = "%d" % abs(value)
+    groups = []
+    while len(text) > 3:
+        groups.insert(0, text[-3:])
+        text = text[:-3]
+    groups.insert(0, text)
+    return "%s %s" % (" ".join(groups),
+                      _plural(abs(value), "душа", "души", "душ"))
+
+
+def _plural(value: int, one: str, few: str, many: str) -> str:
+    value = abs(int(value)) % 100
+    if 11 <= value <= 14:
+        return many
+    tail = value % 10
+    if tail == 1:
+        return one
+    if 2 <= tail <= 4:
+        return few
+    return many
+
+
+def audit(world) -> list:
+    """Ищет в готовом мире следы известных поломок.
+
+    Возвращает список (важность, строка). Важность «!» — серьёзно,
+    «·» — стоит посмотреть.
+    """
+    found = []
+
+    def bad(line):
+        found.append(("!", line))
+
+    def note(line):
+        found.append(("·", line))
+
+    # 0. Приговор миру — на латиницу и на пустоту.
+    #
+    # Раздел этот собирается из чужих заметок, а в заметках лежат ключи
+    # справочников: расы там хранятся как «wolfkin», а не как
+    # «Волколюды». Один раз так и вышло — «Ушли из мира совсем:
+    # wolfkin, troll, bearkin», — и поймать это может только сторож,
+    # потому что сломалось не число, а язык.
+    verdict = []
+    try:
+        world_verdict(world, verdict.append)
+    except Exception as error:                            # noqa: BLE001
+        bad("приговор миру не собрался: %s" % error)
+    else:
+        latin = []
+        for line in verdict:
+            for word in line.split():
+                if any("a" <= char.lower() <= "z" for char in word):
+                    latin.append(word)
+        if latin:
+            bad("в приговоре миру чужое слово: %s" % ", ".join(latin[:4]))
+        if len([line for line in verdict if line.strip()]) < 8:
+            bad("приговор миру вышел пустым: строк всего %d"
+                % len([line for line in verdict if line.strip()]))
+
+        # И на противоречие внутри самого приговора. Раса, вышедшая в этом
+        # мире зверьём, не просыпается вовсе — уходить из мира ей неоткуда;
+        # а та, что поумнела по ходу истории, народом успела побыть и стоит
+        # в своей строке. Пока строка была одна, огры читались сразу и как
+        # зверьё, и как ушедший народ.
+        def named(line):
+            tail = line.split(":", 1)[1] if ":" in line else ""
+            return [part.strip(" .") for part in tail.split(",")
+                    if part.strip(" .")]
+
+        feral = next((line for line in verdict
+                      if "вышли не народом, а зверьём" in line), "")
+        gone = next((line for line in verdict
+                     if "Ушли из мира совсем" in line), "")
+        clash = [name for name in named(feral) if name in named(gone)]
+        if clash:
+            bad("в приговоре миру раса и зверьём вышла, и из мира ушла: %s"
+                % ", ".join(clash))
+
+    # 1. Мужской признак у женского имени и наоборот.
+    wrong_sex = [f for f in world.figures.values() if f.sex == "f"
+                 and any(mark in f.given_name for mark in MALE_MARKS)]
+    if wrong_sex:
+        bad("мужской признак у женских имён: %d (%s)"
+            % (len(wrong_sex), wrong_sex[0].name))
+
+    # 1б. Цифра в имени. Летопись пишет словами: «Джаун Четвёртый», а
+    # «Джаун 2» — это писарская отметка, выданная за имя.
+    digits = [f.name for f in world.figures.values()
+              if any(ch.isdigit() for ch in f.name)]
+    digits += [s.name for s in world.settlements.values()
+               if any(ch.isdigit() for ch in s.name)]
+    digits += [t.name for t in world.tribes.values()
+               if any(ch.isdigit() for ch in t.name)]
+    if digits:
+        bad("цифра в имени: %d (%s)" % (len(digits), digits[0]))
+
+    # 1в. Однокоренная пара в названии: «Лунная Луна», «Дымные Дети Дыма».
+    tautology = []
+    # Земли на карте названы картогенератором, и его слова здесь не судят:
+    # порт сверяется с оригиналом гекс в гекс и правке не подлежит.
+    for name in ([s.name for s in world.settlements.values()]
+                 + [t.name for t in world.tribes.values()]):
+        words = [w for w in name.split() if len(w) >= 4]
+        for first, second in zip(words, words[1:]):
+            if names_mod._same_root(first, second):
+                tautology.append(name)
+                break
+    if tautology:
+        bad("признак повторяет корень в названии: %d (%s)"
+            % (len(tautology), tautology[0]))
+
+    # 1г. Мёртвый вождь у живого племени: племя стоит тысячи лет, вождь —
+    # нет, и числиться живым он не должен.
+    dead_chiefs = []
+    for tribe_id in world.active_tribes:
+        tribe = world.tribes[tribe_id]
+        chief = world.figures.get(tribe.chief_id)
+        if chief is not None and not chief.alive_at(world.total_years):
+            dead_chiefs.append("%s -> %s" % (tribe.full_name, chief.name))
+    if dead_chiefs:
+        bad("у живого племени мёртвый вождь: %d (%s)"
+            % (len(dead_chiefs), dead_chiefs[0]))
+
+    # 1д. Нрав, спорящий с самим собой: «милосердный, жестокий к пленным».
+    clashes = []
+    holders = [(f.name, f.traits) for f in world.figures.values()]
+    holders += [(r.id, r.traits) for r in world.reigns.values()]
+    for who, traits in holders:
+        traits = set(traits or ())
+        for trait in traits:
+            if traits & rulers.TRAIT_AGAINST.get(trait, set()):
+                clashes.append("%s: %s" % (who, ", ".join(sorted(traits))))
+                break
+    if clashes:
+        bad("черты нрава спорят друг с другом: %d (%s)"
+            % (len(clashes), clashes[0]))
+
+    # 2. Титул против формы страны.
+    mismatch = []
+    for polity in world.polities.values():
+        reign = world.current_reign(polity)
+        if reign is None or not reign.title:
+            continue
+        form = polity.form.lower()
+        title = reign.title.lower()
+        for key, wanted in RANK_FORMS:
+            if key in form and not any(w in title for w in wanted):
+                mismatch.append("%s -> %s" % (polity.full_name, reign.title))
+                break
+    if mismatch:
+        bad("титул не отвечает форме страны: %d (%s)"
+            % (len(mismatch), mismatch[0]))
+
+    # 3. Повторяющиеся имена там, где они должны быть своими.
+    for label, values in (
+            ("бедствий", [c.name for c in world.calamities.values()]),
+            ("вер", [f.name for f in world.faiths.values()]),
+            ("стран", [p.name for p in world.polities.values()]),
+            ("городов", [s.name for s in world.settlements.values()]),
+            ("походов", [x.name for x in world.expeditions.values()]),
+            ("союзов держав", [g.name for g in world.leagues.values()])):
+        repeats = [name for name, count in Counter(values).items() if count > 1]
+        if repeats:
+            bad("повторяются имена %s: %d (%s)"
+                % (label, len(repeats), repeats[0]))
+
+    # 4. Один бог во главе слишком многих вер.
+    chiefs = Counter(f.chief_deity_id for f in world.faiths.values()
+                     if f.chief_deity_id)
+    if chiefs:
+        deity_id, count = chiefs.most_common(1)[0]
+        share = count * 100.0 / max(1, len(world.faiths))
+        # На пяти верах любой бог возглавляет «двадцать процентов»: чтобы
+        # говорить о монополии, вер должно быть достаточно много.
+        if share > 20 and count >= 5 and len(world.faiths) >= 12:
+            deity = world.deities.get(deity_id)
+            bad("один бог возглавляет %.0f%% вер мира (%s, %d из %d)"
+                % (share, deity.given_name if deity else deity_id, count,
+                   len(world.faiths)))
+
+    # 5. Связь урона с длительностью: долгая беда не должна быть безобиднее
+    #    короткой той же тяжести.
+    # Сравнивать надо подобное с подобным: долгая перемена климата и
+    # нашествие демонов убивают по-разному и должны мериться каждое со
+    # своей роднёй, иначе безобидный по замыслу ледник вечно числится
+    # аномалией рядом с легионом.
+    by_severity = {}
+    for item in world.calamities.values():
+        if item.end is None or item.severity < 3:
+            continue
+        by_severity.setdefault((item.kind, item.severity), []).append(item)
+    for (kind, severity), items in sorted(by_severity.items()):
+        if len(items) < 3:
+            continue
+        longest = max(items, key=lambda c: c.end.year - c.start.year)
+        typical = sorted(c.deaths for c in items)[len(items) // 2]
+        span = longest.end.year - longest.start.year
+        if span > 200 and typical > 0 and longest.deaths < typical * 0.2:
+            note("самое долгое бедствие рода «%s» тяжести %d (%s, %d лет) "
+                 "унесло %d — меньше пятой части обычного (%d)"
+                 % (KIND_NAMES.get(kind, kind), severity, longest.name,
+                    span, longest.deaths, typical))
+
+    # 6. Тяжёлое бедствие без единой жертвы.
+    empty = [c for c in world.calamities.values()
+             if c.severity >= 4 and c.deaths == 0 and c.end is not None]
+    if empty:
+        note("бедствий тяжести 4–5 без единой жертвы: %d (%s)"
+             % (len(empty), empty[0].name))
+
+    # 7. Падежные ловушки в текстах событий.
+    #    «в Синяя Чащоба» — предлог и следом название в именительном.
+    prepositional = re.compile(r"\b(?:в|на|из|от|к|у|о)\s+[А-ЯЁ][а-яё]+\s+"
+                               r"[А-ЯЁ][а-яё]+\b")
+    suspicious = []
+    for event in world.events:
+        for match in prepositional.finditer(event.text):
+            phrase = match.group(0)
+            # «в землях под именем X» и прочие обороты — законные.
+            if any(word in phrase for word in ("имени", "именем", "краю")):
+                continue
+            suspicious.append((event.date.year, phrase))
+            break
+    if len(suspicious) > len(world.events) * 0.02:
+        note("возможные падежные ошибки после предлога: %d случаев (%s)"
+             % (len(suspicious), suspicious[0][1]))
+
+    # 8. Правители как личности: у каждого правления должны быть нрав,
+    #    умения и приговор истории, иначе короли снова станут переменными.
+    #    Малолетние государи лица ещё не имеют — с них и не спрашиваем.
+    reigns = []
+    for reign in world.reigns.values():
+        if reign.end is None:
+            continue
+        ruler = world.figures.get(reign.ruler_id)
+        race = RACES_BY_ID.get(ruler.race_id) if ruler is not None else None
+        if ruler is None or race is None:
+            continue
+        if ruler.age_at(reign.end.year) < race.adulthood:
+            continue
+        reigns.append(reign)
+    if reigns:
+        faceless = [r for r in reigns if not r.skills]
+        if faceless:
+            line = ("правлений без нрава и умений: %d из %d"
+                    % (len(faceless), len(reigns)))
+            # Единицы — это те, чья держава пала в тот же год: не поломка.
+            (bad if len(faceless) > len(reigns) * 0.02 else note)(line)
+        judged = [r for r in reigns
+                  if (r.end.year - r.start.year) >= 8 and not r.verdict]
+        if judged:
+            bad("долгих правлений без приговора истории: %d" % len(judged))
+        grades = Counter(r.verdict for r in reigns if r.verdict)
+        if grades:
+            top, count = grades.most_common(1)[0]
+            if count > len(reigns) * 0.85:
+                note("приговор «%s» стоит у %.0f%% правлений — оценка не "
+                     "различает правителей" % (top, count * 100.0 / len(reigns)))
+        # Черта нрава без женской формы выдала бы «королева, мстительный».
+        unknown = set()
+        for reign in reigns:
+            for trait in reign.traits:
+                if trait not in rulers.TRAIT_FEMALE:
+                    unknown.add(trait)
+        if unknown:
+            bad("черты нрава без женской формы: %s" % ", ".join(sorted(unknown)))
+
+    # 9. Знать как сила: в крупной старой державе лестница должна быть
+    #    разведена, а дома — иметь нрав и достаток.
+    grown = [p for p in world.polities.values()
+             if len(p.house_ids) >= 4 and p.reign_ids]
+    if grown:
+        flat = [p for p in grown
+                if not any(world.houses[h].rung >= 0 for h in p.house_ids
+                           if h in world.houses)]
+        if len(flat) > len(grown) * 0.5:
+            note("держав со знатью, но без разведённой лестницы: %d из %d"
+                 % (len(flat), len(grown)))
+    faceless_houses = [h for h in world.houses.values() if not h.motto]
+    if faceless_houses:
+        bad("знатных родов без нрава и девиза: %d из %d"
+            % (len(faceless_houses), len(world.houses)))
+
+    # 10. Войны: длина, исходы, разнообразие поводов, честность счёта.
+    wars = [w for w in world.wars.values() if w.end is not None]
+    if wars:
+        causes = Counter(w.cause for w in wars)
+        if len(causes) < 6:
+            note("поводов к войне всего %d — мир воюет по одной причине"
+                 % len(causes))
+        top_cause, top_count = causes.most_common(1)[0]
+        if top_count > len(wars) * 0.4:
+            note("повод «%s» стоит за %.0f%% войн"
+                 % (warfare.cause_label(top_cause),
+                    top_count * 100.0 / len(wars)))
+        outcomes = Counter(w.outcome for w in wars)
+        top_outcome, outcome_count = outcomes.most_common(1)[0]
+        if outcome_count > len(wars) * 0.7:
+            note("исход «%s» у %.0f%% войн — войны кончаются одинаково"
+                 % (top_outcome, outcome_count * 100.0 / len(wars)))
+        # Война, в которой не успели сойтись, — это либо оборванная
+        # война, либо та, чей противник погиб раньше от чужой руки.
+        # Войну, которую развели послы или выкупили купцы, к аномалиям
+        # не относим: она и не должна была дойти до сражения.
+        silent = [w for w in wars if not w.battle_ids
+                  and w.outcome not in (wf.INTERRUPTED, wf.ANNIHILATION)
+                  and war_system.NEGOTIATED not in w.notes]
+        if silent:
+            bad("войн без единого сражения: %d из %d" % (len(silent), len(wars)))
+        peaceless = [w for w in wars if not w.peace_name
+                     and w.outcome != wf.ANNIHILATION]
+        if peaceless:
+            bad("войн, кончившихся без мира и без гибели державы: %d"
+                % len(peaceless))
+        longest = max(wars, key=lambda w: w.years)
+        if longest.years < 8:
+            note("самая долгая война длилась %d лет — затяжных войн в мире нет"
+                 % longest.years)
+        # Счёт потерь должен сходиться с числом сражений.
+        odd = [w for w in wars if w.battle_ids and w.deaths <= 0]
+        if odd:
+            bad("войн со сражениями, но без потерь: %d" % len(odd))
+
+    # 11. Политика: договоры, союзы, крепости, роты, море.
+    if len(world.polities) >= 6:
+        if not world.pacts:
+            note("за всю историю не заключено ни одного договора")
+        else:
+            kinds = Counter(pact.kind for pact in world.pacts.values())
+            if len(kinds) < 3:
+                note("договоры бывают лишь %d видов — политика однообразна"
+                     % len(kinds))
+            if not world.leagues:
+                note("союзов держав не сложилось ни разу")
+            else:
+                small = [g for g in world.leagues.values()
+                         if g.status == ACTIVE and len(g.member_ids) < 3]
+                if small:
+                    bad("живой союз держав из %d державы: %s"
+                        % (len(small[0].member_ids), small[0].name))
+        forts = list(world.fortresses.values())
+        if forts:
+            moved = [item for item in forts if item.times_taken]
+            if not moved:
+                note("ни одна крепость за всю историю не сменила знамени")
+            ancient = max(forts, key=lambda f: (
+                (f.ended.year if f.ended else world.total_years) - f.built.year))
+            span = (ancient.ended.year if ancient.ended else world.total_years) \
+                - ancient.built.year
+            if span < 200:
+                note("крепости не стоят и двух веков — они должны переживать "
+                     "своих строителей")
+        elif len(world.polities) >= 10:
+            note("крепостей не построено ни одной")
+
+    for pact in world.pacts.values():
+        if pact.first_id == pact.second_id:
+            bad("договор заключён сам с собой")
+            break
+    for war in world.wars.values():
+        if set(war.attacker_allies) & set(war.defender_allies):
+            bad("в войне «%s» союзник на обеих сторонах" % war.name)
+            break
+
+    # 12. Повторы текста — главное, из-за чего мир перестаёт читаться живым.
+    sentences = Counter()
+    for event in world.events:
+        for piece in re.split(r"(?<=[.!?])\s+", event.text):
+            piece = piece.strip()
+            if len(piece) > 40:
+                sentences[piece] += 1
+    if sentences:
+        total = sum(sentences.values())
+        unique = len(sentences)
+        top_text, top_count = sentences.most_common(1)[0]
+        variety = unique * 100.0 / max(1, total)
+        line = ("разнообразие фраз: %d различных на %d, самая частая "
+                "повторена %d раз" % (unique, total, top_count))
+        if variety < 25 or top_count > total * 0.02:
+            note(line + " — «%s…»" % top_text[:60])
+        else:
+            found.append(("=", line))
+
+    # 13. Языки: разошлись ли они и слышно ли это в именах.
+    if world.tongues:
+        living = [t for t in world.tongues.values() if t.status == "живой"]
+        families = {}
+        for tongue in world.tongues.values():
+            root, seen = tongue, set()
+            while root is not None and root.parent_id and root.id not in seen:
+                seen.add(root.id)
+                root = world.tongues.get(root.parent_id)
+            families.setdefault(root.id if root else tongue.id, 0)
+            families[root.id if root else tongue.id] += 1
+        scripts = {t.script for t in world.tongues.values() if t.script}
+        found.append(("=", "языков: %d (живых %d), семей %d, письменностей %d"
+                      % (len(world.tongues), len(living), len(families),
+                         len(scripts))))
+        if len(world.tongues) <= len(families) and world.total_years >= 3000:
+            note("ни один язык за всю историю не разошёлся на наречия")
+        speechless = [t.name for t in living if not t.laws]
+        if speechless:
+            bad("язык без единого звукового закона: %s" % speechless[0])
+        # Два народа одной расы, говорящие на разных языках, не должны
+        # называть города одинаково — ради этого языки и заводились.
+        by_tongue = {}
+        for settlement in world.settlements.values():
+            folk = world.folks.get(settlement.folk_id)
+            if folk is None or not folk.tongue_id:
+                continue
+            by_tongue.setdefault(folk.tongue_id, set()).add(settlement.name)
+        pairs = [(tid, names) for tid, names in by_tongue.items()
+                 if len(names) >= 3]
+        clashes = 0
+        for i in range(len(pairs)):
+            for j in range(i + 1, len(pairs)):
+                first, second = world.tongues.get(pairs[i][0]), \
+                    world.tongues.get(pairs[j][0])
+                if first is None or second is None:
+                    continue
+                if first.race_id != second.race_id or first.laws == second.laws:
+                    continue
+                if pairs[i][1] & pairs[j][1]:
+                    clashes += 1
+        if clashes:
+            note("города разных наречий одной расы зовутся одинаково: %d пар"
+                 % clashes)
+    elif world.total_years >= 1000:
+        note("в мире не завелось ни одного языка")
+
+    # 14. Посольства: ездят ли и не выродились ли в одно и то же.
+    if world.embassies:
+        answers = Counter(item.answer for item in world.embassies.values())
+        errands = Counter(item.purpose for item in world.embassies.values())
+        found.append(("=", "посольств: %d, наказов различных %d, принято %d, "
+                      "убито послов %d"
+                      % (len(world.embassies), len(errands),
+                         answers.get("принято", 0),
+                         answers.get("посла убили", 0))))
+        if len(errands) <= 2 and len(world.embassies) > 20:
+            note("послы ездят всего с %d наказами" % len(errands))
+        top_errand, top_count = errands.most_common(1)[0]
+        if top_count > len(world.embassies) * 0.6:
+            note("посольства почти все об одном: «%s» — %d из %d"
+                 % (top_errand, top_count, len(world.embassies)))
+        for record in world.embassies.values():
+            if record.sender_id == record.host_id:
+                bad("посольство отправлено самому себе")
+                break
+    elif len(world.polities) >= 10 and world.total_years >= 2000:
+        note("дворы этого мира друг к другу не ездили ни разу")
+
+    # 15. Море и осады: сошлись ли флот и войско у одной гавани.
+    kinds = Counter(event.kind for event in world.events)
+    sieges = kinds.get("siege_start", 0)
+    blockades = kinds.get("blockade_start", 0)
+    if sieges or blockades:
+        sealed = sum(1 for event in world.events
+                     if any(line in event.text
+                            for line in narrative_war.SEALED_LINES))
+        found.append(("=", "осад: %d, морских блокад: %d, из них город "
+                      "заперт с моря и с суши: %d"
+                      % (sieges, blockades, sealed)))
+
+    # 16. Гильдии и вольные города.
+    if world.guilds:
+        kinds = Counter(item.kind for item in world.guilds.values())
+        republics = sum(1 for item in world.guilds.values() if item.republic_id)
+        found.append(("=", "гильдий: %d (родов %d), вольных городов %d, "
+                      "вмешательств в дела держав %d"
+                      % (len(world.guilds), len(kinds), republics,
+                         sum(item.deeds for item in world.guilds.values()))))
+        for guild in world.guilds.values():
+            if guild.wealth < 0:
+                bad("у гильдии «%s» казна ушла в минус" % guild.name)
+                break
+        if len(kinds) <= 1 and len(world.guilds) > 8:
+            note("все гильдии мира одного рода")
+    elif len(world.polities) >= 12 and world.total_years >= 3000:
+        note("купцы этого мира в силу не вошли ни разу")
+
+    # 17. Тайная политика.
+    if world.plots:
+        kinds = Counter(item.kind for item in world.plots.values())
+        results = Counter(item.outcome for item in world.plots.values())
+        found.append(("=", "тайных дел: %d (родов %d), удалось %d, "
+                      "раскрыто %d"
+                      % (len(world.plots), len(kinds),
+                         results.get("удалось", 0), results.get("раскрыто", 0))))
+        if len(kinds) <= 2 and len(world.plots) > 20:
+            note("тайные дела все на один лад: %d рода" % len(kinds))
+        if not results.get("раскрыто") and len(world.plots) > 40:
+            note("ни один соглядатай за всю историю не попался")
+        for plot in world.plots.values():
+            if plot.sender_id == plot.target_id:
+                bad("тайное дело затеяно против самого себя")
+                break
+
+    # 18. Династические унии.
+    if world.unions:
+        merged = sum(1 for item in world.unions.values() if item.merged)
+        longest = max(item.years or (world.total_years - item.started.year)
+                      for item in world.unions.values())
+        found.append(("=", "династических уний: %d, слияний держав %d, "
+                      "самая долгая %d лет"
+                      % (len(world.unions), merged, longest)))
+        for union in world.unions.values():
+            if union.first_id == union.second_id:
+                bad("держава в унии сама с собой")
+                break
+
+    # 19. Вещи и места: то, из чего потом строят подземелья.
+    if world.artifacts:
+        with_owner = sum(1 for item in world.artifacts.values() if item.owner_id)
+        in_places = sum(1 for item in world.artifacts.values() if item.site_id)
+        cursed = sum(1 for item in world.artifacts.values() if item.curse)
+        hands = sorted(len(item.trail) for item in world.artifacts.values())
+        found.append(("=", "именных вещей: %d (у владельцев %d, в местах %d, "
+                      "проклятых %d), рук в самой заслуженной %d"
+                      % (len(world.artifacts), with_owner, in_places, cursed,
+                         hands[-1])))
+        lonely = [item for item in world.artifacts.values()
+                  if len(item.trail) <= 1 and item.made.year
+                  < world.total_years - 1500]
+        if len(lonely) > len(world.artifacts) * 0.6:
+            note("вещи не ходят по рукам: у %d из %d всего один владелец"
+                 % (len(lonely), len(world.artifacts)))
+    elif world.total_years >= 2000:
+        bad("за всю историю не выковано ни одной именной вещи")
+
+    if world.sites:
+        by_kind = Counter(item.kind for item in world.sites.values())
+        untouched = sum(1 for item in world.sites.values()
+                        if item.status == "нетронуто")
+        with_story = sum(1 for item in world.sites.values() if item.story)
+        found.append(("=", "мест истории: %d (%s), нетронутых %d"
+                      % (len(world.sites),
+                         ", ".join("%s %d" % (kind, count)
+                                   for kind, count in by_kind.most_common(4)),
+                         untouched)))
+        if with_story < len(world.sites) * 0.9:
+            bad("мест без своей истории: %d — подземелью не из чего расти"
+                % (len(world.sites) - with_story))
+        if untouched == 0 and len(world.sites) > 40:
+            note("не осталось ни одного нетронутого места: всё уже вскрыли")
+    elif world.total_years >= 2000:
+        bad("мир не оставил ни одного места с историей")
+
+    if world.monsters:
+        slain = sum(1 for item in world.monsters.values()
+                    if item.status == "убит")
+        alive = len(world.living_monsters)
+        biggest = max(item.kills for item in world.monsters.values())
+        found.append(("=", "именных чудовищ: %d (убито %d, живы %d), "
+                      "худшее съело %d"
+                      % (len(world.monsters), slain, alive, biggest)))
+        if slain == 0 and len(world.monsters) > 8:
+            note("ни одно чудовище так и не убито: героям нечего рассказывать")
+
+    # 20. Ремёсла: расходятся ли открытия и есть ли отстающие.
+    if world.discoveries:
+        spread = sorted(len(item.known_by) for item in world.discoveries.values())
+        levels = sorted(len(p.known) for p in
+                        (world.polities[pid] for pid in world.active_polities))
+        found.append(("=", "открытий: %d, самое расхожее знают %d держав; "
+                      "ремёсел у держав от %d до %d"
+                      % (len(world.discoveries), spread[-1],
+                         levels[0] if levels else 0,
+                         levels[-1] if levels else 0)))
+        if levels and levels[0] == levels[-1] and len(levels) > 3:
+            note("все державы знают поровну: ремесло не даёт им различий")
+    elif world.total_years >= 2000:
+        bad("за всю историю не сделано ни одного открытия")
+
+    # 21. Своды и легенды: врут ли летописцы и расходится ли молва.
+    if world.codices:
+        kept = sum(1 for item in world.codices.values()
+                   if item.status == "ведётся")
+        spans = sorted(item.span for item in world.codices.values())
+        keepers = max(len(item.keepers) for item in world.codices.values())
+        accuracy = sum(item.accuracy for item in world.codices.values()) \
+            / len(world.codices)
+        found.append(("=", "летописных сводов: %d (ведутся %d), самый долгий "
+                      "%d лет, рук за пером до %d, средняя точность %.2f"
+                      % (len(world.codices), kept, spans[-1], keepers,
+                         accuracy)))
+        if spans[-1] < 150 and world.total_years >= 3000:
+            note("ни один свод не продержался и полутора веков")
+        if keepers < 2 and len(world.codices) > 5:
+            note("летописи не передают: каждый свод кончается со своим "
+                 "летописцем")
+
+    if world.legends:
+        drifted = sum(1 for item in world.legends.values() if item.shifts)
+        abouts = Counter(item.about for item in world.legends.values())
+        found.append(("=", "легенд: %d (изменились в пересказе %d), о чём: %s"
+                      % (len(world.legends), drifted,
+                         ", ".join("%s %d" % (about, count)
+                                   for about, count in abouts.most_common(4)))))
+        if drifted == 0 and len(world.legends) > 10:
+            note("легенды не меняются в пересказе — а должны")
+
+    # 22. Законы: расходятся ли реформы и есть ли образцовые державы.
+    if world.laws:
+        famous = [item for item in world.laws.values() if item.famous]
+        widest = max(len(item.copied_by) for item in world.laws.values())
+        kinds = len({item.key for item in world.laws.values()})
+        found.append(("=", "реформ: %d видов %d, самую переняли %d держав, "
+                      "образцовых %d"
+                      % (len(world.laws), kinds, widest, len(famous))))
+        if widest <= 1 and len(world.laws) > 6:
+            note("реформы никто не перенимает: державы не смотрят друг на друга")
+    elif world.total_years >= 3000:
+        note("ни одна держава за всю историю не провела реформы")
+
+    # 23. Великие бедствия: меняли ли они карту и пережил ли мир это.
+    great = [item for item in world.calamities.values()
+             if item.key in GREAT_KEYS]
+    drowned = [r for r in world.regions.values() if r.drowned]
+    sundered = [r for r in world.regions.values() if r.sundered]
+    gone = world.notes.get("народов больше нет") or {}
+    peaks = world.notes.get("народ в лучший век") or {}
+    notable_gone = [rid for rid in gone if int(peaks.get(rid, 0)) >= 20000]
+    from .catastrophe import CATALOG_BY_KEY
+    great_titles = sorted({CATALOG_BY_KEY[item.key].title.lower()
+                           for item in great if item.key in CATALOG_BY_KEY})
+    found.append(("=", "великих бедствий: %d (%s); затоплено земель %d, "
+                  "разрезано %d; народов ушло из мира %d"
+                  % (len(great), ", ".join(great_titles) or "нет",
+                     len(drowned), len(sundered), len(notable_gone))))
+    # Одна великая беда на тысячу лет — редкость; чаще — уже погода.
+    great_limit = max(3, int(world.total_years / 1000.0) + 3)
+    if len(great) > great_limit:
+        bad("великих бедствий %d за %d лет — это уже погода"
+            % (len(great), world.total_years))
+    if len(drowned) > len(world.regions) * 0.4:
+        bad("под водой оказалось больше трети мира: %d земель из %d"
+            % (len(drowned), len(world.regions)))
+    peak = int(world.notes.get("людей в лучший век") or 0)
+    now = world.world_population()
+    if peak and now * 20 < peak:
+        bad("мир опустел: от лучшего века осталась двадцатая доля "
+            "(%d из %d)" % (now, peak))
+    for calamity in great:
+        if calamity.key == "deep_waking" and not calamity.parent_id:
+            bad("«%s» поднялось ниоткуда, а должно быть осколком прошлого"
+                % calamity.name)
+            break
+
+    # 24. Худший год мира: не по одному бедствию, а по тому, сколько душ
+    #     мир на самом деле потерял — и что в тот век с ним делалось.
+    census = getattr(world, "census", None) or []
+    # Пролог, пока в мире никого нет, — не история: считаем с того века,
+    # когда появилась первая живая душа.
+    first = next((i for i, row in enumerate(census) if row["souls"] > 0), None)
+    census = census[first:] if first is not None else []
+    if len(census) >= 3:
+        worst, worst_loss = None, 0
+        for before, after in zip(census, census[1:]):
+            loss = before["souls"] - after["souls"]
+            if loss > worst_loss:
+                worst, worst_loss = (before, after), loss
+        # Век грызёт мир медленнее одного чёрного десятилетия, но
+        # выгрызает больше: худший век ищется отдельно.
+        span = 10
+        age, age_loss = None, 0
+        for index in range(len(census) - span):
+            before, after = census[index], census[index + span]
+            loss = before["souls"] - after["souls"]
+            if loss > age_loss:
+                age, age_loss = (before, after), loss
+        deepest = min(census, key=lambda row: row["souls"])
+        peak = max(census, key=lambda row: row["souls"])
+        if worst is not None and worst_loss > 0:
+            before, after = worst
+            share = worst_loss * 100.0 / max(1, before["souls"])
+            blame = ", ".join(after["calamities"][:3]) or "ничего громкого"
+            found.append(("=", "худшие десять лет: %d–%d, полегло %s "
+                          "(%.0f%% живших), виной %s; мрак %.2f, войн %d"
+                          % (before["year"], after["year"], _souls(worst_loss),
+                             share, blame, after["gloom"], after["wars"])))
+            if share >= 55:
+                note("за десять лет мир потерял %.0f%% населения (%d год)"
+                     % (share, after["year"]))
+        if age is not None and age_loss > 0:
+            before, after = age
+            share = age_loss * 100.0 / max(1, before["souls"])
+            blame = ", ".join(after["calamities"][:3]) \
+                or ", ".join(before["calamities"][:3]) or "долгий упадок"
+            found.append(("=", "худший век мира: %d–%d, мир потерял %s "
+                          "(%.0f%% живших), виной %s"
+                          % (before["year"], after["year"], _souls(age_loss),
+                             share, blame)))
+        found.append(("=", "лучший век: %d год, %s; самый пустой: %d год, %s"
+                      % (peak["year"], _souls(peak["souls"]),
+                         deepest["year"], _souls(deepest["souls"]))))
+        # Мир, который к концу истории так и не поднялся выше горстки,
+        # читать нечего — это не суровый мир, это пустой.
+        if peak["souls"] and census[-1]["souls"] * 50 < peak["souls"]:
+            bad("мир кончает историю в пятидесятой доле от лучшего века: "
+                "%s против %s"
+                % (_souls(census[-1]["souls"]), _souls(peak["souls"])))
+        dark = sum(1 for row in census if row["gloom"] >= 0.5)
+        if dark * 2 > len(census):
+            bad("больше половины истории мир провёл во всемирной тьме: "
+                "%d десятилетий из %d" % (dark, len(census)))
+        elif dark * 4 > len(census):
+            note("четверть истории мир провёл во всемирной тьме: "
+                 "%d десятилетий из %d" % (dark, len(census)))
+        # Мир, который только растёт, тоже не история: должны быть спады.
+        drops = sum(1 for a, b in zip(census, census[1:])
+                    if b["souls"] < a["souls"])
+        if drops * 20 < len(census):
+            note("население почти не падало за всю историю: спадов %d "
+                 "из %d веков — мир рос как на дрожжах" % (drops, len(census)))
+
+    # 25. Цепи бедствий: помнит ли беда прежнюю беду.
+    kids = {}
+    for calamity in world.calamities.values():
+        if calamity.parent_id and calamity.parent_id in world.calamities:
+            kids.setdefault(calamity.parent_id, []).append(calamity)
+    linked = sum(len(items) for items in kids.values())
+    if world.calamities:
+        share = linked * 100.0 / len(world.calamities)
+        gap = 0
+        for parent_id, items in kids.items():
+            parent = world.calamities[parent_id]
+            for child in items:
+                gap = max(gap, child.start.year - parent.start.year)
+        errands = sum(1 for e in world.events if e.kind == "dark_errand")
+        fallen = sum(1 for e in world.events if e.kind == "ruler_fallen")
+        # Путей возврата двенадцать; если мир знает один-два, цепи стали
+        # однообразными и читатель угадывает конец с первой строки.
+        from .systems.legacy import WAY_NOTES, WAY_WORDS
+        used = set()
+        for calamity in world.calamities.values():
+            for line in calamity.notes:
+                for key, pattern in WAY_NOTES.items():
+                    if line.startswith(pattern.split("%")[0].strip()):
+                        used.add(key)
+        if linked >= 6 and len(used) <= 2:
+            note("зло возвращается в мир всего %d путями из %d — цепи "
+                 "однообразны" % (len(used), len(WAY_NOTES)))
+        if used:
+            found.append(("=", "путей возврата зла: %d из %d (%s)"
+                          % (len(used), len(WAY_NOTES),
+                             ", ".join(sorted(WAY_WORDS.get(key, key)
+                                             for key in used)))))
+        found.append(("=", "связанных бедствий: %d из %d (%.0f%%), самый "
+                      "долгий разрыв %d %s; дверей в прошлое открыто %d, "
+                      "павших государей %d"
+                      % (linked, len(world.calamities), share,
+                         gap, _plural(gap, "год", "года", "лет"),
+                         errands, fallen)))
+        if world.total_years >= 4000 and share < 2:
+            note("беды этого мира не помнят друг друга: связанных "
+                 "%.0f%%" % share)
+        if share > 45:
+            bad("почти каждая беда выросла из прежней (%.0f%%) — цепь "
+                "перестала быть редкостью" % share)
+        for calamity in world.calamities.values():
+            if calamity.parent_id == calamity.id:
+                bad("бедствие «%s» выросло само из себя" % calamity.name)
+                break
+            parent = world.calamities.get(calamity.parent_id)
+            if parent is not None \
+                    and parent.start.ordinal > calamity.start.ordinal:
+                bad("бедствие «%s» старше своего родителя «%s»"
+                    % (calamity.name, parent.name))
+                break
+
+    # 26. Хозяйство: ясно ли, чем держава живёт, и разное ли оно у разных.
+    living = [world.polities[pid] for pid in world.active_polities]
+    if living:
+        middle = goods.middle_wealth(world)
+        mainstays, rich, poor = Counter(), None, None
+        best, worst = -1.0, 1e9
+        for polity in living:
+            souls = goods.polity_souls(world, polity)
+            if souls <= 0:
+                continue
+            balance = goods.polity_balance(world, polity)
+            rows = goods.mainstay(balance, 2)
+            if rows:
+                mainstays[rows[0][0]] += 1
+            value = goods.wealth(balance, souls)
+            if value > best:
+                best, rich = value, (polity, rows)
+            if value < worst:
+                worst, poor = value, (polity, rows)
+        if mainstays:
+            found.append(("=", "хозяйство: держав %d, опор %d; чаще всего "
+                          "живут %s (%d держав); достаток середняка %.1f"
+                          % (len(living), len(mainstays),
+                             goods.instr(mainstays.most_common(1)[0][0]),
+                             mainstays.most_common(1)[0][1], middle)))
+        if rich is not None and poor is not None and rich[0] is not poor[0]:
+            found.append(("=", "богаче всех %s (%s, %.1f), беднее всех %s "
+                          "(%s, %.1f)"
+                          % (rich[0].name,
+                             goods.instr(rich[1][0][0]) if rich[1] else "ничем",
+                             best, poor[0].name,
+                             goods.instr(poor[1][0][0]) if poor[1] else "ничем",
+                             worst)))
+        top = mainstays.most_common(1)[0][1] if mainstays else 0
+        if len(living) >= 6 and top * 10 > len(living) * 8:
+            note("почти все державы мира живут одним и тем же — хозяйства "
+                 "не различаются")
+        if len(living) >= 6 and len(mainstays) < 3:
+            note("опор у держав всего %d: хозяйство мира однообразно"
+                 % len(mainstays))
+
+    # 27. Причинность: держится ли история на собственных нитях.
+    from . import history
+    # Считаем по делам державы: город, основанный на пустом месте, и
+    # открытие ремесла причины иметь не обязаны, а война, мир, бунт,
+    # договор и реформа — обязаны.
+    POLITICAL = ("war_start", "war_end", "revolt", "betrayal",
+                 "titular_shift", "supply_break", "famine", "reform",
+                 "calamity_begins", "unfulfilled")
+    big = [event for event in world.events if event.kind in POLITICAL]
+    caused = [event for event in big if event.causes or event.facts]
+    share = 100.0 * len(caused) / max(1, len(big))
+    sprouted = [item for item in world.seeds.values() if item.state == "сбылось"]
+    faded = [item for item in world.seeds.values() if item.state == "угасло"]
+    deepest, longest = 0, 0
+    for event in world.events:
+        if not (event.causes or event.facts):
+            continue
+        depth = history.depth_of(world, event, 20)
+        if depth > deepest:
+            deepest = depth
+            chain = history.roots(world, event, 20)
+            longest = event.date.year - chain[-1].date.year if chain else 0
+    found.append(("=", "причинность: событий державных дел с причиной %d "
+                  "из %d "
+                  "(%.0f%%); следов %d, живых %d; зёрен %d — взошло %d, "
+                  "угасло %d; самая длинная нить %d звеньев на %d лет"
+                  % (len(caused), len(big), share, len(world.facts),
+                     len(world.open_facts), len(world.seeds), len(sprouted),
+                     len(faded), deepest + 1, longest)))
+    if world.total_years >= 2000:
+        if share < 5:
+            bad("история рассыпается: причина есть лишь у %.0f%% державных "
+                "дел" % share)
+        elif share < 25:
+            note("державных дел с причиной всего %.0f%%" % share)
+        if not sprouted:
+            note("ни одно отложенное последствие так и не взошло")
+        if deepest < 2:
+            note("длинных цепей причин в мире нет")
+        if sprouted and len(faded) < len(sprouted) * 0.3:
+            note("сбывается почти всё задуманное — несбывшегося слишком мало")
+    kinds = Counter(item.kind for item in sprouted)
+    if len(kinds) >= 2:
+        found.append(("=", "взошли: %s"
+                      % ", ".join("%s — %d" % (kind, count)
+                                  for kind, count in kinds.most_common(6))))
+    elif len(world.seeds) > 20 and len(kinds) == 1:
+        note("всходит только одно последствие из всех: %s"
+             % ", ".join(kinds))
+
+    # 28. Память людей: движет ли личный опыт политикой.
+    if world.memories:
+        by_kind = Counter(item.kind for item in world.memories.values())
+        twisted = sum(1 for item in world.memories.values() if item.twisted)
+        found.append(("=", "память: %d воспоминаний у %d человек, "
+                      "переиначенных %d; чаще всего помнят %s"
+                      % (len(world.memories), len(world._memory_of), twisted,
+                         ", ".join("%s (%d)" % pair
+                                   for pair in by_kind.most_common(3)))))
+        bonds = Counter(item.kind for item in world.bonds.values())
+        turned = sum(1 for item in world.bonds.values() if item.turns)
+        if bonds:
+            found.append(("=", "связи: %d, переменившихся %d; чаще всего %s"
+                          % (len(world.bonds), turned,
+                             ", ".join("%s (%d)" % pair
+                                       for pair in bonds.most_common(3)))))
+        personal = [event for event in world.events
+                    if event.kind == "war_start" and event.motives.get("лично")]
+        wars = [event for event in world.events if event.kind == "war_start"]
+        found.append(("=", "войн с личной причиной: %d из %d"
+                      % (len(personal), len(wars))))
+        for memory in world.memories.values():
+            figure = world.figures.get(memory.figure_id)
+            if figure is None:
+                bad("воспоминание принадлежит человеку, которого нет")
+                break
+            if figure.birth is not None and memory.year < figure.birth.year:
+                bad("%s помнит то, что было до его рождения"
+                    % figure.plain_name)
+                break
+        if world.total_years >= 3000 and len(by_kind) < 3:
+            note("люди этого мира помнят только одно: %s"
+                 % ", ".join(by_kind))
+    elif world.total_years >= 2000:
+        note("личной памяти в мире не осталось вовсе")
+
+    # 29. Переселения народов.
+    if world.migrations:
+        moves = list(world.migrations.values())
+        causes = Counter(item.cause for item in moves)
+        refused = sum(1 for item in moves if item.outcome != "приняли")
+        souls = sum(item.souls for item in moves)
+        found.append(("=", "переселений: %d, в дороге %s; отказали в приёме "
+                      "%d раз; гнало с места: %s"
+                      % (len(moves), _souls(souls), refused,
+                         ", ".join("%s — %d" % pair
+                                   for pair in causes.most_common(4)))))
+        top = causes.most_common(1)[0][1]
+        if len(moves) >= 10 and top * 10 > len(moves) * 9:
+            note("все переселения мира случились по одной причине: %s"
+                 % causes.most_common(1)[0][0])
+        for item in moves:
+            if item.souls <= 0:
+                bad("переселение без единой души")
+                break
+            target = world.regions.get(item.to_region)
+            if target is not None and target.drowned \
+                    and target.drowned_year and item.year > target.drowned_year:
+                bad("народ переселился в землю, ушедшую под воду")
+                break
+    elif world.total_years >= 3000:
+        note("за всю историю ни один народ не тронулся с места")
+
+    # 30. Растворение народов: смешиваются ли культуры.
+    culture = Counter(event.kind for event in world.events
+                      if event.kind in ("assimilation", "folk_blend",
+                                        "tongue_ban", "court_tongue"))
+    if culture:
+        found.append(("=", "растворение народов: растворилось %d, смешанных "
+                      "народов %d, дворов перешло на чужую речь %d, "
+                      "запретов речи %d"
+                      % (culture.get("assimilation", 0),
+                         culture.get("folk_blend", 0),
+                         culture.get("court_tongue", 0),
+                         culture.get("tongue_ban", 0))))
+        for folk in world.folks.values():
+            if folk.parent_id and folk.parent_id not in world.folks:
+                bad("народ «%s» вышел из народа, которого нет" % folk.name)
+                break
+    elif world.total_years >= 4000:
+        multi = sum(1 for pid in world.active_polities
+                    if world.polities[pid].multiethnic)
+        if multi >= 3:
+            note("в мире есть многонародные державы, но ни один народ ни в "
+                 "ком не растворился")
+
+    # 31. Смуты и заговоры: воюет ли держава сама с собой.
+    if world.strifes:
+        strifes = list(world.strifes.values())
+        causes = Counter(item.cause for item in strifes)
+        ends = Counter(item.outcome or "идёт" for item in strifes)
+        dead = sum(item.deaths for item in strifes)
+        longest = max(item.years for item in strifes)
+        found.append(("=", "смут: %d, полегло %s, самая долгая %d лет; "
+                      "из-за чего: %s; чем кончались: %s"
+                      % (len(strifes), _souls(dead), longest,
+                         ", ".join("%s — %d" % pair
+                                   for pair in causes.most_common(3)),
+                         ", ".join("%s — %d" % pair
+                                   for pair in ends.most_common(3)))))
+        if len(strifes) >= 6 and len(causes) < 2:
+            note("все смуты мира случились по одной причине")
+        for item in strifes:
+            if set(item.crown_cities) & set(item.rebel_cities):
+                bad("город смуты «%s» держат обе стороны разом" % item.name)
+                break
+    elif world.total_years >= 4000:
+        note("ни одна держава за всю историю не воевала сама с собой")
+
+    if world.cabals:
+        cabals = list(world.cabals.values())
+        ends = Counter(item.outcome or "зреет" for item in cabals)
+        aims = Counter(item.aim for item in cabals)
+        struck = sum(1 for item in cabals
+                     if item.outcome in ("удалось", "сорвалось"))
+        found.append(("=", "заговоров: %d, дошло до удара %d; ради чего: %s; "
+                      "чем кончились: %s"
+                      % (len(cabals), struck,
+                         ", ".join("%s — %d" % pair
+                                   for pair in aims.most_common(3)),
+                         ", ".join("%s — %d" % pair
+                                   for pair in ends.most_common(3)))))
+        if len(cabals) >= 10 and len(ends) < 3:
+            note("заговоры этого мира кончаются всегда одинаково")
+
+    # 32. Живая катастрофа: беда как история, а не как число погибших.
+    from . import disaster as dis_cat
+
+    calamities = list(world.calamities.values())
+    if calamities:
+        named = sum(1 for item in calamities
+                    if item.cause and item.cause != dis_cat.UNKNOWN_CAUSE)
+        hidden = sum(1 for item in calamities if item.cause_hidden)
+        omens = sum(len(item.omens) for item in calamities)
+        answered = sum(1 for item in calamities if item.responses)
+        mistakes = sum(1 for item in calamities if item.mistakes)
+        stopped = sum(1 for item in calamities
+                      if item.prevented
+                      and item.prevented != dis_cat.STOP_NONE)
+        found.append(("=", "беды: %d; причина названа у %d, известная не та "
+                      "у %d; знаков %d; власть отвечала в %d, ошиблась в %d; "
+                      "отведено заранее %d"
+                      % (len(calamities), named, hidden, omens, answered,
+                         mistakes, stopped)))
+        if named * 10 < len(calamities) * 8:
+            bad("у большинства бед причина не названа: %d из %d"
+                % (named, len(calamities)))
+        heavy = [item for item in calamities if item.severity >= 3]
+        if heavy and not any(item.responses for item in heavy):
+            bad("на тяжёлые беды власть не отвечала ни разу")
+        for item in calamities:
+            if item.cause_year and item.cause_year > item.start.year:
+                bad("у беды «%s» причина позже самой беды" % item.name)
+                break
+            if item.damage and max(item.damage.values()) > 1.0:
+                bad("у беды «%s» ущерб больше единицы" % item.name)
+                break
+
+    # 33. Шрамы земли и потерянное знание: что беда оставила после себя.
+    scars = list(world.scars.values())
+    if scars:
+        states = Counter(item.state for item in scars)
+        kinds = Counter(item.kind for item in scars)
+        kept = sum(1 for item in scars
+                   if item.state != dis_cat.SCAR_FORGOTTEN)
+        found.append(("=", "шрамы земли: %d, видов %d, состояния %s; мир ещё "
+                      "помнит %d"
+                      % (len(scars), len(kinds),
+                         ", ".join("%s — %d" % pair
+                                   for pair in states.most_common(4)), kept)))
+        top, count = kinds.most_common(1)[0]
+        if len(scars) >= 12 and count * 4 > len(scars):
+            note("шрамы однообразны: «%s» — %d из %d" % (top, count, len(scars)))
+        if len(scars) >= 12 and len(states) < 3:
+            note("шрамы не живут: состояний всего %d" % len(states))
+        for scar in scars:
+            region = world.regions.get(scar.region_id)
+            if (region is None or region.drowned) \
+                    and scar.state != dis_cat.SCAR_FORGOTTEN:
+                bad("шрам «%s» остался в земле, которой нет, и мир его всё "
+                    "ещё помнит" % scar.name)
+                break
+    elif world.total_years >= 3000 and len(calamities) >= 20:
+        note("беды этого мира не оставили на земле ни следа")
+
+    lore = list(world.lost_lore.values())
+    if lore:
+        back = sum(1 for item in lore if item.state == dis_cat.LORE_FOUND)
+        found.append(("=", "утрачено умений: %d, вернулось %d, видов %d"
+                      % (len(lore), back,
+                         len({item.kind for item in lore}))))
+        if back == len(lore) and len(lore) >= 6:
+            note("всё утраченное вернулось — утрата ничего не стоит")
+        for item in lore:
+            if item.found is not None and item.lost is not None \
+                    and item.found.ordinal < item.lost.ordinal:
+                bad("умение «%s» найдено раньше, чем потеряно" % item.kind)
+                break
+
+    # 34. Времена бед и шесть рассказов об одном.
+    eras = [item for item in world.crisis_eras.values() if item.name]
+    if eras:
+        spans = [(item.end.year if item.end else item.start.year)
+                 - item.start.year for item in eras]
+        found.append(("=", "времён бед: %d, в среднем по %d лет и %.1f беды; "
+                      "с многими именами %d"
+                      % (len(eras), round(sum(spans) / float(len(spans))),
+                         sum(len(item.calamity_ids)
+                             for item in eras) / float(len(eras)),
+                         sum(1 for item in eras if item.voices))))
+        longest = max(spans)
+        if longest > 600:
+            note("время бед длиной %d лет — это уже не эпоха, а весь мир"
+                 % longest)
+        for era in eras:
+            if len(era.calamity_ids) < 2:
+                bad("время бед «%s» собрано из одной беды" % era.name)
+                break
+    elif world.total_years >= 5000 and len(calamities) >= 40:
+        note("за всю историю беды ни разу не сложились в одно время")
+
+    spoken = [item for item in calamities if len(item.versions) >= 4]
+    if spoken:
+        found.append(("=", "бед, о которых спорят: %d из %d"
+                      % (len(spoken), len(calamities))))
+
+    # 35. Фронт: нашествие шло по землям или легло на них сразу.
+    fronts = [item for item in calamities if item.front]
+    if fronts:
+        rows = sum(len(item.front) for item in fronts)
+        lost = sum(1 for item in fronts
+                   if any(row.get("состояние") == dis_cat.LAND_LOST
+                          for row in item.front))
+        holds = sum(1 for item in fronts for row in item.front
+                    if row.get("состояние") == dis_cat.LAND_THREAT)
+        roles = Counter(row["роль"] for item in fronts for row in item.front
+                        if row.get("роль"))
+        found.append(("=", "фронтов: %d, записей %d, задержек %d; земли "
+                      "остались за чужими в %d; роли городов: %s"
+                      % (len(fronts), rows, holds, lost,
+                         ", ".join("%s — %d" % pair
+                                   for pair in roles.most_common(4)))))
+        for item in fronts:
+            for row in item.front:
+                if row.get("роль") == dis_cat.ROLE_STOOD \
+                        and row.get("состояние") == dis_cat.LAND_HELD:
+                    bad("город «выстоял» в земле, которую заняли (беда «%s»)"
+                        % item.name)
+                    break
+
+    # 36. Субъекты истории: не одни люди и не одни списки дел.
+    subjects = list(world.subjects.values())
+    if subjects:
+        from . import subject as sub_cat
+        kinds = Counter(item.kind for item in subjects)
+        rungs = Counter(item.rung for item in subjects)
+        back = sum(1 for item in subjects if len(item.spans) > 1)
+        quiet = sum(1 for item in subjects if item.quiet)
+        turns = sum(1 for item in subjects if item.temper_turns)
+        got = sum(1 for item in subjects
+                  if item.wish_state == sub_cat.GOAL_DONE)
+        found.append(("=", "субъектов: %d (%s); ступени: %s; вернулись %d, "
+                      "молчали %d, переменились %d, добились своего %d"
+                      % (len(subjects),
+                         ", ".join("%s — %d" % pair
+                                   for pair in kinds.most_common(4)),
+                         ", ".join("%s — %d" % pair
+                                   for pair in rungs.most_common(3)),
+                         back, quiet, turns, got)))
+        if len(kinds) == 1 and world.total_years >= 3000:
+            note("историю в этом мире делали только «%s»"
+                 % next(iter(kinds)))
+        for item in subjects:
+            died = item.ended.year if item.ended else None
+            if died is None:
+                continue
+            late = [turn for turn in item.temper_turns
+                    if int(turn.get("год", 0)) > died]
+            if late:
+                bad("субъект «%s» переменился после своего конца" % item.name)
+                break
+
+    # 38. Начало мира: первый слой причин, а не вступление.
+    origin = world.origin
+    if origin is not None:
+        from . import origin as org_cat
+        named = sum(1 for row in origin.laws if row.get("известен"))
+        place = {row["слой"]: index
+                 for index, row in enumerate(origin.order)}
+        turned = 0
+        for key, index in place.items():
+            layer = org_cat.LAYERS.get(key)
+            if layer is None:
+                continue
+            turned += sum(1 for need in layer.needs
+                          if need in place and place[need] > index)
+        found.append(("=", "начало: уклад «%s», мотив «%s»; слоёв %d "
+                      "(нет %d, не на своём месте %d); законов названо %d "
+                      "из %d; шрамов %d; версий %d; споров не решено %d; "
+                      "без ответа %d"
+                      % (origin.model,
+                         org_cat.MOTIFS[origin.motif].name
+                         if origin.motif in org_cat.MOTIFS else origin.motif,
+                         len(origin.layers), len(origin.missing), turned,
+                         named, len(origin.laws), len(origin.scars),
+                         len(origin.versions), len(origin.open_clashes),
+                         len(origin.unknown))))
+        if origin.order and origin.order[0]["слой"] != org_cat.SPACE:
+            bad("первым слоем мира положено не пространство")
+        for row in origin.scars:
+            land = row.get("земля", "")
+            if land and land not in world.regions:
+                bad("шрам творения лежит в земле, которой нет")
+                break
+
+    # 37. Праздники: память, у которой началась своя жизнь.
+    holidays = list(world.holidays.values())
+    if holidays:
+        from . import holidays as hol_cat
+        steps = Counter(item.step for item in holidays)
+        holders = Counter(item.holder for item in holidays)
+        lost = sum(1 for item in holidays if item.lost_why)
+        banned = sum(1 for item in holidays if item.bans)
+        back = sum(1 for item in holidays if item.state == hol_cat.REVIVED)
+        marks = sum(1 for item in holidays if item.marks)
+        cases = sum(len(item.doings) for item in holidays)
+        found.append(("=", "праздников: %d (отмечают %d); ступени: %s; "
+                      "держат: %s; повод забыт у %d, запрещали %d, "
+                      "вернулось %d, оставили постройку %d, случаев на них %d"
+                      % (len(holidays), len(world.holidays_kept()),
+                         ", ".join("%s — %d" % pair
+                                   for pair in steps.most_common(3)),
+                         ", ".join("%s — %d" % pair
+                                   for pair in holders.most_common(3)),
+                         lost, banned, back, marks, cases)))
+        if world.total_years >= 3000 and not lost:
+            note("ни один праздник за всю историю не потерял своего повода")
+        for item in holidays:
+            if item.forgot_year and item.forgot_year < item.born.year:
+                bad("праздник «%s» забыл повод раньше, чем завёлся"
+                    % item.name)
+                break
+
+    # 9. Мир, в котором ничего не выросло.
+    if world.active_polities:
+        biggest = max((world.polities[p].population
+                       for p in world.active_polities), default=0)
+        if biggest < 5000:
+            note("крупнейшая держава к концу истории — %d душ" % biggest)
+    elif world.total_years >= 3000:
+        note("за всю историю не уцелело ни одной страны")
+
+    return found
+
+
+# ---------------------------------------------------------------------------
+# Запуск
+# ---------------------------------------------------------------------------
+
+def dates_for(world, spin: int = 0, count: int = 5) -> list:
+    """Пять дат для срезов: по одной из каждой полосы истории.
+
+    Даты берутся от сида мира, а не от случая: один и тот же мир даёт один
+    и тот же разбор, и его можно сравнить с прежним. А чтобы посмотреть
+    другие века, крутят `spin` — это та же пятёрка полос, но другие дни
+    внутри них.
+    """
+    total = max(1, int(getattr(world, "total_years", 1)))
+    rng = Rng(mix_seed(seed_to_int(getattr(world, "seed_text", "") or ""),
+                       ("разбор", int(spin))))
+    dates = []
+    for low, high in BANDS[:count]:
+        start = max(1, int(total * low))
+        end = max(start + 1, int(total * high))
+        dates.append(min(total, rng.randint(start, end - 1)))
+    return sorted(set(dates))
+
+
+def random_spin() -> int:
+    """Случайный поворот дат — для прогона, которому нужен не тот же век."""
+    return struct.unpack(">Q", os.urandom(8))[0]
+
+
+# ---------------------------------------------------------------------------
+# Разбор целиком
+# ---------------------------------------------------------------------------
+
+# Части разбора: ключ, как зовётся для человека, о чём она.
+VERDICT = "мир"
+DATES = "даты"
+PORTRAITS = "портреты"
+TOTALS = "итог"
+FLAWS = "поломки"
+
+PARTS = (
+    (VERDICT, "Что это за мир",
+     "мир целиком одной страницей: тепло и влага, суша, судьба, беды, "
+     "волшебство, народы и то, как он сделан"),
+    (DATES, "Пять дат",
+     "срезы мира на пять дат с разбросом по всем эпохам: кто держал "
+     "землю, что шло, кто был жив"),
+    (PORTRAITS, "Портреты",
+     "одиннадцать портретов: величайшие имена, ушедшие народы, самый "
+     "старый город, самое злое время, чудо, владение, сама земля"),
+    (TOTALS, "Итог числами", "сводка всех реестров мира"),
+    (FLAWS, "Проверка на поломки",
+     "сто с лишним мер и ловушек: падежи, род, повторы текста, "
+     "монополия одного бога — всё, на чём мир ломался прежде"),
+)
+ALL_PARTS = tuple(key for key, _name, _about in PARTS)
+PART_NAMES = {key: name for key, name, _about in PARTS}
+
+
+def head_lines(world, dates=()) -> list:
+    """Шапка разбора: чем этот мир задан."""
+    settings = getattr(world, "settings", None)
+    map_path = getattr(settings, "map_path", "") if settings else ""
+    made = getattr(settings, "map_make", None) if settings else None
+    if map_path:
+        where = os.path.basename(map_path)
+    elif made:
+        where = "своей выделки"
+    elif getattr(world, "map_link", None) is not None:
+        where = "гексовая"
+    else:
+        where = "процедурная"
+    rows = ["#" * 78, "РАЗБОР МИРА",
+            "  сид: %s" % getattr(world, "seed_text", "?"),
+            "  длительность: %s" % years_text(int(world.total_years)),
+            "  карта: %s" % where]
+    if dates:
+        rows.append("  даты срезов: %s" % ", ".join(str(d) for d in dates))
+    rows.append("#" * 78)
+    rows.append("")
+    return rows
+
+
+def report(world, parts=ALL_PARTS, dates=None, spin: int = 0,
+           progress=None, findings=None) -> str:
+    """Собрать разбор мира и вернуть его одним текстом.
+
+    `parts` — какие части нужны (ключи из `PARTS`); порядок всегда один и
+    тот же, потому что общее читается прежде частного. `progress` —
+    если передан, зовётся как progress(доля, «чем занят») — окну нужно
+    показывать полосу, а разбор большого мира идёт секунды. `findings` —
+    уже сосчитанные находки проверки: на большом мире она идёт секунды, и
+    считать её дважды (для текста и для ответа «сколько поломок») незачем.
+    """
+    wanted = [key for key in ALL_PARTS if key in set(parts or ALL_PARTS)]
+    if dates is None:
+        dates = dates_for(world, spin)
+    dates = [d for d in dates if 1 <= d <= int(world.total_years)]
+    lines = []
+
+    def out(line="") -> None:
+        lines.append(line)
+
+    def step(done: int, note: str) -> None:
+        if progress is not None:
+            progress(done / float(max(1, len(wanted))), note)
+
+    lines.extend(head_lines(world, dates if DATES in wanted else ()))
+    for done, key in enumerate(wanted):
+        step(done, PART_NAMES.get(key, key))
+        if key == VERDICT:
+            world_verdict(world, out)
+        elif key == DATES:
+            for year in dates:
+                snapshot(world, year, out)
+        elif key == PORTRAITS:
+            portraits(world, out)
+        elif key == TOTALS:
+            out("#" * 78)
+            out("ИТОГ")
+            out("#" * 78)
+            for name, value in world.stats().items():
+                out("  %-28s %s" % (name, value))
+            out("")
+        elif key == FLAWS:
+            out("#" * 78)
+            out("ПРОВЕРКА НА ПОЛОМКИ")
+            out("#" * 78)
+            if findings is None:
+                findings = audit(world)
+            for mark, line in findings:
+                out("  %s %s" % (mark, line))
+            if not findings:
+                out("  всё чисто")
+            out("")
+            out("  серьёзных аномалий: %d" % serious_count(findings))
+    step(len(wanted), "готово")
+    return "\n".join(lines)
+
+
+def serious_count(findings) -> int:
+    """Сколько среди находок настоящих поломок, а не наблюдений."""
+    return len([row for row in findings if row[0] == "!"])

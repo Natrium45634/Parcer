@@ -396,6 +396,7 @@ def upkeep(ctx, year: int, period: int) -> None:
         population += population * growth * (1.0 - population / capacity)
         population *= rng.uniform(0.985, 1.02)
         tribe.population = max(0, int(population))
+        world.note_census(tribe, year)
 
         if tribe.population < 25 or rng.chance(0.0022 * spec.turmoil * period * ctx.growth_scale):
             date = ctx.date_in(rng, year)

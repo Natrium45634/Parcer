@@ -342,4 +342,16 @@ def _finalize(world: World) -> None:
     """Приводит летопись в порядок: строгий хронологический порядок событий."""
     world.refresh_populations()
     world.refresh_faiths()
+    # Последний год мира записывается точно. Перепись снимается шагом в
+    # десятки лет, и без этой записи счёт по кривым расходится с живым
+    # счётом на последний год на процент — а это тот самый год, на котором
+    # мир и показывают по умолчанию.
+    last = int(world.total_years)
+    for registry, alive in ((world.settlements, world.active_settlements),
+                            (world.tribes, world.active_tribes),
+                            (world.camps, world.active_camps)):
+        for place_id in alive:
+            place = registry.get(place_id)
+            if place is not None:
+                world.note_census(place, last, force=True)
     world.events.sort(key=lambda event: (event.date.ordinal, int(event.id[1:])))

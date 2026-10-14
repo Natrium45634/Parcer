@@ -1336,7 +1336,7 @@ def _split_polity(ctx, calamity, polity, rng, year: int, date) -> None:
                 polity.settlement_ids.remove(settlement.id)
             settlement.polity_id = new_polity.id
             settlement.is_capital = settlement.id == capital.id
-            world.hold_settlement(new_polity, settlement.id)
+            world.hold_settlement(new_polity, settlement.id, year)
             if settlement.region_id not in new_polity.region_ids:
                 new_polity.region_ids.append(settlement.region_id)
         succession.install_founder(ctx, new_polity, head, capital, date, year)
@@ -1369,7 +1369,7 @@ def _free_cities(ctx, calamity, polity, rng, year: int, date) -> None:
     for settlement in freed:
         if settlement.id in polity.settlement_ids:
             polity.settlement_ids.remove(settlement.id)
-        settlement.polity_id = ""
+        world.release_settlement(settlement, year)
     world.add_event(
         date=date, era_index=world.era_index_at(year), kind="polity_fracture",
         title="Раздробленность: %s" % polity.name,
@@ -1421,7 +1421,7 @@ def _tribal_takeover(ctx, calamity, polity, rng, year: int, date) -> None:
             settlement.polity_id = new_polity.id
             settlement.race_id = settlement.race_id     # жители остаются прежними
             settlement.is_capital = settlement.id == capital.id
-            world.hold_settlement(new_polity, settlement.id)
+            world.hold_settlement(new_polity, settlement.id, year)
             if settlement.region_id not in new_polity.region_ids:
                 new_polity.region_ids.append(settlement.region_id)
         world.end_tribe(tribe, date, "село на завоёванные города", "осело")

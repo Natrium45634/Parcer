@@ -413,7 +413,7 @@ def tick_colonies(ctx, year: int) -> None:
     leader.home_id = settlement.id
     subjects = [settlement.id]
     if polity is not None:
-        world.hold_settlement(polity, settlement.id)
+        world.hold_settlement(polity, settlement.id, year)
         if region.id not in polity.region_ids:
             polity.region_ids.append(region.id)
         subjects.append(polity.id)
@@ -500,7 +500,7 @@ def tick_polities(ctx, year: int) -> None:
     )
     for settlement in members:
         settlement.polity_id = polity.id
-        world.hold_settlement(polity, settlement.id)
+        world.hold_settlement(polity, settlement.id, year)
         if settlement.region_id not in polity.region_ids:
             polity.region_ids.append(settlement.region_id)
     capital.is_capital = True
@@ -892,6 +892,7 @@ def upkeep(ctx, year: int, period: int) -> None:
             1.0 + ctx.growth(race.growth, camp.region_id) * period
             * rng.uniform(-0.6, 1.0))
         camp.population = max(0, int(population))
+        world.note_census(camp, year)
         if camp.population < 20 or rng.chance(0.0022 * spec.turmoil * period * ctx.growth_scale):
             date = ctx.date_in(rng, year)
             world.end_camp(camp, date, "разорён", GONE)

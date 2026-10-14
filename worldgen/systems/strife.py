@@ -587,7 +587,7 @@ def _split(ctx, strife, polity, rebel, year: int, date, rng):
             polity.settlement_ids.remove(city.id)
         city.polity_id = new_polity.id
         city.is_capital = city.id == capital.id
-        world.hold_settlement(new_polity, city.id)
+        world.hold_settlement(new_polity, city.id, year)
         if city.region_id not in new_polity.region_ids:
             new_polity.region_ids.append(city.region_id)
     if not _live_cities(world, polity):

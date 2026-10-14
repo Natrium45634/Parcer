@@ -57,6 +57,34 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
 # которые летопись не перечисляет по одному.
 RURAL_FACTOR = 11.0
 
+# Чем в летописи зовётся начало и конец срока. Слов несколько, потому что
+# город основан, договор подписан, поход отправлен, а крепость построена, —
+# и у каждой модели своё слово. Проверка одна на всех: иначе «кто был жив в
+# таком-то году» отвечалось бы в каждом разделе по-своему.
+BEGAN_FIELDS = ("founded", "started", "signed", "sent", "built", "start",
+                "created", "born")
+ENDED_FIELDS = ("ended", "end", "returned", "closed")
+
+
+def alive_at(item, year: int) -> bool:
+    """Стояло ли это в таком-то году — по записанным срокам.
+
+    Год считается сроком, а не точкой: кончившееся в этот самый год в нём
+    ещё стояло. Той же меркой отвечает и `World.souls_at`, иначе город
+    выходил бы разом стоящим и пустым.
+    """
+    for name in BEGAN_FIELDS:
+        began = getattr(item, name, None)
+        if began is not None:
+            if began.year > year:
+                return False
+            break
+    for name in ENDED_FIELDS:
+        ended = getattr(item, name, None)
+        if ended is not None:
+            return ended.year >= year
+    return True
+
 # Насколько тяжела именная обида и как она называется в летописи.
 GRUDGE_WEIGHT = {"poison": 0.85, "envoy": 0.8, "spy": 0.45, "claim": 0.5,
                  "oath": 0.7, "murder": 0.9, "insult": 0.4}
@@ -992,6 +1020,7 @@ class World:
         tribe = Tribe(id=self.next_id("T"), **kwargs)
         self.tribes[tribe.id] = tribe
         self.active_tribes.append(tribe.id)
+        self.note_census(tribe, tribe.founded.year, force=True)
         return tribe
 
     def add_settlement(self, **kwargs) -> Settlement:
@@ -1020,6 +1049,9 @@ class World:
         # кривая начинается там, где до города впервые дошла перепись, и
         # начало его жизни пропадает.
         self.note_census(settlement, settlement.founded.year, force=True)
+        if settlement.polity_id:
+            self.note_owner(settlement, settlement.polity_id,
+                            settlement.founded.year)
         return settlement
 
     def census_step(self) -> int:
@@ -1037,25 +1069,58 @@ class World:
             self._census_step = step
         return step
 
-    def note_census(self, settlement, year: int, force: bool = False) -> None:
-        """Отметить, сколько душ в поселении на этот год.
+    def note_census(self, place, year: int, force: bool = False) -> None:
+        """Отметить, сколько душ в поселении, племени или лагере на этот год.
 
         Заодно ведётся самый людный год за всю его жизнь: по нынешнему числу
         не видно, что город был вдвое больше тысячу лет назад, а это и есть
         самое интересное, что о нём можно сказать.
+
+        Пишется это всем, кто держит людей, а не одним городам: пока кривая
+        была только у городов, мир прошлого века было не пересчитать — три
+        четверти истории иных миров проходит до первого города, и в срезе на
+        тысячный год стояло бы «население неизвестно».
         """
         year = int(year)
-        souls = int(settlement.population)
-        if souls > settlement.peak_population:
-            settlement.peak_population = souls
-            settlement.peak_year = year
+        souls = int(place.population)
+        if souls > place.peak_population:
+            place.peak_population = souls
+            place.peak_year = year
         if not force and year % self.census_step():
             return
-        rows = settlement.census
+        rows = place.census
         if rows and rows[-1][0] == year:
             rows[-1][1] = souls
             return
         rows.append([year, souls])
+
+    def souls_at(self, place, year: int) -> int:
+        """Сколько душ было в этом месте в таком-то году.
+
+        Ответ берётся из кривой людности: последняя запись не позже
+        спрошенного года. Если место в этот год ещё не стояло или уже
+        кончилось — ноль, и это не пробел, а ответ.
+
+        Год тут считается сроком, а не точкой: место, кончившееся в этот
+        самый год, в нём ещё стояло — и в счёт входит. Это та же мерка,
+        по которой летопись решает, кто в таком-то году жив.
+        """
+        year = int(year)
+        if place.founded is not None and place.founded.year > year:
+            return 0
+        ended = getattr(place, "ended", None)
+        if ended is not None and ended.year < year:
+            return 0
+        souls = 0
+        for mark, value in (place.census or ()):
+            if int(mark) > year:
+                break
+            souls = int(value)
+        if not souls and not (place.census or ()):
+            # Кривой нет вовсе — мир сделан старой программой. Нынешнее
+            # число честнее нуля: оно хотя бы верно для последнего года.
+            return int(place.population)
+        return souls
 
     def add_polity(self, **kwargs) -> Polity:
         polity = Polity(id=self.next_id("P"), **kwargs)
@@ -1067,15 +1132,21 @@ class World:
         camp = Camp(id=self.next_id("K"), **kwargs)
         self.camps[camp.id] = camp
         self.active_camps.append(camp.id)
+        self.note_census(camp, camp.founded.year, force=True)
         return camp
 
-    def hold_settlement(self, polity, settlement_id: str) -> None:
+    def hold_settlement(self, polity, settlement_id: str,
+                        year: int = 0) -> None:
         """Город достался державе.
 
         Список нынешних городов потом почистят — от погибших и от тех,
         что отошли соседу. Список «держала когда-то» не чистят никогда:
         иначе в летописи остаются державы без единого города, и о том,
         чем они были, сказать уже нечего.
+
+        Год перехода пишется городу отрезком: по спискам державы видно, чем
+        она владела, но не видно, когда, — а «чей это был город в таком-то
+        году» спрашивают и срез года, и страница места.
         """
         if not settlement_id:
             return
@@ -1083,6 +1154,59 @@ class World:
             polity.settlement_ids.append(settlement_id)
         if settlement_id not in polity.held_ids:
             polity.held_ids.append(settlement_id)
+        self.note_owner(self.settlements.get(settlement_id), polity.id, year)
+
+    def note_owner(self, settlement, polity_id: str, year: int = 0) -> None:
+        """Отметить, с какого года город за этой державой (пусто — ничей).
+
+        Повторную запись о том же хозяине не делаем: отрезок есть смена
+        хозяина, а не ежегодная отметка.
+        """
+        if settlement is None:
+            return
+        if not year:
+            year = (settlement.founded.year
+                    if settlement.founded is not None else 0)
+        rows = settlement.owners
+        if rows and rows[-1][1] == (polity_id or ""):
+            return
+        if rows and int(rows[-1][0]) == int(year):
+            # Два хозяина в один год — записывается последний: город,
+            # взятый и отданный в том же году, историей не владел. А если
+            # после этого вышло, что хозяин тот же, что в прошлом отрезке,
+            # отрезок надо убрать: иначе в череде стоят два «ничей»
+            # подряд — взяли и отдали в один год.
+            rows[-1][1] = polity_id or ""
+            if len(rows) > 1 and rows[-2][1] == rows[-1][1]:
+                rows.pop()
+            return
+        rows.append([int(year), polity_id or ""])
+
+    def release_settlement(self, settlement, year: int = 0) -> None:
+        """Город остался без державы: столица пала, держава кончилась."""
+        if settlement is None:
+            return
+        settlement.polity_id = ""
+        self.note_owner(settlement, "", year)
+
+    def town_owner_at(self, settlement, year: int):
+        """Какая держава держала этот город в таком-то году (или None).
+
+        Отвечает по отрезкам, а не по нынешнему хозяину: держава, взявшая
+        город в последнем веке, не владела им всю его жизнь.
+        """
+        if settlement is None:
+            return None
+        year = int(year)
+        owner = ""
+        for mark, polity_id in (settlement.owners or ()):
+            if int(mark) > year:
+                break
+            owner = polity_id or ""
+        if not owner and not (settlement.owners or ()):
+            # Отрезков нет вовсе — мир сделан старой программой.
+            owner = settlement.polity_id
+        return self.polities.get(owner) if owner else None
 
     def add_event(self, date: Date, era_index: int, kind: str, title: str,
                   text: str, importance: int = 2, actors=None, subjects=None,
@@ -1523,6 +1647,9 @@ class World:
         tribe.status = status
         tribe.ended = date
         tribe.end_reason = reason
+        # Последняя точка кривой — год конца: с чем племя ушло. Без неё по
+        # кривой выходит, будто оно угасло полным.
+        self.note_census(tribe, date.year, force=True)
         if tribe.id in self.active_tribes:
             self.active_tribes.remove(tribe.id)
         if self.map_link is not None:
@@ -1609,7 +1736,7 @@ class World:
         for settlement_id in list(polity.settlement_ids):
             settlement = self.settlements.get(settlement_id)
             if settlement is not None and settlement.status == ACTIVE:
-                settlement.polity_id = ""
+                self.release_settlement(settlement, date.year)
                 settlement.is_capital = False
 
     def end_camp(self, camp, date: Date, reason: str, status: str = GONE) -> None:
@@ -1618,6 +1745,7 @@ class World:
         camp.status = status
         camp.ended = date
         camp.end_reason = reason
+        self.note_census(camp, date.year, force=True)
         if camp.id in self.active_camps:
             self.active_camps.remove(camp.id)
         if self.map_link is not None:
@@ -1773,6 +1901,65 @@ class World:
         for camp_id in self.active_camps:
             total += self.camps[camp_id].population
         return total
+
+    def holdings_at(self, year: int) -> dict:
+        """Какие города были за какой державой в этом году: id -> города.
+
+        Считается по отрезкам владения, одним проходом. По нынешнему
+        хозяину города судить нельзя: завоеватель вышел бы великим ещё до
+        своего первого завоевания, а павшая держава — нищей за век до
+        своего падения. Отвечает на это один метод на всю программу:
+        временная шкала и разбор мира должны называть одну и ту же
+        крупнейшую державу.
+        """
+        rows = {}
+        for town in self.settlements.values():
+            if not alive_at(town, year):
+                continue
+            owner = self.town_owner_at(town, year)
+            if owner is None:
+                continue
+            rows.setdefault(owner.id, []).append(town)
+        for towns in rows.values():
+            towns.sort(key=lambda item: (-self.souls_at(item, year), item.id))
+        return rows
+
+    def population_at(self, year: int) -> int:
+        """Сколько душ было в мире в таком-то году.
+
+        Считается не по нынешнему состоянию, а по кривым людности: мир
+        прошлого века должен отвечать из записей, иначе срез на любой год,
+        кроме последнего, приходится снимать во время самого счёта — и мир,
+        загруженный из файла, о себе уже ничего сказать не может.
+        """
+        total = 0
+        for settlement in self.settlements.values():
+            souls = self.souls_at(settlement, year)
+            if souls:
+                total += int(souls * RURAL_FACTOR)
+        for tribe in self.tribes.values():
+            total += self.souls_at(tribe, year)
+        for camp in self.camps.values():
+            total += self.souls_at(camp, year)
+        return total
+
+    def population_by_race_at(self, year: int) -> dict:
+        """То же, но по народам: раса -> душ в этот год."""
+        totals = {}
+
+        def add(race_id: str, souls: int) -> None:
+            if souls:
+                totals[race_id] = totals.get(race_id, 0) + int(souls)
+
+        for settlement in self.settlements.values():
+            souls = self.souls_at(settlement, year)
+            if souls:
+                add(settlement.race_id, int(souls * RURAL_FACTOR))
+        for tribe in self.tribes.values():
+            add(tribe.race_id, self.souls_at(tribe, year))
+        for camp in self.camps.values():
+            add(camp.race_id, self.souls_at(camp, year))
+        return totals
 
     def population_by_race(self) -> dict:
         totals = {}
