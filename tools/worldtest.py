@@ -1070,6 +1070,373 @@ def worst_dominion(world, out) -> None:
             % (cat.ENDS_BY_KEY[hold.end][0], hold.end_how))
 
 
+def world_verdict(world, out) -> None:
+    """Что это за мир — одной страницей, прежде всего остального.
+
+    Числа в итоге говорят, сколько в мире держав и бед. Но человек,
+    открывший летопись, спрашивает другое: холодно тут или жарко, много
+    ли суши, можно ли вообще тут жить, чем этот мир опасен, есть ли в
+    нём волшебство и кто его населяет. Всё это в генераторе уже решено
+    — судьбой мира, картой, складом бед, началом, — но лежит порознь, и
+    собрать это в приговор никто не брался.
+
+    Раздел нарочно стоит первым и говорит словами, а не числами: числа
+    о той же земле есть ниже, в разборе карты. И он собирается даже у
+    мира без карты — там, где слоёв нет, приговор выносится по тому,
+    из каких земель мир составлен.
+    """
+    out("=" * 78)
+    out("ЧТО ЭТО ЗА МИР")
+    out("=" * 78)
+    for line in _climate_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _life_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _danger_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _magic_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _folk_lines(world):
+        out("  %s" % line)
+    out("")
+    for line in _origin_lines(world):
+        out("  %s" % line)
+    out("")
+
+
+def wm_magic() -> int:
+    """Номер слоя магии — из самого читателя карт, а не числом в коде."""
+    from worldgen import worldmap as wm
+    return wm.L_MAGIC
+
+
+def _wmap_of(world):
+    link = getattr(world, "map_link", None)
+    return getattr(link, "wmap", None) if link is not None else None
+
+
+def _climate_lines(world) -> list:
+    """Холодный он или жаркий, мокрый или сухой, много ли в нём суши."""
+    wmap = _wmap_of(world)
+    if wmap is None:
+        return _climate_by_terrain(world)
+
+    size = wmap.size
+    land = [index for index in range(size) if wmap.is_land(index)]
+    if not land:
+        return ["Суши в этом мире нет вовсе."]
+    temps = [wmap.value(1, index) for index in land]
+    wets = [wmap.value(2, index) for index in land]
+    mean_t = sum(temps) / len(temps)
+    mean_w = sum(wets) / len(wets)
+    frozen = sum(1 for value in temps if value < 0) * 100.0 / len(temps)
+    hot = sum(1 for value in temps if value > 25) * 100.0 / len(temps)
+    dry = sum(1 for value in wets if value < 0.3) * 100.0 / len(wets)
+    share = len(land) * 100.0 / max(1, size)
+
+    said = []
+    if mean_t < 2:
+        said.append("Мир холодный")
+    elif mean_t < 12:
+        said.append("Мир прохладный")
+    elif mean_t < 22:
+        said.append("Мир умеренный")
+    else:
+        said.append("Мир жаркий")
+    said.append("в среднем на суше %+.1f °C" % mean_t)
+    if frozen >= 20:
+        said.append("пятая часть земли и больше лежит под морозом (%.0f%%)"
+                    % frozen)
+    elif frozen < 3 and hot >= 25:
+        said.append("мороза тут не знают вовсе, а зной стоит на %.0f%% земли"
+                    % hot)
+    lines = [", ".join(said) + "."]
+
+    wet_said = "сухой" if mean_w < 0.3 else \
+        ("мокрый" if mean_w > 0.55 else "ни сухой, ни мокрый")
+    lines.append("По воде он %s: влага в среднем %.2f, сухих земель %.0f%%."
+                 % (wet_said, mean_w, dry))
+
+    if share < 15:
+        about = "воды тут впятеро больше суши"
+    elif share < 25:
+        about = "воды втрое больше суши"
+    elif share < 42:
+        about = "воды заметно больше суши"
+    elif share < 55:
+        about = "воды и суши примерно поровну"
+    elif share < 70:
+        about = "суши больше, чем воды"
+    else:
+        about = "это мир суши, а не моря"
+    masses = _land_masses(world)
+    lines.append("Суши %.0f%% карты — %s." % (share, about))
+    if masses:
+        biggest, count = masses
+        if count == 1:
+            lines.append("Вся земля собрана в один материк.")
+        elif biggest >= 70:
+            lines.append("Земля собрана в один большой материк (%.0f%% всей "
+                         "суши) и ещё %d %s вокруг."
+                         % (biggest, count - 1,
+                            _plural(count - 1, "клочок", "клочка",
+                                    "клочков")))
+        elif biggest >= 40:
+            lines.append("Есть главный материк (%.0f%% суши), а остальное "
+                         "раздроблено на %d %s."
+                         % (biggest, count - 1,
+                            _plural(count - 1, "массив", "массива",
+                                    "массивов")))
+        else:
+            lines.append("Единого материка нет: земля разбита на %d %s, и "
+                         "крупнейший держит лишь %.0f%% её."
+                         % (count,
+                            _plural(count, "массив", "массива", "массивов"),
+                            biggest))
+    return lines
+
+
+def _land_masses(world):
+    """Доля крупнейшего массива суши и сколько их всего.
+
+    Считается по номерам земель карты (слой 20): они и есть связные
+    куски суши, которые картогенератор уже разобрал.
+    """
+    wmap = _wmap_of(world)
+    if wmap is None:
+        return None
+    masses = Counter()
+    try:
+        layer = wmap.layer(20)
+    except Exception:                                     # noqa: BLE001
+        return None
+    for index in range(wmap.size):
+        if not wmap.is_land(index):
+            continue
+        masses[layer[index]] += 1
+    if not masses:
+        return None
+    total = sum(masses.values())
+    return masses.most_common(1)[0][1] * 100.0 / total, len(masses)
+
+
+def _climate_by_terrain(world) -> list:
+    """Приговор миру без карты: по тому, из каких земель он составлен.
+
+    Слоёв тут нет, и выдумывать их нельзя. Зато есть сами земли, и по
+    их смеси видно то же самое: мир из тундры и льдов студёный, мир из
+    пустынь и джунглей жаркий.
+    """
+    kinds = Counter(region.terrain for region in world.regions.values())
+    total = max(1, sum(kinds.values()))
+    cold = (kinds["тундра"]) * 100.0 / total
+    hot = (kinds["пустыня"] + kinds["джунгли"]) * 100.0 / total
+    wet = (kinds["болото"] + kinds["джунгли"] + kinds["побережье"]) \
+        * 100.0 / total
+    water = (kinds["острова"] + kinds["побережье"]) * 100.0 / total
+    lines = ["Карты у этого мира нет — он собран из %d %s, и говорить о нём "
+             "можно только по ним."
+             % (total, _plural(total, "земли", "земель", "земель"))]
+    if cold >= 25:
+        said = "Мир студёный: тундры в нём %.0f%%" % cold
+    elif hot >= 35:
+        said = "Мир жаркий: пустынь и джунглей в нём %.0f%%" % hot
+    else:
+        said = "Мир умеренный: ни тундра, ни пустыня в нём не главные"
+    lines.append(said + ".")
+    lines.append("Мокрых земель — болот, джунглей и побережий — %.0f%%; "
+                 "морем и островами тронуто %.0f%%." % (wet, water))
+    top = ", ".join("%s (%d)" % (name, count)
+                    for name, count in kinds.most_common(4))
+    lines.append("Чаще всего тут встречается: %s." % top)
+    return lines
+
+
+def _life_lines(world) -> list:
+    """Можно ли в нём жить: сколько народу он прокормил и когда."""
+    fate = world.notes.get("судьба") or {}
+    peak = int(world.notes.get("людей в лучший век") or 0)
+    now = world.world_population()
+    towns = [item for item in world.settlements.values()]
+    alive = [item for item in towns if item.status == ACTIVE]
+    lines = []
+    if fate.get("имя"):
+        lines.append("Судьба мира — «%s»: %s." % (fate["имя"],
+                                                  fate.get("как было", "")))
+    if peak:
+        lines.append("Больше всего душ он держал %s, а к концу летописи "
+                     "осталось %s — это %.0f%% от лучшего века."
+                     % (_souls(peak), _souls(now), now * 100.0 / peak))
+    else:
+        lines.append("К концу летописи в мире %s." % _souls(now))
+    lines.append("Поселений за всю историю %d, стоит к концу %d; "
+                 "держав %d, живых %d."
+                 % (len(towns), len(alive), len(world.polities),
+                    len(world.active_polities)))
+    peopled = len({item.region_id for item in alive})
+    lines.append("Обжито к концу %d %s из %d: %s."
+                 % (peopled,
+                    _plural(peopled, "земля", "земли", "земель"),
+                    len(world.regions),
+                    "мир заселён целиком" if peopled >= len(world.regions) - 1
+                    else ("людные края тут скорее исключение"
+                          if peopled * 3 < len(world.regions)
+                          else "обжитое и пустое поделили мир пополам")))
+    return lines
+
+
+def _danger_lines(world) -> list:
+    """Чем этот мир опасен — и отчего беды в нём берутся."""
+    from worldgen import catastrophe as cat
+
+    total = max(1, world.total_years)
+    woes = list(world.calamities.values())
+    per_century = len(woes) * 100.0 / total
+    lines = ["Бед в нём %d — это %.1f на век; тёмных веков %d."
+             % (len(woes), per_century, len(world.dark_ages))]
+    nature = world.notes.get("нрав мира") or ()
+    titles = [cat.CATALOG_BY_KEY[key].title.lower() for key in nature
+              if key in cat.CATALOG_BY_KEY]
+    if titles:
+        lines.append("Склонен он к такому: %s." % ", ".join(titles))
+    profile = world.notes.get("склад мира") or ()
+    if profile:
+        lines.append("А причины бед тут берутся прежде всего отсюда: %s."
+                     % ", ".join(profile))
+    deaths = sum(item.deaths for item in woes)
+    if deaths:
+        lines.append("Всего беды унесли %s." % _souls(deaths))
+    return lines
+
+
+def _magic_lines(world) -> list:
+    """Сколько в этом мире волшебства — и есть ли оно вовсе."""
+    from worldgen import origin as ocat
+
+    origin = next(iter(world.origins.values()), None)
+    missing = list(getattr(origin, "missing", ()) or ())
+    if ocat.MAGIC in missing:
+        return ["Магии в этом мире нет вовсе: такого слоя ему не положили, "
+                "и ни чар, ни чудес от чар тут не бывает."]
+    lines = []
+    wmap = _wmap_of(world)
+    if wmap is not None:
+        land = [index for index in range(wmap.size) if wmap.is_land(index)]
+        if land:
+            # Магия на карте — величина знаковая: минус тёмная, плюс
+            # светлая. Простое среднее по ней всегда около нуля, потому
+            # что тьма со светом взаимно гасятся, — и мир с кипящей
+            # магией читался бы как мир без неё. Поэтому считается, где
+            # её вообще много (по модулю) и куда она склоняется.
+            values = [wmap.value(wm_magic(), index) for index in land]
+            count = float(len(values))
+            strong = sum(1 for value in values if abs(value) > 0.05) \
+                * 100.0 / count
+            dark = sum(1 for value in values if value < -0.05) * 100.0 / count
+            light = sum(1 for value in values if value > 0.05) * 100.0 / count
+            if strong < 1.0:
+                said = "Волшебство в этой земле — редкость: на него натыкаются"
+            elif strong < 5.0:
+                said = "Волшебных мест тут немного, но они есть"
+            else:
+                said = "Волшебных мест в этой земле много"
+            lines.append("%s: их %.1f%% земли." % (said, strong))
+            if dark > light * 2 and dark > 0.2:
+                lines.append("И склоняется оно к тёмному: таких мест %.1f%% "
+                             "против %.1f%% светлых." % (dark, light))
+            elif light > dark * 2 and light > 0.2:
+                lines.append("И склоняется оно к светлому: таких мест %.1f%% "
+                             "против %.1f%% тёмных." % (light, dark))
+            elif strong >= 1.0:
+                lines.append("Тёмного и светлого в нём примерно равно.")
+    profile = world.notes.get("склад мира") or ()
+    if "чары" in profile:
+        lines.append("И беды тут часто идут от чар, а не от погоды.")
+    if not lines:
+        lines.append("О волшебстве этого мира сказать по слоям нечего: "
+                     "карты у него нет.")
+    return lines
+
+
+def _folk_lines(world) -> list:
+    """Кто его населяет: сколько народов проснулось, кто остался, кто зверьём."""
+    from worldgen.races import get_race
+
+    awoke = sorted(world.race_awakening.items(), key=lambda row: row[1])
+    alive = Counter()
+    for item in world.settlements.values():
+        if item.status == ACTIVE:
+            alive[item.race_id] += item.population
+    for item in world.tribes.values():
+        if item.status == ACTIVE:
+            alive[item.race_id] += item.population
+    lines = ["Проснулось в нём %d %s, до конца дожило %d."
+             % (len(awoke), _plural(len(awoke), "раса", "расы", "рас"),
+                len(alive))]
+    if alive:
+        total = max(1, sum(alive.values()))
+        top = ", ".join("%s (%.0f%%)" % (race_name(race), souls * 100.0 / total)
+                        for race, souls in alive.most_common(3))
+        lines.append("Больше всего на свете их: %s." % top)
+    beasts = world.notes.get("не народ, а зверьё") or ()
+    if beasts:
+        lines.append("А эти в этом мире вышли не народом, а зверьём: %s."
+                     % ", ".join(beasts))
+    gifts = getattr(world, "race_gifts", {}) or {}
+    for race_id, gift in sorted(gifts.items()):
+        race = get_race(race_id)
+        lines.append("Особенность мира: %s — %s."
+                     % (race.name if race is not None else race_id, gift))
+    # Заметка держит ключи рас, а в русском выводе ключам места нет:
+    # «wolfkin, troll» — это не народы, а внутренние имена.
+    gone = world.notes.get("народов больше нет") or ()
+    if gone:
+        lines.append("Ушли из мира совсем: %s."
+                     % ", ".join(sorted(race_name(key) for key in gone)))
+    return lines
+
+
+def _origin_lines(world) -> list:
+    """Как этот мир сделан — и чего в нём нет."""
+    from worldgen import origin as ocat
+
+    origin = next(iter(world.origins.values()), None)
+    if origin is None:
+        return ["О начале этого мира летопись молчит."]
+    lines = []
+    motif = ocat.MOTIFS.get(origin.motif)
+    if motif is not None:
+        lines.append("Сделан он так: %s, и ради этого — «%s»: %s."
+                     % (origin.model, motif.name, motif.about))
+    else:
+        lines.append("Сделан он так: %s." % origin.model)
+    missing = [key for key in (getattr(origin, "missing", ()) or ())]
+    if missing:
+        said = []
+        for key in missing:
+            layer = ocat.LAYERS.get(key)
+            if layer is not None and layer.without:
+                said.append("%s — %s" % (key, layer.without))
+            else:
+                said.append(str(key))
+        lines.append("Чего в нём нет вовсе: %s." % "; ".join(said))
+    else:
+        lines.append("Слои мира положены все до единого.")
+    laws = list(getattr(origin, "laws", ()) or ())
+    if laws:
+        lines.append("Законов начала названо %d — по ним и решается, что в "
+                     "этом мире вообще возможно." % len(laws))
+    certainty = ocat.CERTAINTY.get(getattr(origin, "certainty", ""))
+    if certainty is not None:
+        lines.append("А знают об этом вот сколько — «%s»: %s."
+                     % (certainty.name, certainty.about))
+    return lines
+
+
 def portraits(world, out) -> None:
     """Одиннадцать портретов мира: имена, ушедшие народы, старый город,
     злое время, тот, кто людям не ровня, самый долгий праздник, самое
@@ -1539,6 +1906,30 @@ def audit(world) -> list:
 
     def note(line):
         found.append(("·", line))
+
+    # 0. Приговор миру — на латиницу и на пустоту.
+    #
+    # Раздел этот собирается из чужих заметок, а в заметках лежат ключи
+    # справочников: расы там хранятся как «wolfkin», а не как
+    # «Волколюды». Один раз так и вышло — «Ушли из мира совсем:
+    # wolfkin, troll, bearkin», — и поймать это может только сторож,
+    # потому что сломалось не число, а язык.
+    verdict = []
+    try:
+        world_verdict(world, verdict.append)
+    except Exception as error:                            # noqa: BLE001
+        bad("приговор миру не собрался: %s" % error)
+    else:
+        latin = []
+        for line in verdict:
+            for word in line.split():
+                if any("a" <= char.lower() <= "z" for char in word):
+                    latin.append(word)
+        if latin:
+            bad("в приговоре миру чужое слово: %s" % ", ".join(latin[:4]))
+        if len([line for line in verdict if line.strip()]) < 8:
+            bad("приговор миру вышел пустым: строк всего %d"
+                % len([line for line in verdict if line.strip()]))
 
     # 1. Мужской признак у женского имени и наоборот.
     wrong_sex = [f for f in world.figures.values() if f.sex == "f"
@@ -2715,9 +3106,16 @@ def main(argv) -> int:
     dates = [d for d in dates if 1 <= d <= years] or [years]
 
     lines = []
+    # Срезы по годам печатаются во время счёта, а приговор миру можно
+    # вынести только по готовому. Поэтому срезы собираются отдельно и
+    # встают в отчёт после него: общее читается прежде частного.
+    snaps = []
 
     def out(line=""):
         lines.append(line)
+
+    def snap(line=""):
+        snaps.append(line)
 
     settings = Settings(seed=seed, years=years, map_path=options["--map"],
                         regions=int(float(options["--regions"])))
@@ -2739,7 +3137,7 @@ def main(argv) -> int:
     def patched(ctx, year):
         original(ctx, year)
         if year in targets and "--quiet" not in flags:
-            snapshot(ctx.world, year, out)
+            snapshot(ctx.world, year, snap)
 
     lives.tick = patched
     try:
@@ -2747,6 +3145,8 @@ def main(argv) -> int:
     finally:
         lives.tick = original
 
+    world_verdict(world, out)
+    lines.extend(snaps)
     portraits(world, out)
 
     out("#" * 78)
