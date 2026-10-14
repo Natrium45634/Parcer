@@ -3337,11 +3337,26 @@ ALL_PARTS = tuple(key for key, _name, _about in PARTS)
 PART_NAMES = {key: name for key, name, _about in PARTS}
 
 
+def _setting(settings, name: str, default=""):
+    """Настройка мира — хоть у живых настроек, хоть у прочитанных из файла.
+
+    У только что созданного мира настройки лежат объектом, а у
+    прочитанного — словарём: в файл они уходят записью. Спрашивать их
+    надо одинаково, иначе мир, открытый из файла, рассказывает о себе не
+    то — например, называет процедурной карту, по которой он построен.
+    """
+    if settings is None:
+        return default
+    if isinstance(settings, dict):
+        return settings.get(name, default)
+    return getattr(settings, name, default)
+
+
 def head_lines(world, dates=()) -> list:
     """Шапка разбора: чем этот мир задан."""
     settings = getattr(world, "settings", None)
-    map_path = getattr(settings, "map_path", "") if settings else ""
-    made = getattr(settings, "map_make", None) if settings else None
+    map_path = _setting(settings, "map_path", "")
+    made = _setting(settings, "map_make", None)
     if map_path:
         where = os.path.basename(map_path)
     elif made:
