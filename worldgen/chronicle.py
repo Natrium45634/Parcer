@@ -9,7 +9,7 @@ from . import creatures
 from . import narrative_creatures as creature_texts
 from . import races as races_mod
 from .models import ACTIVE
-from .timeline import years_text
+from .timeline import plural, years_text
 from .world import RURAL_FACTOR, alive_at
 
 # Знак важности слева от даты. Вместо звёздочек — отчётливые значки: в
@@ -5066,10 +5066,11 @@ def _year_towns(world, year: int) -> list:
         for town in towns[:10]:
             race = races_mod.RACES_BY_ID.get(town.race_id)
             polity = world.town_owner_at(town, year)
-            rows.append("  %s — %s, %d душ, стоит %s%s"
+            souls = world.souls_at(town, year)
+            rows.append("  %s — %s, %d %s, стоит %s%s"
                         % (town.name,
                            race.name if race is not None else "?",
-                           world.souls_at(town, year),
+                           souls, plural(souls, "душа", "души", "душ"),
                            years_text(year - town.founded.year + 1),
                            "; под рукой державы по имени %s" % polity.name
                            if polity is not None else ""))

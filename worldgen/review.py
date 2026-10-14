@@ -1989,9 +1989,10 @@ def snapshot(world, year: int, out) -> None:
             out("ОСТАЛЬНЫЕ ДЕРЖАВЫ (ещё %d из %d):"
                 % (len(active) - 3, len(active)))
             for population, cities, polity, mine in active[3:9]:
-                out("   • %s (%s) — %d душ, %d %s; %s; вера: %s" % (
+                out("   • %s (%s) — %d %s, %d %s; %s; вера: %s" % (
                     polity.full_name,
                     polity_folk(world, polity, year, mine), population,
+                    _plural(population, "душа", "души", "душ"),
                     cities, _plural(cities, "город", "города", "городов"),
                     ruler_line(world, polity, year).split(";")[0],
                     faith_line(world, polity.faith_id, year,
@@ -2006,9 +2007,11 @@ def snapshot(world, year: int, out) -> None:
             region = world.regions.get(tribe.region_id)
             chief = world.figures.get(tribe.chief_id)
             folk = world.folks.get(tribe.folk_id)
-            out("   • %s (%s), %d душ, земля %s" % (
-                tribe.full_name, race_name(tribe.race_id),
-                world.souls_at(tribe, year), region.name if region else "?"))
+            souls = world.souls_at(tribe, year)
+            out("   • %s (%s), %d %s, земля %s" % (
+                tribe.full_name, race_name(tribe.race_id), souls,
+                _plural(souls, "душа", "души", "душ"),
+                region.name if region else "?"))
             marks = ["стоит %d-й год" % (year - tribe.founded.year + 1)]
             # Вождь нынешний: по годам вожди племён не записаны. Поэтому
             # в прошлом веке его не называют — вместо имени живого вождя
