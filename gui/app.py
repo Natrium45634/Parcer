@@ -1459,6 +1459,13 @@ class ChronicleApp(tk.Tk):
             self.history.world = None
         if getattr(self, "land", None) is not None:
             self.land.clear()      # и страница места прошлого мира тоже
+        # Разбор прошлого мира к новому не относится: оставить его на
+        # вкладке значит показать чужой мир и сохранить в файл чужой
+        # разбор. Даты срезов начинаются заново с первого поворота.
+        self.review_text_value = ""
+        self.review_spin = 0
+        if getattr(self, "review_text", None) is not None:
+            self._fill_review()
         self._fill_figure_picks()   # в списках выбора — только то, что в мире есть
         self._fill_monster_picks()
         self.refresh_chronicle()
