@@ -1364,7 +1364,7 @@ def _magic_lines(world) -> list:
 
 def _folk_lines(world) -> list:
     """Кто его населяет: сколько народов проснулось, кто остался, кто зверьём."""
-    from worldgen.races import get_race
+    from worldgen.races import RACES, get_race
 
     awoke = sorted(world.race_awakening.items(), key=lambda row: row[1])
     alive = Counter()
@@ -1384,8 +1384,25 @@ def _folk_lines(world) -> list:
         lines.append("Больше всего на свете их: %s." % top)
     beasts = world.notes.get("не народ, а зверьё") or ()
     if beasts:
-        lines.append("А эти в этом мире вышли не народом, а зверьём: %s."
-                     % ", ".join(beasts))
+        # Заметку кладут в начале мира: это то, какими они вышли. Кто из
+        # них потом поумнел, в мире уже проснулся и успел стать народом —
+        # и сказать об этом надо отдельно, иначе одна и та же раса стоит
+        # в двух строках подряд: зверьём и ушедшим из мира народом.
+        woke = {}
+        for race in RACES:
+            if race.name in beasts and race.id in world.race_awakening:
+                woke[race.name] = world.race_awakening[race.id]
+        still = [name for name in beasts if name not in woke]
+        if still:
+            lines.append("А эти в этом мире вышли не народом, а зверьём: %s."
+                         % ", ".join(still))
+        if woke:
+            lines.append("А эти вышли зверьём, но разум обрели по ходу "
+                         "истории: %s."
+                         % ", ".join("%s (в %d году)" % (name, year)
+                                     for name, year
+                                     in sorted(woke.items(),
+                                               key=lambda row: row[1])))
     gifts = getattr(world, "race_gifts", {}) or {}
     for race_id, gift in sorted(gifts.items()):
         race = get_race(race_id)
@@ -1930,6 +1947,25 @@ def audit(world) -> list:
         if len([line for line in verdict if line.strip()]) < 8:
             bad("приговор миру вышел пустым: строк всего %d"
                 % len([line for line in verdict if line.strip()]))
+
+        # И на противоречие внутри самого приговора. Раса, вышедшая в этом
+        # мире зверьём, не просыпается вовсе — уходить из мира ей неоткуда;
+        # а та, что поумнела по ходу истории, народом успела побыть и стоит
+        # в своей строке. Пока строка была одна, огры читались сразу и как
+        # зверьё, и как ушедший народ.
+        def named(line):
+            tail = line.split(":", 1)[1] if ":" in line else ""
+            return [part.strip(" .") for part in tail.split(",")
+                    if part.strip(" .")]
+
+        feral = next((line for line in verdict
+                      if "вышли не народом, а зверьём" in line), "")
+        gone = next((line for line in verdict
+                     if "Ушли из мира совсем" in line), "")
+        clash = [name for name in named(feral) if name in named(gone)]
+        if clash:
+            bad("в приговоре миру раса и зверьём вышла, и из мира ушла: %s"
+                % ", ".join(clash))
 
     # 1. Мужской признак у женского имени и наоборот.
     wrong_sex = [f for f in world.figures.values() if f.sex == "f"
