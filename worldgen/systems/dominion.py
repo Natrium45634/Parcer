@@ -1173,7 +1173,8 @@ def _name_for(world, rng, kind, region, pick: dict) -> str:
     for _try in range(12):
         word, gender = rng.choice(words)
         if rng.chance(0.4):
-            name = "%s %s" % (word, rng.choice(list(cat.NAME_TAILS)))
+            tails = cat.tails_for(getattr(region, "terrain", ""))
+            name = "%s %s" % (word, rng.choice(list(tails)))
         else:
             forms, _why = rng.choice(list(cat.NAME_ADJ))
             name = "%s %s" % (cat.adjective(forms, gender), word)

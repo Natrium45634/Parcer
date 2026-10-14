@@ -4646,6 +4646,18 @@ def check_catalogues() -> list:
         if not item.about:
             problems.append("каталог владений: у причины «%s» нет объяснения"
                             % item.key)
+    # Хвост имени даётся по земле: «Пустошь Семи Холмов» на заливе — это
+    # имя, которого люди, видевшие эту землю, не сказали бы. Сторож
+    # смотрит и за тем, чтобы всякой земле досталось не два хвоста на
+    # выбор: иначе владения в морском мире начнут звать одинаково.
+    miss("земли у хвостов имён",
+         [land for _said, lands in dom.NAME_TAILS for land in lands],
+         set(races_for_rough.TERRAINS))
+    for land in races_for_rough.TERRAINS:
+        rows = dom.tails_for(land)
+        if len(rows) < 3:
+            problems.append("каталог владений: земле «%s» на выбор всего "
+                            "%d хвоста имени" % (land, len(rows)))
     # Положение подданного должно что-то значить: воля, цена и риск —
     # это и есть разница между данником и рабом.
     for item in dom.STANDINGS:
