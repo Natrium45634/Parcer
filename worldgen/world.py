@@ -2134,6 +2134,10 @@ class World:
             "Городских биографий": len(self.townships),
             "Праздников (всего)": len(self.holidays),
             "Праздников (отмечают)": len(self.holidays_kept()),
+            "Обычаев (всего)": len(self.customs),
+            "Обычаев (держатся)": len([item for item in self.customs.values()
+                                       if item.ended is None]),
+            "Культурных обликов": len(self.culture_profiles),
             "Божественных биографий": len(self.godheads),
             "Взвешенных имён": len(self.renowns),
             "Открытых земель": sum(1 for r in self.regions.values()

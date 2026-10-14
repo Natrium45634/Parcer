@@ -448,18 +448,19 @@ def _born(ctx, rng, year: int, lands) -> None:
             return
 
     date = ctx.date_in(rng, year)
+    # Причина берётся из того, что к обычаю относится: сперва из условия,
+    # которого эта форма и требует, а если такого у народа нет — из самой
+    # задачи. Брать первое попавшееся условие нельзя: «Камень имён» с
+    # пояснением «вода дороже слова» читается как сбой.
     why_root = ""
     for key in form.wants:
         if key in roots and key in LIFE_WHYS:
             why_root = LIFE_WHYS[key]
             break
     if not why_root:
-        for key in roots:
-            if key in LIFE_WHYS:
-                why_root = LIFE_WHYS[key]
-                break
-    why = ("после того, как %s" % event.title.rstrip(".").lower()) if event \
-        else why_root or "так сложилось"
+        why_root = cat.NEED_WHYS.get(need, "так сложилось")
+    why = ("так вышло после того, что в летописи записано как «%s»"
+           % event.title.rstrip(".")) if event else why_root
 
     custom = world.add_custom(
         name=_name_for(world, rng, folk, form, need), case=case, need=need,
@@ -1077,6 +1078,50 @@ def _deed(ctx, rng, profile, figure, year: int) -> None:
             kind="custom_made", title=title, text=text, importance=3,
             actors=[figure.id], subjects=[custom.id, figure.id],
             race_id=figure.race_id)
+
+
+# ---------------------------------------------------------------------------
+# Узлы для былей
+# ---------------------------------------------------------------------------
+
+# Сколько лет должно пройти, чтобы о порядке стало что рассказывать.
+STORY_AGE = 80
+
+
+def story_nodes(world, year: int) -> list:
+    """Обычаи, из которых прямо сейчас может вырасти быль.
+
+    Не всякий обычай годится в узел — и это условие, а не недоработка:
+    большинство порядков просто держит мир правдоподобным. Годятся три
+    случая: о порядке спорят, его держат втайне от власти и его делают,
+    не помня зачем. В первых двух быль растёт из людей, в третьем — из
+    дыры в памяти.
+    """
+    rows = []
+    for custom in sorted(world.customs.values(), key=lambda item: item.id):
+        if custom.ended is not None or custom.state == cat.LOST:
+            continue
+        folk = world.folks.get(custom.folk_id)
+        where = custom.region_ids[0] if custom.region_ids else ""
+        since = custom.forgot_year or custom.born.year
+        if year - since < STORY_AGE:
+            continue
+        folk_name = folk.name if folk is not None else "этот народ"
+        if custom.state == cat.SHAKEN or custom.bind == cat.ARGUED:
+            rows.append(("спор о порядке",
+                         "о том, нужен ли обычай «%s», спорят у народа по "
+                         "имени %s" % (custom.name, folk_name),
+                         custom, where, 1.2))
+        elif custom.state in (cat.BANNED, cat.SECRET):
+            rows.append(("спор о порядке",
+                         "обычай «%s» запрещён, и его держат втайне"
+                         % custom.name, custom, where, 1.1))
+        elif not cat.is_known(custom.why):
+            rows.append(("обряд без причины",
+                         "обычай «%s» делают, не помня зачем: %s"
+                         % (custom.name, custom.doing),
+                         custom, where, 1.0))
+    return rows
 
 
 # ---------------------------------------------------------------------------

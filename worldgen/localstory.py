@@ -85,13 +85,18 @@ FEAST_MARK = "след праздника"      # площадь есть, пр�
 # половина семей кому-то служила, а половина кого-то прятала, и всё это
 # всплывает, когда хозяина не стало.
 YOKE = "старое ярмо"               # тут был хозяин, и он был не человек
+# И один от обычая. Он не похож на обряд без причины: там не помнят
+# зачем, а тут помнят слишком хорошо — и половина города считает, что
+# так надо, а половина, что так больше нельзя. Спор о порядке тем и
+# хорош, что обе стороны правы по-своему.
+CUSTOM_ROW = "спор о порядке"      # одни держат обычай, другие уже нет
 
 NODES = (RUIN, PLACE, THING, TRACE, WAR_END, CALAMITY, DEAD, HOUSE_FALL,
          TONGUE, ROUTE, GRUDGE, MIGRATION, LAW, BEAST, HOLY, CRAFT,
          TOWN_ACHE, TOWN_SECRET, UNDERCITY,
          DIVINE_BAN, LOST_GOD, PROPHECY, FIRST_TRACE,
          LOST_NAME, UNDONE, FALSE_HERO, SCAR, LOST_SKILL,
-         BLIND_RITE, HID_FEAST, FEAST_MARK, YOKE)
+         BLIND_RITE, HID_FEAST, FEAST_MARK, YOKE, CUSTOM_ROW)
 
 # Насколько охотно мир рассказывает о каждом узле. Быт и последствия
 # войн — самое частое; древнее зло — редкость.
@@ -104,7 +109,7 @@ NODE_WEIGHT = {
     LOST_NAME: 0.9, UNDONE: 1.0, FALSE_HERO: 0.8,
     SCAR: 1.0, LOST_SKILL: 0.9,
     BLIND_RITE: 1.2, HID_FEAST: 1.0, FEAST_MARK: 0.8,
-    YOKE: 1.3,
+    YOKE: 1.3, CUSTOM_ROW: 1.2,
 }
 
 
@@ -183,7 +188,8 @@ SHAPES = (
           acts=(3, 6), epicity=0, weight=1.0,
           genres=("камерный", "горький"), fight=0.03),
     Shape("scribe", "ошибка в своде", (LAW, HOLY, RUIN, DEAD, TOWN_SECRET, UNDERCITY, LOST_GOD, PROPHECY,
-           LOST_NAME, FALSE_HERO, LOST_SKILL, BLIND_RITE, HID_FEAST),
+           LOST_NAME, FALSE_HERO, LOST_SKILL, BLIND_RITE, HID_FEAST,
+           CUSTOM_ROW),
           acts=(4, 8), epicity=1, weight=1.1,
           genres=("книжный", "таинственный"), fight=0.05),
     Shape("missing", "пропал человек", (ROUTE, WAR_END, BEAST, CALAMITY, UNDERCITY, TOWN_ACHE, DIVINE_BAN,
@@ -198,11 +204,12 @@ SHAPES = (
           acts=(5, 10), epicity=1, weight=1.4,
           genres=("таинственный", "мрачный"), fight=0.18),
     Shape("blamed", "того, кого сочли виновным", (GRUDGE, DEAD, CALAMITY, TOWN_ACHE, TOWN_SECRET, DIVINE_BAN, PROPHECY,
-           FALSE_HERO, SCAR, BLIND_RITE, HID_FEAST, YOKE),
+           FALSE_HERO, SCAR, BLIND_RITE, HID_FEAST, YOKE, CUSTOM_ROW),
           acts=(5, 10), epicity=1, weight=1.3,
           genres=("тяжбенный", "мрачный"), fight=0.2),
     Shape("two_sides", "две правды", (GRUDGE, LAW, HOLY, MIGRATION, RUIN, TOWN_ACHE, TOWN_SECRET, DIVINE_BAN,
-           FALSE_HERO, UNDONE, SCAR, BLIND_RITE, HID_FEAST, YOKE),
+           FALSE_HERO, UNDONE, SCAR, BLIND_RITE, HID_FEAST, YOKE,
+           CUSTOM_ROW),
           acts=(5, 11), epicity=2, weight=1.4,
           genres=("тяжбенный", "политический"), fight=0.22),
     Shape("after_war", "что осталось после войны",

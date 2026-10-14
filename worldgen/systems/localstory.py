@@ -42,6 +42,7 @@ from .. import narrative_wonders as wonder_texts
 from .. import races as races_mod
 from .. import sites as sites_mod
 from .. import township as town_cat
+from . import customs as customs_sys
 from . import holidays as holidays_sys
 from ..models import ACTIVE, RUINED
 
@@ -480,6 +481,22 @@ def _nodes(ctx, year: int) -> list:
             node_kind, line, when, ref=holiday.id,
             region_id=holiday.region_id,
             settlement_id=holiday.settlement_id, weight=weight))
+
+    # --- то, что осталось от обычаев -----------------------------------
+    # Обычай годится в узел не всякий: большинство порядков просто
+    # держит мир правдоподобным. Берутся три случая — о порядке спорят,
+    # его держат втайне или делают, не помня зачем, — и собирает их сама
+    # система обычаев.
+    for kind, line, custom, region_id, weight in customs_sys.story_nodes(
+            world, year):
+        node_kind = {"спор о порядке": cat.CUSTOM_ROW,
+                     "обряд без причины": cat.BLIND_RITE}.get(kind)
+        if node_kind is None:
+            continue
+        when = custom.forgot_year or custom.born.year
+        out.append(Node(
+            node_kind, line, when, ref=custom.id, region_id=region_id,
+            weight=weight))
 
     return out
 

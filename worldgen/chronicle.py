@@ -1890,6 +1890,169 @@ def render_origin(world) -> str:
     return "\n".join(rows)
 
 
+def render_customs(world) -> str:
+    """Обычаи и традиции: как в народах поступают, когда случается.
+
+    Раздел отвечает на три вопроса, и в этом порядке. **Какие порядки в
+    мире есть** — по случаям жизни, потому что обычай заводится не
+    вообще, а на случай. **Что с ними сталось** — потому что обычай не
+    лежит в справочнике неизменным: его закрепляют, запрещают, он
+    усыхает, расходится к соседям и обрастает изводами. И **что о них
+    знают** — потому что настоящая причина уходит раньше самого обычая,
+    и тогда остаются только объяснения, которые между собой не сходятся.
+
+    Праздники тут нарочно не поминаются: день в году — это другой
+    раздел. Тут о том, как поступают, когда случается.
+    """
+    from . import customs as cat
+
+    rows = ["ОБЫЧАИ И ТРАДИЦИИ", ""]
+    if not world.customs:
+        rows.append("  Ни одного заведённого порядка летопись не записала.")
+        return "\n".join(rows)
+
+    items = sorted(world.customs.values(),
+                   key=lambda item: (item.born.ordinal, item.id))
+    kept = [item for item in items if item.ended is None
+            and item.state in cat.KEPT]
+    known = [item for item in items if cat.is_known(item.why)]
+    from_event = [item for item in items if item.why_event]
+    spread = [item for item in items if item.spread]
+    varied = [item for item in items if item.variants]
+    banned = [item for item in items
+              if any(mark.get("что") == "запрет" for mark in item.marks)]
+    back = [item for item in items
+            if any(mark.get("что") == "возвращение" for mark in item.marks)]
+    taboo = [item for item in items if item.taboo]
+
+    rows.append("  Заведено порядков: %d, держится к концу истории: %d."
+                % (len(items), len(kept)))
+    cases = {}
+    for item in items:
+        cases[item.case] = cases.get(item.case, 0) + 1
+    rows.append("  По случаям жизни: %s."
+                % ", ".join("%s — %d" % (key, value) for key, value
+                            in sorted(cases.items(), key=lambda row: -row[1])))
+    rows.append("  Выросли из названного события: %d; прочие — из того, как "
+                "народ живёт всегда." % len(from_event))
+    rows.append("  Причину помнят у %d, забыли у %d." % (len(known),
+                                                         len(items) - len(known)))
+    rows.append("  Разошлись к соседям: %d; обросли изводами: %d; "
+                "запрещали: %d; возвращали: %d."
+                % (len(spread), len(varied), len(banned), len(back)))
+    if taboo:
+        rows.append("  Из них запретов: %d — и не всякий от богов."
+                    % len(taboo))
+    rows.append("")
+
+    # Народы по очереди: обычай без народа — запись в справочнике.
+    by_folk = {}
+    for item in items:
+        by_folk.setdefault(item.folk_id, []).append(item)
+    folks = sorted(by_folk, key=lambda key: (-len(by_folk[key]), key))
+    for folk_id in folks[:14]:
+        folk = world.folks.get(folk_id)
+        mine = by_folk[folk_id]
+        rows.append("  %s — порядков %d%s"
+                    % (folk.name if folk is not None else "Неизвестный народ",
+                       len(mine),
+                       "" if folk is None or folk.status == ACTIVE
+                       else " (народа больше нет)"))
+        for item in mine[:6]:
+            marks = []
+            if item.holder:
+                marks.append("держит %s" % item.holder)
+            if item.folk_ids:
+                marks.append("перенят ещё %d народом" % len(item.folk_ids)
+                             if len(item.folk_ids) == 1
+                             else "перенят ещё %d народами" % len(item.folk_ids))
+            if item.variants:
+                marks.append("изводов %d" % len(item.variants))
+            rows.append("     • «%s» (%s, %s): %s"
+                        % (item.name, item.case, item.state, item.doing))
+            rows.append("       %s; %s%s"
+                        % (item.bind, item.reach,
+                           "; " + ", ".join(marks) if marks else ""))
+            if cat.is_known(item.why):
+                rows.append("       отчего: %s" % item.why)
+            else:
+                rows.append("       отчего — не помнят; между собой %s"
+                            % item.folk_why)
+        if len(mine) > 6:
+            rows.append("     ...и ещё %d." % (len(mine) - 6))
+        rows.append("")
+
+    # Повороты судьбы: самое интересное — не список, а что с ними было.
+    turned = [item for item in items if len(item.marks) >= 2]
+    if turned:
+        rows.extend(["ЧТО С НИМИ БЫЛО", ""])
+        turned.sort(key=lambda item: (-len(item.marks), item.id))
+        for item in turned[:8]:
+            folk = world.folks.get(item.folk_id)
+            rows.append("  «%s» (%s)" % (item.name,
+                                         folk.name if folk else "?"))
+            for mark in item.marks[:5]:
+                rows.append("     %d: %s — %s%s"
+                            % (int(mark.get("год", 0)), mark.get("что", "?"),
+                               mark.get("отчего", "?"),
+                               " (%s)" % mark.get("кто")
+                               if mark.get("кто") else ""))
+        rows.append("")
+
+    # Забытая причина — отдельно: это главное, что с обычаем делает время.
+    forgotten = [item for item in items if item.forgot_year]
+    if forgotten:
+        rows.extend(["ПОРЯДОК ОСТАЛСЯ, ПРИЧИНА УШЛА", ""])
+        for item in sorted(forgotten, key=lambda row: row.forgot_year)[:8]:
+            folk = world.folks.get(item.folk_id)
+            rows.append("  «%s» (%s): причину забыли к %d году. Делают так: "
+                        "%s" % (item.name, folk.name if folk else "?",
+                                item.forgot_year, item.doing))
+            rows.append("     сверху говорят: %s" % item.said)
+            rows.append("     между собой: %s" % item.folk_why)
+        rows.append("")
+
+    # Люди и порядки: ради этого всё и заводилось.
+    profiles = [item for item in world.culture_profiles.values()
+                if item.broke or item.made]
+    if profiles:
+        rows.extend(["ЛЮДИ ПРОТИВ ПОРЯДКА", ""])
+        profiles.sort(key=lambda item: item.id)
+        for profile in profiles[:10]:
+            figure = world.figures.get(profile.figure_id)
+            if figure is None:
+                continue
+            for mark in profile.broke:
+                custom = world.customs.get(mark.get("обычай", ""))
+                if custom is not None:
+                    rows.append("  %d: %s нарушил обычай «%s»"
+                                % (int(mark.get("год", 0)), figure.name,
+                                   custom.name))
+            for mark in profile.made:
+                custom = world.customs.get(mark.get("обычай", ""))
+                if custom is not None:
+                    rows.append("  %d: %s %s обычай «%s»"
+                                % (int(mark.get("год", 0)), figure.name,
+                                   mark.get("что", "переменил").lower(),
+                                   custom.name))
+        rows.append("")
+
+    # И отдельно — сколько людей живёт с обычаями не так, как велено.
+    att = {}
+    for profile in world.culture_profiles.values():
+        for row in profile.attitudes:
+            kind = cat.ATTITUDES_BY_KEY.get(row.get("вид", ""))
+            if kind is not None:
+                att[kind.name] = att.get(kind.name, 0) + 1
+    if att:
+        rows.append("  Как люди относятся к своим порядкам: %s."
+                    % ", ".join("%s — %d" % pair for pair
+                                in sorted(att.items(), key=lambda row: -row[1])[:6]))
+        rows.append("  Облик составлен у %d имён."
+                    % len(world.culture_profiles))
+    return "\n".join(rows)
+
+
 def render_holidays(world) -> str:
     """Праздники и памятные дни: чем они были и чем стали.
 
@@ -5346,6 +5509,7 @@ def full_text(world) -> str:
         render_stories(world),
         render_towns(world),
         render_holidays(world),
+        render_customs(world),
         render_gods(world),
         render_renown(world),
         render_guilds(world),

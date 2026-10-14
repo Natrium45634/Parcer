@@ -574,6 +574,9 @@ class ChronicleApp(tk.Tk):
         self.holidays_text = self._add_text_tab(
             "Праздники", lambda: self._set_text(
                 self.holidays_text, chronicle.render_holidays(self.world)))
+        self.customs_text = self._add_text_tab(
+            "Обычаи", lambda: self._set_text(
+                self.customs_text, chronicle.render_customs(self.world)))
         self.gods_text = self._add_text_tab(
             "Боги и их дела", lambda: self._set_text(
                 self.gods_text, chronicle.render_gods(self.world)))
@@ -2233,6 +2236,19 @@ class ChronicleApp(tk.Tk):
                     (polity.full_name if polity else (house.full_name if house else "—"))[:22],
                     reign.end_reason or "правит"))
             return out
+
+        if kind == "Figure":
+            # Культура и личные традиции: чей человек, как он живёт с
+            # порядками своего народа и что у него своего. Блок
+            # появляется не у всякого — облик заводится тем, чьи решения
+            # видны в летописи.
+            profile = world.profile_of(entity.id)
+            if profile is not None:
+                from worldgen import narrative_customs as custom_texts
+                rows = custom_texts.profile_lines(world, profile, entity)
+                if rows:
+                    lines.extend(["", "КУЛЬТУРА И ЛИЧНЫЕ ТРАДИЦИИ", "-" * 60])
+                    lines.extend("  %s" % row for row in rows)
 
         if kind == "Polity":
             # «Почему эта держава такая»: живые следы её прошлого —
