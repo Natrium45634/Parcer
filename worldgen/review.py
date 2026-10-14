@@ -1758,9 +1758,11 @@ def polity_block(world, polity, year: int, population: int, cities: int,
                           for r in polity.region_ids if r in world.regions)
     else:
         seen = []
+        marked = set()
         for town in towns:
             region = world.regions.get(town.region_id)
-            if region is not None and region not in seen:
+            if region is not None and region.id not in marked:
+                marked.add(region.id)
                 seen.append(region)
         lands = ", ".join("%s (%s)" % (region.name, region.terrain)
                           for region in seen)
