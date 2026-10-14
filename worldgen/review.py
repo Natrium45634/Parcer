@@ -2042,9 +2042,11 @@ def snapshot(world, year: int, out) -> None:
 # Латинское, которое в русском выводе законно. Знак градуса пишется
 # «°C» и по-русски (ГОСТ 8.417) — это мера тепла, а не забытый
 # английский корень; римское число в имени государя — тоже число, а не
-# слово. Всё прочее латинское в летописи — ключ справочника, забытый в
-# тексте, и ловить его надо.
+# слово; а имя файла карты («aurora-7.world» в шапке разбора) — имя
+# файла, и переводить его не на что. Всё прочее латинское в летописи —
+# ключ справочника, забытый в тексте, и ловить его надо.
 OK_LATIN = ("°C",)
+OK_SUFFIXES = (".world", ".json", ".txt", ".exe")
 
 
 def foreign_words(lines) -> list:
@@ -2062,6 +2064,8 @@ def foreign_words(lines) -> list:
                 continue
             if bare in OK_LATIN or bare.rstrip(".,") in OK_LATIN:
                 continue
+            if bare.lower().endswith(OK_SUFFIXES):
+                continue          # имя файла — это имя файла
             if all(char in "IVXLCDM" for char in bare):
                 continue          # римское число — это число
             found.append(bare)
