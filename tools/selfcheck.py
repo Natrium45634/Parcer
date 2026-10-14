@@ -1439,6 +1439,44 @@ def check_land(world, seed: str) -> list:
                                 "стоит %s, а основан он в %d году"
                                 % (seed, item.hex_index, item.full_name,
                                    item.founded.year))
+
+    # --- страница места отвечает на спрошенный год, а не на последний ---
+    # Город, взятый соседом в последнем веке, не был его все восемь тысяч
+    # лет; людность его тоже менялась. И то, и другое записано — кривой
+    # переписи и отрезками владения, — поэтому страница обязана сходиться
+    # с этими записями, а не с нынешним состоянием города.
+    for town in sorted(world.settlements.values(), key=lambda item: item.id):
+        if town.hex_index < 0 or len(town.owners or ()) < 2:
+            continue
+        year = max(town.founded.year, int(town.owners[0][0]))
+        if town.ended is not None and town.ended.year < year:
+            continue
+        said = [row for row in landlore.standing(world, town.hex_index, year)
+                if row.startswith("Тут стоит") and town.name in row]
+        if not said:
+            continue
+        line = said[0]
+        souls = world.souls_at(town, year)
+        if str(souls) not in line:
+            problems.append("сид «%s»: страница места в %d году говорит о "
+                            "городе по имени %s не ту людность: «%s», а по "
+                            "переписи %d"
+                            % (seed, year, town.name, line[:70], souls))
+        owner = world.town_owner_at(town, year)
+        if owner is not None and owner.full_name not in line:
+            problems.append("сид «%s»: страница места в %d году не называет "
+                            "хозяином города по имени %s державу «%s»: «%s»"
+                            % (seed, year, town.name, owner.full_name,
+                               line[:70]))
+        later = [pid for mark, pid in town.owners
+                 if int(mark) > year and pid
+                 and pid in world.polities
+                 and world.polities[pid].full_name in line]
+        if later:
+            problems.append("сид «%s»: страница места в %d году отдаёт город "
+                            "по имени %s державе, которая возьмёт его "
+                            "позже" % (seed, year, town.name))
+        break
     return problems
 
 
