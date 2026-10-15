@@ -757,43 +757,364 @@ def render_regions(world) -> str:
 
 
 def render_expeditions(world) -> str:
-    """Походы в неизведанное и что из них вышло."""
+    """Походы в неизведанное: зачем шли, кто шёл и что из этого вышло.
+
+    Раздел отвечает на три вопроса в этом порядке. **Отчего пошли** —
+    потому что поход без предпосылки это не история, а сообщение «в
+    таком-то году открыли гору». **Чем кончилось** — и кончаются походы
+    не «удачей» и «неудачей»: уточнённая карта, опровергнутая старая,
+    найденная стоянка прежних и подтверждённое «там ничего нет» — это
+    тоже работа. И **кто не вернулся**, потому что из таких походов
+    вырастают следующие.
+    """
+    from . import knowing as cat
+    from . import narrative_knowing as knowing_texts
+
     rows = ["ПОХОДЫ В НЕИЗВЕДАННОЕ", ""]
     if not world.expeditions:
-        rows.append("  За море в этом мире так и не вышел никто.")
+        rows.append("  За край известного в этом мире так и не вышел никто.")
         return "\n".join(rows)
 
-    names = {"discovered": "земля найдена", "sighted": "берег видели",
-             "lost": "не вернулся никто", "empty": "впустую", "": "в пути"}
-    kinds = {"sea": "за море", "ice": "к краю света", "deep": "в открытую воду",
-             "land": "за горы"}
-    found = sum(1 for x in world.expeditions.values() if x.discovered)
-    rows.append("  Всего походов: %d. Открытых земель: %d." % (
-        len(world.expeditions), found))
+    sea_names = {"discovered": "земля найдена", "sighted": "берег видели",
+                 "lost": "не вернулся никто", "empty": "впустую",
+                 "": "в пути"}
+    kinds = {"sea": "за море", "ice": "к краю света",
+             "deep": "под землю", "land": "за горы"}
+    items = sorted(world.expeditions.values(), key=lambda item: item.start.ordinal)
+    probes = [item for item in items if item.goal]
+    found = sum(1 for item in items if item.discovered)
+    gone = [item for item in items
+            if item.result in (cat.E_GONE, cat.E_DARK) or item.outcome == "lost"]
+
+    rows.append("  Всего походов: %d, из них за ответом на названный "
+                "вопрос: %d. Открытых земель: %d." % (len(items), len(probes),
+                                                      found))
+    if probes:
+        groups = {}
+        for item in probes:
+            groups[item.goal_group] = groups.get(item.goal_group, 0) + 1
+        rows.append("  За чем ходили: %s."
+                    % ", ".join("%s — %d" % pair for pair
+                                in sorted(groups.items(),
+                                          key=lambda row: -row[1])))
+        spurs = {}
+        for item in probes:
+            spur = cat.SPURS_BY_KEY.get(item.spur)
+            if spur is not None:
+                spurs[spur.said] = spurs.get(spur.said, 0) + 1
+        rows.append("  Отчего собирались: %s."
+                    % ", ".join("%s — %d" % pair for pair
+                                in sorted(spurs.items(),
+                                          key=lambda row: -row[1])[:6]))
+        ends = {}
+        for item in probes:
+            ends[item.result] = ends.get(item.result, 0) + 1
+        rows.append("  Чем кончалось: %s."
+                    % ", ".join("%s — %d" % pair for pair
+                                in sorted(ends.items(),
+                                          key=lambda row: -row[1])))
+        turned = [item for item in probes if item.turn]
+        rows.append("  Передумали по дороге: %d. Не вернулись: %d."
+                    % (len(turned), len(gone)))
     edge = world.notes.get("край света") or []
     if edge:
         rows.append("  Края света достигали: %s." % "; ".join(edge))
     rows.append("")
 
-    for expedition in sorted(world.expeditions.values(),
-                             key=lambda x: x.start.ordinal):
+    shown = items if len(items) <= 60 else (
+        sorted(items, key=lambda item: (-int(item.weight or 1),
+                                        item.start.ordinal))[:60])
+    shown = sorted(shown, key=lambda item: item.start.ordinal)
+    for expedition in shown:
         leader = world.figures.get(expedition.leader_id)
-        polity = world.polities.get(expedition.polity_id)
-        rows.append("  %d — %s (%s)" % (expedition.start.year, expedition.name,
-                                        kinds.get(expedition.kind, expedition.kind)))
-        rows.append("      ведёт: %s%s" % (
-            leader.name if leader else "—",
-            "; снаряжает %s" % polity.full_name if polity is not None else
-            "; поход вольный"))
-        rows.append("      цель: %s; попытка %d; людей: %d" % (
-            expedition.target_name or "—", expedition.attempt, expedition.crew))
-        rows.append("      исход: %s%s" % (
-            names.get(expedition.outcome, expedition.outcome),
-            "; погибло %d" % expedition.deaths if expedition.deaths else ""))
+        host = expedition.host_said or (
+            world.polities[expedition.polity_id].full_name
+            if expedition.polity_id in world.polities else "поход вольный")
+        rows.append("  %d — %s (%s)" % (expedition.start.year,
+                                        expedition.name,
+                                        kinds.get(expedition.kind,
+                                                  expedition.kind)))
+        rows.append("      ведёт: %s; снаряжает: %s"
+                    % (leader.name if leader else "—", host))
+        if expedition.goal:
+            goal = cat.GOALS_BY_KEY.get(expedition.goal)
+            spur = cat.SPURS_BY_KEY.get(expedition.spur)
+            rows.append("      цель: %s" % (goal.said if goal is not None
+                                            else expedition.goal))
+            if spur is not None:
+                rows.append("      повод: %s" % spur.line)
+            if expedition.roles:
+                rows.append("      отряд: %s"
+                            % ", ".join(cat.ROLES_BY_KEY[key].man
+                                        for key in expedition.roles
+                                        if key in cat.ROLES_BY_KEY))
+        else:
+            rows.append("      цель: %s; попытка %d"
+                        % (expedition.target_name or "—", expedition.attempt))
+        rows.append("      людей: %d" % expedition.crew)
+        if expedition.snags:
+            rows.append("      по дороге: %s" % "; ".join(expedition.snags))
+        if expedition.turn:
+            rows.append("      цель переменилась (%d): %s"
+                        % (expedition.turn_year, expedition.turn))
+        outcome = expedition.result or sea_names.get(expedition.outcome,
+                                                     expedition.outcome)
+        rows.append("      исход: %s%s"
+                    % (outcome or "в пути",
+                       "; погибло %d" % expedition.deaths
+                       if expedition.deaths else ""))
+        for finding_id in expedition.findings:
+            finding = world.findings.get(finding_id)
+            if finding is not None:
+                rows.append("      открытие: %s"
+                            % knowing_texts.finding_line(world, finding))
         for region_id in expedition.discovered:
             region = world.regions.get(region_id)
             if region is not None:
-                rows.append("      открыто: %s (%s)" % (region.name, region.terrain))
+                rows.append("      земля стала досягаема: %s (%s)"
+                            % (region.name, region.terrain))
+        rows.append("")
+    if len(items) > len(shown):
+        rows.append("  Прочих походов, помельче: %d." % (len(items) - len(shown)))
+        rows.append("")
+    return "\n".join(rows)
+
+
+def render_knowing(world) -> str:
+    """Познание мира: что о нём знают, чего не знают и кто ошибается.
+
+    Раздел нарочно начинается не с открытий, а с **неведения**: карта
+    мира у каждого общества своя, и разница между тем, что знают
+    живущие, и тем, что знает держава за морем, и есть содержание этой
+    истории. Дальше идут открытия с тремя родами первенства (дошёл,
+    записал, признан), карты со своей точностью и своими ошибками,
+    встречи обществ, у которых о одном дне две памяти, и попытки
+    освоения — отдельно от обнаружения, потому что нанесённая на карту
+    земля своей не становится.
+    """
+    from . import knowing as cat
+    from . import narrative_knowing as knowing_texts
+
+    rows = ["ПОЗНАНИЕ МИРА", ""]
+    if not world.knowings:
+        rows.append("  О том, кто что в этом мире знал, летопись молчит.")
+        return "\n".join(rows)
+
+    records = list(world.knowings.values())
+    live = [item for item in records if item.known]
+    lost = [item for item in records if item.lost_year]
+    warped = [item for item in records if item.warp]
+    local = [item for item in records if item.level == cat.LOCAL]
+    rows.append("  Записей о знании: %d; из них живых: %d, потерянных: %d."
+                % (len(records), len(live), len(lost)))
+    rows.append("  Знание живущих (своя земля, и знают её подробно): %d."
+                % len(local))
+    levels = {}
+    for item in records:
+        levels[item.level] = levels.get(item.level, 0) + 1
+    rows.append("  По состояниям: %s."
+                % ", ".join("%s — %d" % pair for pair
+                            in sorted(levels.items(), key=lambda row: -row[1])))
+    if warped:
+        rows.append("  Дошло искажённым: %d — вести по дороге усыхают." % len(warped))
+    rows.append("")
+
+    # --- открытия -------------------------------------------------------
+    findings = sorted(world.findings.values(),
+                      key=lambda item: (item.found.ordinal if item.found else 0,
+                                        item.id))
+    rows.append("  ОТКРЫТИЯ")
+    if not findings:
+        rows.append("    Ни одного открытия в этом мире не записано.")
+    else:
+        kinds = {}
+        for item in findings:
+            kinds[item.kind] = kinds.get(item.kind, 0) + 1
+        split = [item for item in findings
+                 if item.prime.get(cat.P_FACT) != item.prime.get(cat.P_FAME)]
+        wrong = [item for item in findings if item.wrong]
+        fixed = [item for item in wrong if item.wrong_fixed]
+        rowed = [item for item in findings if len(item.claims) > 1]
+        rows.append("    Всего: %d. По родам: %s."
+                    % (len(findings),
+                       ", ".join("%s — %d" % pair for pair
+                                 in sorted(kinds.items(),
+                                           key=lambda row: -row[1]))))
+        rows.append("    Первенство по делу и по признанию расходится у %d "
+                    "из %d." % (len(split), len(findings)))
+        rows.append("    Поняли неверно: %d, из них выправлено потом: %d."
+                    % (len(wrong), len(fixed)))
+        rows.append("    О первенстве спорили: %d." % len(rowed))
+        rows.append("")
+        shown = sorted(findings, key=lambda item: (-int(item.weight or 1),
+                                                   item.id))[:25]
+        for finding in sorted(shown,
+                              key=lambda item: item.found.ordinal
+                              if item.found else 0):
+            rows.append("    %s" % knowing_texts.finding_line(world, finding))
+            rows.append("      кому стало известно: %s"
+                        % (world.entity_name(finding.group_id)
+                           if finding.group_id else "неизвестно кому"))
+            for key, said in cat.PRIME:
+                if finding.prime.get(key):
+                    rows.append("      %s (%s): %s"
+                                % (key, said, finding.prime[key]))
+            if finding.twist:
+                rows.append("      отчего так: %s" % finding.twist)
+            if finding.fruits:
+                rows.append("      что из этого вышло: %s"
+                            % "; ".join(finding.fruits))
+            rows.append("")
+    rows.append("")
+
+    # --- карты ----------------------------------------------------------
+    rows.append("  КАРТЫ")
+    charts = sorted(world.charts.values(),
+                    key=lambda item: (item.made.ordinal if item.made else 0,
+                                      item.id))
+    if not charts:
+        rows.append("    Карт в этом мире не чертили.")
+    else:
+        alive = [item for item in charts if item.alive]
+        rows.append("    Всего: %d, цело к концу истории: %d."
+                    % (len(charts), len(alive)))
+        kinds = {}
+        for item in charts:
+            spec = cat.CHART_KINDS_BY_KEY.get(item.kind)
+            name = spec.said if spec is not None else item.kind
+            kinds[name] = kinds.get(name, 0) + 1
+        rows.append("    По родам: %s."
+                    % ", ".join("%s — %d" % pair for pair
+                                in sorted(kinds.items(),
+                                          key=lambda row: -row[1])))
+        for chart in charts[:12]:
+            spec = cat.CHART_KINDS_BY_KEY.get(chart.kind)
+            rows.append("    %d — «%s» (%s)"
+                        % (chart.made.year if chart.made else 0, chart.name,
+                           spec.said if spec is not None else chart.kind))
+            rows.append("      для чего: %s; у кого: %s"
+                        % (chart.purpose or "—",
+                           world.entity_name(chart.group_id)))
+            good = [key for key, value in sorted(chart.marks.items())
+                    if value >= 0.7]
+            bad = [key for key, value in sorted(chart.marks.items())
+                   if value <= 0.3]
+            if good:
+                rows.append("      точна в: %s" % ", ".join(good))
+            if bad:
+                rows.append("      врёт в: %s" % ", ".join(bad))
+            if chart.spread > 1:
+                rows.append("      списков разошлось: %d" % chart.spread)
+            if chart.secret:
+                rows.append("      держат при себе: %s" % chart.secret)
+            if chart.lost_year:
+                rows.append("      пропала в %d году" % chart.lost_year)
+            rows.append("")
+    rows.append("")
+
+    # --- встречи --------------------------------------------------------
+    rows.append("  ВСТРЕЧИ ОБЩЕСТВ")
+    meetings = sorted(world.meetings.values(),
+                      key=lambda item: (item.date.ordinal if item.date else 0,
+                                        item.id))
+    if not meetings:
+        rows.append("    Чужих в этом мире так и не встретили.")
+    else:
+        ends = {}
+        for item in meetings:
+            ends[item.outcome] = ends.get(item.outcome, 0) + 1
+        hard = [item for item in meetings if item.barrier > 0.5]
+        rows.append("    Всего: %d; из них через языковой барьер: %d."
+                    % (len(meetings), len(hard)))
+        rows.append("    Чем кончались: %s."
+                    % ", ".join("%s — %d" % pair for pair
+                                in sorted(ends.items(),
+                                          key=lambda row: -row[1])))
+        for meeting in meetings[:12]:
+            host = world.folks.get(meeting.host_folk)
+            rows.append("    %d — %s и народ по имени %s (%s)"
+                        % (meeting.date.year if meeting.date else 0,
+                           world.entity_name(meeting.comer_id),
+                           host.name if host is not None else "?",
+                           meeting.kind))
+            if meeting.shut_why:
+                rows.append("      отчего о них не знали: %s"
+                            % meeting.shut_why)
+            rows.append("      объяснялись: %s" % ", ".join(meeting.speech))
+            rows.append("      поняли так: %s" % meeting.read_as)
+            rows.append("      для живущих это было: %s" % meeting.local_eyes)
+            rows.append("      кончилось: %s; дальше — %s"
+                        % (meeting.outcome, meeting.after))
+            for version in meeting.versions:
+                rows.append("      как помнят у %s: %s"
+                            % (version.get("кто"), version.get("как помнит")))
+            rows.append("")
+    rows.append("")
+
+    # --- освоение -------------------------------------------------------
+    rows.append("  ОСВОЕНИЕ НОВЫХ ЗЕМЕЛЬ")
+    settlings = sorted(world.settlings.values(),
+                       key=lambda item: (item.started.ordinal
+                                         if item.started else 0, item.id))
+    if not settlings:
+        rows.append("    Новых земель в этом мире не осваивали.")
+    else:
+        failed = [item for item in settlings if item.result == "не прижилось"]
+        rooted = [item for item in settlings
+                  if item.result and item.result != "не прижилось"]
+        towns = [item for item in settlings if item.settlement_id]
+        used = [item for item in settlings
+                if item.locals_use and not item.locals_use.startswith("ею не")]
+        rows.append("    Попыток: %d; прижилось: %d, брошено: %d, выросло в "
+                    "поселение: %d." % (len(settlings), len(rooted),
+                                        len(failed), len(towns)))
+        rows.append("    Землёй уже пользовались до прихода: %d из %d."
+                    % (len(used), len(settlings)))
+        for settling in settlings[:12]:
+            region = world.regions.get(settling.region_id)
+            rows.append("    %d — %s в земле по имени %s"
+                        % (settling.started.year if settling.started else 0,
+                           settling.kind,
+                           region.name if region is not None else "?"))
+            rows.append("      кто ставил: %s; зачем: %s"
+                        % (world.entity_name(settling.host_id),
+                           settling.purpose))
+            rows.append("      как землёй пользовались: %s"
+                        % settling.locals_use)
+            rows.append("      чем ответили здешние: %s"
+                        % settling.locals_answer)
+            if settling.result:
+                rows.append("      чем кончилось: %s%s"
+                            % (settling.result,
+                               " (%s)" % settling.fail_why
+                               if settling.fail_why else ""))
+            else:
+                rows.append("      чем кончилось: ещё не решилось")
+            rows.append("")
+    rows.append("")
+
+    # --- исследователи --------------------------------------------------
+    rows.append("  ИССЛЕДОВАТЕЛИ")
+    explorers = sorted(world.explorers.values(), key=lambda item: item.id)
+    if not explorers:
+        rows.append("    Имён исследователей летопись не сохранила.")
+        return "\n".join(rows)
+    credited = [item for item in explorers if item.credit == "признан"]
+    taken = [item for item in explorers
+             if item.credit and item.credit != "признан"]
+    rows.append("    Всего: %d; признаны за своё дело: %d, признание "
+                "досталось не им: %d." % (len(explorers), len(credited),
+                                          len(taken)))
+    best = sorted(explorers, key=lambda item: (-len(item.findings),
+                                               -len(item.expeditions),
+                                               item.id))[:8]
+    for explorer in best:
+        figure = world.figures.get(explorer.figure_id)
+        if figure is None:
+            continue
+        rows.append("    %s" % figure.name)
+        for line in knowing_texts.explorer_lines(world, explorer, figure):
+            rows.append("      %s" % line)
         rows.append("")
     return "\n".join(rows)
 
@@ -5514,6 +5835,7 @@ def full_text(world) -> str:
         render_renown(world),
         render_guilds(world),
         render_expeditions(world),
+        render_knowing(world),
         render_politics(world),
         render_embassies(world),
         render_wars(world),

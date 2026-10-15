@@ -1456,11 +1456,11 @@ def _origin_lines(world) -> list:
 
 
 def portraits(world, out) -> None:
-    """Одиннадцать портретов мира: имена, ушедшие народы, старый город,
+    """Двенадцать портретов мира: имена, ушедшие народы, старый город,
     злое время, тот, кто людям не ровня, самый долгий праздник, самое
     громкое за всю историю, самое весомое место, самое громкое чудо,
-    самое людное владение чудовища и — если мир стоит на гексовой
-    карте — сама эта земля."""
+    самое людное владение чудовища, тот, кто узнал мир, и — если мир
+    стоит на гексовой карте — сама эта земля."""
     great_names(world, out)
     peoples_gone(world, out)
     oldest_town(world, out)
@@ -1471,7 +1471,48 @@ def portraits(world, out) -> None:
     weightiest_place(world, out)
     best_wonder(world, out)
     worst_dominion(world, out)
+    best_explorer(world, out)
     land_portrait(world, out)
+
+
+def best_explorer(world, out) -> None:
+    """Тот, кто узнал мир, — и то, как его за это помнят.
+
+    Портрет тут не о подвиге, а о расхождении: у пославшей державы он
+    «первый, кто дошёл», у тех, к кому он пришёл, бывает «чужаком,
+    которого пустили и пожалели», а первым по делу оказывается народ,
+    живший там за тысячу лет до него.
+    """
+    from . import knowing as knowing_cat
+    from . import narrative_knowing as knowing_texts
+
+    out("=" * 78)
+    out("ТОТ, КТО УЗНАЛ МИР")
+    out("=" * 78)
+    if not world.explorers:
+        out("  Ни одного исследователя этот мир не запомнил.")
+        out("")
+        return
+    best = max(world.explorers.values(),
+               key=lambda item: (len(item.findings), len(item.expeditions),
+                                 item.id))
+    figure = world.figures.get(best.figure_id)
+    if figure is None:
+        out("  Запись есть, а человека за ней нет.")
+        out("")
+        return
+    out("  %s" % figure.name)
+    for line in knowing_texts.explorer_lines(world, best, figure):
+        out("    %s" % line)
+    for finding_id in best.findings[:3]:
+        finding = world.findings.get(finding_id)
+        if finding is None:
+            continue
+        fact = finding.prime.get(knowing_cat.P_FACT, "")
+        fame = finding.prime.get(knowing_cat.P_FAME, "")
+        if fact and fame and fact != fame:
+            out("    а первым по делу был %s" % fact)
+    out("")
 
 
 # ---------------------------------------------------------------------------
@@ -3310,6 +3351,54 @@ def audit(world) -> list:
                     % item.name)
                 break
 
+    # 8в. Познание мира: что мир о себе узнал и чего так и не узнал.
+    if world.knowings:
+        from . import knowing as knowing_cat
+        probes = [item for item in world.expeditions.values() if item.goal]
+        records = list(world.knowings.values())
+        rows = {}
+        for item in records:
+            rows.setdefault(item.about_id, set()).add(item.level)
+        split = [key for key, levels in rows.items() if len(levels) > 1]
+        prime = [item for item in world.findings.values()
+                 if item.prime.get(knowing_cat.P_FACT)
+                 != item.prime.get(knowing_cat.P_FAME)]
+        wrong = [item for item in world.findings.values() if item.wrong]
+        lost = [item for item in records if item.lost_year]
+        found.append(("=", "познание: записей о знании %d (потеряно %d, "
+                      "искажено %d, в тайне %d); походов за ответом %d; "
+                      "открытий %d (первенство расходится у %d, поняли "
+                      "неверно %d); карт %d; встреч %d; освоений %d; "
+                      "исследователей %d"
+                      % (len(records), len(lost),
+                         len([item for item in records if item.warp]),
+                         len([item for item in records
+                              if item.access != "открыто"]),
+                         len(probes), len(world.findings), len(prime),
+                         len(wrong), len(world.charts), len(world.meetings),
+                         len(world.settlings), len(world.explorers))))
+        if len(rows) >= 5 and not split:
+            note("об одном и том же предмете все общества знают одно и то "
+                 "же: графа «кто знает» ничего не различает")
+        if world.total_years >= 3000 and not world.findings:
+            bad("за всю историю мир не сделал о себе ни одного открытия")
+        if world.findings and not prime and len(world.findings) >= 5:
+            note("первенство по делу и по признанию не разошлись ни разу: "
+                 "первооткрывателем всегда оказывается тот, кто дошёл")
+        for item in records:
+            if item.lost_year and item.since is not None \
+                    and item.lost_year < item.since.year:
+                bad("знание о «%s» потеряно раньше, чем получено"
+                    % item.about_name)
+                break
+        for item in probes:
+            if item.end is not None \
+                    and item.end.ordinal < item.start.ordinal:
+                bad("поход «%s» вернулся раньше, чем вышел" % item.name)
+                break
+    elif world.total_years >= 3000:
+        bad("мир ничего о себе не знает: ни одной записи о знании")
+
     # 9. Мир, в котором ничего не выросло.
     if world.active_polities:
         biggest = max((world.polities[p].population
@@ -3369,8 +3458,9 @@ PARTS = (
      "срезы мира на пять дат с разбросом по всем эпохам: кто держал "
      "землю, что шло, кто был жив"),
     (PORTRAITS, "Портреты",
-     "одиннадцать портретов: величайшие имена, ушедшие народы, самый "
-     "старый город, самое злое время, чудо, владение, сама земля"),
+     "двенадцать портретов: величайшие имена, ушедшие народы, самый "
+     "старый город, самое злое время, чудо, владение, тот, кто узнал "
+     "мир, сама земля"),
     (TOTALS, "Итог числами", "сводка всех реестров мира"),
     (FLAWS, "Проверка на поломки",
      "сто с лишним мер и ловушек: падежи, род, повторы текста, "

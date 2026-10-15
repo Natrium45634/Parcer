@@ -1512,6 +1512,40 @@ def deep(world, index: int) -> list:
     return rows
 
 
+def knowledge(world, index: int) -> list:
+    """Что об этом месте знают — и кто не знает ничего.
+
+    Это другой слой, чем «когда сюда впервые ступила нога»: тот
+    отвечает, что тут было, а этот — чьё это знание. Земля, на которой
+    три тысячи лет живёт народ, бывает неведома державе за морем, и
+    наоборот: о далёком чуде знают все, а дороги к нему не знает никто.
+    Поэтому запись тут всегда с хозяином.
+    """
+    from . import narrative_knowing as knowing_texts
+
+    rows = []
+    region = _region_of(world, index)
+    seen = set()
+    marks = []
+    if region is not None:
+        marks.append((region.id, "земля по имени %s" % region.name))
+    for item in wonders_here(world, index):
+        marks.append((item.id, "чудо по имени %s" % item.name))
+    for item in world.sites.values():
+        if item.hex_index == index:
+            marks.append((item.id, "%s по имени %s" % (item.kind, item.name)))
+    for key, said in marks:
+        if key in seen:
+            continue
+        seen.add(key)
+        lines = knowing_texts.place_knowing(world, key)
+        if not lines:
+            continue
+        rows.append(said)
+        rows.extend("  %s" % line for line in lines)
+    return rows
+
+
 def blocks(world, index: int, year: int = 0) -> list:
     """Полная страница места кусками: (метка, строка).
 
@@ -1563,6 +1597,17 @@ def blocks(world, index: int, year: int = 0) -> list:
         out.append(("dim", "  а как было на самом деле:"))
         for line in truth:
             out.append(("dim", "    %s" % line))
+        out.append(("line", ""))
+
+    told = knowledge(world, index)
+    if told:
+        out.append(("head", "ЧТО ОБ ЭТОМ МЕСТЕ ЗНАЮТ"))
+        out.append(("dim", "  знание тут всегда чьё-то: живущие знают "
+                           "подробно, сосед по рассказам, держава за морем "
+                           "может не знать вовсе"))
+        out.append(("line", ""))
+        for line in told:
+            out.append(("line", "  %s" % line))
         out.append(("line", ""))
 
     score, verdict, why = weight(world, index)
@@ -1782,6 +1827,6 @@ def notable(world, limit: int = 40) -> list:
 
 
 __all__ = ["cap", "gender_of", "agree", "live_word", "conditions",
-           "standing", "features",
+           "standing", "features", "knowledge",
            "weight", "timeline", "around", "brief", "deep", "blocks",
            "chapter", "best_hex", "notable"]

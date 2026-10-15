@@ -577,6 +577,9 @@ class ChronicleApp(tk.Tk):
         self.customs_text = self._add_text_tab(
             "Обычаи", lambda: self._set_text(
                 self.customs_text, chronicle.render_customs(self.world)))
+        self.knowing_text = self._add_text_tab(
+            "Познание мира", lambda: self._set_text(
+                self.knowing_text, chronicle.render_knowing(self.world)))
         self.gods_text = self._add_text_tab(
             "Боги и их дела", lambda: self._set_text(
                 self.gods_text, chronicle.render_gods(self.world)))
@@ -2238,6 +2241,18 @@ class ChronicleApp(tk.Tk):
             return out
 
         if kind == "Figure":
+            # Походы и открытия: чем он занимался, что нашёл, кто его
+            # снаряжал и каким его помнят у разных народов — потому что
+            # «первый, кто дошёл» у пославшей державы бывает «чужаком,
+            # которого пустили» у тех, к кому он пришёл.
+            explorer = world.explorer_of(entity.id)
+            if explorer is not None:
+                from worldgen import narrative_knowing as knowing_texts
+                rows = knowing_texts.explorer_lines(world, explorer, entity)
+                if rows:
+                    lines.extend(["", "ПОХОДЫ И ОТКРЫТИЯ", "-" * 60])
+                    lines.extend("  %s" % row for row in rows)
+
             # Культура и личные традиции: чей человек, как он живёт с
             # порядками своего народа и что у него своего. Блок
             # появляется не у всякого — облик заводится тем, чьи решения
