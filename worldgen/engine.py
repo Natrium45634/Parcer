@@ -35,6 +35,7 @@ from .systems import (aristocracy, artifacts, cabals, calamity, causes,
                       era_events,
                       exploration, founding, geography, guilds,
                       holidays as holidays_sys,
+                      knowing as knowing_sys,
                       houses,
                       origin as origin_sys,
                       invasion as invasion_sys,
@@ -192,6 +193,9 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
         founding.tick_camps(ctx, year)
         succession.tick(ctx, year)
         exploration.tick(ctx, year)
+        # Познание мира идёт сразу за походами за море: возвращаются в
+        # этом году и те, и другие, а год возвращения должен быть один.
+        knowing_sys.tick(ctx, year)
         nations.tick(ctx, year)
         # Прежде чем мир начнёт новый год, он вспоминает старые долги:
         # созревшие последствия прошлого входят в него первыми.
@@ -268,6 +272,12 @@ def generate(settings: Settings, progress=None, should_stop=None) -> World:
             # при этом разные вещи: праздник — день в году, обычай — то,
             # как поступают, когда случается.
             customs_sys.upkeep(ctx, year, UPKEEP_PERIOD)
+            # Познание мира — последним из «мирных» тактов и до былей:
+            # ему нужен сложившийся мир со всеми его руинами,
+            # владениями, путями и затворившимися народами, а быль
+            # растёт уже из его белых пятен — из пропавшего похода, из
+            # спора о первенстве, из карты, которой верят напрасно.
+            knowing_sys.upkeep(ctx, year, UPKEEP_PERIOD)
             # Были идут последними из историй: им нужен готовый мир со
             # всеми его руинами, вдовами, тяжбами и закрывшимися трактами.
             localstory.upkeep(ctx, year, UPKEEP_PERIOD)

@@ -90,13 +90,21 @@ YOKE = "старое ярмо"               # тут был хозяин, и о
 # так надо, а половина, что так больше нельзя. Спор о порядке тем и
 # хорош, что обе стороны правы по-своему.
 CUSTOM_ROW = "спор о порядке"      # одни держат обычай, другие уже нет
+# И три от познания мира. Они тем и хороши, что в них уже есть вопрос
+# без ответа: отряд, не пришедший назад; первенство, о котором спорят
+# две державы, когда живущие там помнят иначе; и карта, по которой
+# ходят век, хотя проход на ней закрыт.
+LOST_PROBE = "пропавший поход"     # ушли и не вернулись, а стан нашли
+FIRST_ROW = "спор о первенстве"    # кто дошёл, кто записал, кого признали
+BAD_CHART = "ошибка в карте"       # верят бумаге, а бумага врёт
 
 NODES = (RUIN, PLACE, THING, TRACE, WAR_END, CALAMITY, DEAD, HOUSE_FALL,
          TONGUE, ROUTE, GRUDGE, MIGRATION, LAW, BEAST, HOLY, CRAFT,
          TOWN_ACHE, TOWN_SECRET, UNDERCITY,
          DIVINE_BAN, LOST_GOD, PROPHECY, FIRST_TRACE,
          LOST_NAME, UNDONE, FALSE_HERO, SCAR, LOST_SKILL,
-         BLIND_RITE, HID_FEAST, FEAST_MARK, YOKE, CUSTOM_ROW)
+         BLIND_RITE, HID_FEAST, FEAST_MARK, YOKE, CUSTOM_ROW,
+         LOST_PROBE, FIRST_ROW, BAD_CHART)
 
 # Насколько охотно мир рассказывает о каждом узле. Быт и последствия
 # войн — самое частое; древнее зло — редкость.
@@ -110,6 +118,7 @@ NODE_WEIGHT = {
     SCAR: 1.0, LOST_SKILL: 0.9,
     BLIND_RITE: 1.2, HID_FEAST: 1.0, FEAST_MARK: 0.8,
     YOKE: 1.3, CUSTOM_ROW: 1.2,
+    LOST_PROBE: 1.3, FIRST_ROW: 0.9, BAD_CHART: 1.0,
 }
 
 
@@ -189,18 +198,18 @@ SHAPES = (
           genres=("камерный", "горький"), fight=0.03),
     Shape("scribe", "ошибка в своде", (LAW, HOLY, RUIN, DEAD, TOWN_SECRET, UNDERCITY, LOST_GOD, PROPHECY,
            LOST_NAME, FALSE_HERO, LOST_SKILL, BLIND_RITE, HID_FEAST,
-           CUSTOM_ROW),
+           CUSTOM_ROW, FIRST_ROW, BAD_CHART),
           acts=(4, 8), epicity=1, weight=1.1,
           genres=("книжный", "таинственный"), fight=0.05),
     Shape("missing", "пропал человек", (ROUTE, WAR_END, BEAST, CALAMITY, UNDERCITY, TOWN_ACHE, DIVINE_BAN,
-           PROPHECY, UNDONE, SCAR, HID_FEAST),
+           PROPHECY, UNDONE, SCAR, HID_FEAST, LOST_PROBE),
           acts=(4, 9), epicity=1, weight=1.6,
           genres=("розыскной", "тревожный"), fight=0.22),
 
     # --- местное: одно поселение или округа ----------------------------
     Shape("strange", "странность", (TRACE, PLACE, RUIN, CALAMITY, UNDERCITY, TOWN_SECRET, DIVINE_BAN,
            LOST_GOD, PROPHECY, FIRST_TRACE, LOST_NAME, SCAR, BLIND_RITE,
-           FEAST_MARK),
+           FEAST_MARK, LOST_PROBE, BAD_CHART),
           acts=(5, 10), epicity=1, weight=1.4,
           genres=("таинственный", "мрачный"), fight=0.18),
     Shape("blamed", "того, кого сочли виновным", (GRUDGE, DEAD, CALAMITY, TOWN_ACHE, TOWN_SECRET, DIVINE_BAN, PROPHECY,

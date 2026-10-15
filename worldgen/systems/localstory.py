@@ -43,6 +43,7 @@ from .. import races as races_mod
 from .. import sites as sites_mod
 from .. import township as town_cat
 from . import customs as customs_sys
+from . import knowing as knowing_sys
 from . import holidays as holidays_sys
 from ..models import ACTIVE, RUINED
 
@@ -497,6 +498,26 @@ def _nodes(ctx, year: int) -> list:
         out.append(Node(
             node_kind, line, when, ref=custom.id, region_id=region_id,
             weight=weight))
+
+    # --- то, что осталось от походов и открытий ------------------------
+    # Познание мира даёт узлы сам: пропавший отряд, спорное первенство
+    # и карта, которой верят напрасно, — в каждом уже есть вопрос без
+    # ответа, а это и есть то, с чего начинается быль.
+    for kind, line, item, region_id, weight in knowing_sys.story_nodes(
+            world, year):
+        node_kind = {"пропавший поход": cat.LOST_PROBE,
+                     "спор о первенстве": cat.FIRST_ROW,
+                     "ошибка в карте": cat.BAD_CHART}.get(kind)
+        if node_kind is None:
+            continue
+        when = 0
+        for field in ("end", "found", "made", "start"):
+            date = getattr(item, field, None)
+            if date is not None:
+                when = date.year
+                break
+        out.append(Node(node_kind, line, when or year, ref=item.id,
+                        region_id=region_id or "", weight=weight))
 
     return out
 

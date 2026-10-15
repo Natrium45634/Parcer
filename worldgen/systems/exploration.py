@@ -24,6 +24,7 @@ from __future__ import annotations
 from .. import narrative_exploration as texts
 from .. import races as races_mod
 from ..models import ACTIVE
+from . import knowing as knowing_sys
 from . import succession
 
 EXPEDITION_RATE = 0.012        # годовая вероятность снарядить поход
@@ -255,6 +256,10 @@ def _finish(ctx, expedition, year: int) -> None:
                               race_id=expedition.race_id)
         ctx.spread_knowledge()
         expedition.discovered.append(target.id)
+        # Земля стала досягаема — это ответ на один вопрос. На другой
+        # («кто теперь о ней знает, что именно знает и жил ли там
+        # кто-нибудь до прихода корабля») отвечает познание мира.
+        knowing_sys.landfall(ctx, expedition, target, leader, year)
         title, text = texts.discovery(rng, expedition, leader, target,
                                       survivors, expedition.crew)
         importance = 5
