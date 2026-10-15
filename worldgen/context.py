@@ -51,6 +51,8 @@ class GenContext:
         self.climate_plan = []       # перемены климата, вписанные в карту
         self.expedition_due = {}     # поход -> год возвращения
         self.expedition_attempts = {}  # цель -> сколько раз к ней ходили
+        self.probe_due = {}          # поход за знанием -> год возвращения
+        self.probe_count = {}        # общество -> сколько походов снарядило
         self.notable_done = {}       # ремесло -> уже сделанные работы
         self.lair_of_relic = {}      # след -> логово карты, из которого он взялся
         self.piety = 1.0             # набожность мира

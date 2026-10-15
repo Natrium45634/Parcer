@@ -1743,7 +1743,16 @@ class Folk:
 
 @dataclass
 class Expedition:
-    """Поход в неизведанное: за море, за горы, за край света."""
+    """Поход в неизведанное: за море, за горы, за край света.
+
+    Запись одна на два разных дела, и это нарочно. Старое дело — выйти
+    за воду и найти землю, которой нет ни на одной карте
+    (`systems/exploration.py`). Новое — пойти за ответом на названный
+    вопрос: где исток реки, цел ли свод погибшей державы, докуда
+    достаёт хозяин той земли (`systems/knowing.py`). Заводить под
+    второе вторую сущность значило бы развести по разным спискам то,
+    что в мире одно: снаряжённый отряд, ушедший за край известного.
+    """
 
     id: str
     name: str
@@ -1761,6 +1770,36 @@ class Expedition:
     crew: int = 0
     deaths: int = 0
     attempt: int = 1           # какая по счёту попытка дойти до этой цели
+    # --- познание мира: зачем шли, кто шёл и что из этого вышло -------
+    # Поля ниже пустые у походов, снаряжённых старым порядком (поиск
+    # земли за морем): там и цели не было, кроме самой земли. У похода
+    # за знанием они названы все, и в них весь смысл записи: без
+    # предпосылки это сообщение «в таком-то году открыли гору», а с
+    # предпосылкой — история.
+    goal: str = ""             # ключ задачи из knowing.GOALS
+    goal_group: str = ""
+    spur: str = ""             # отчего вообще собрались идти
+    haze: str = ""             # насколько заранее известно, куда идут
+    hope: str = ""             # чего от похода ждали
+    aim_kind: str = ""         # о предмете какого рода речь
+    aim_id: str = ""
+    aim_name: str = ""
+    host_kind: str = ""        # кто снаряжает: держава, цех, храм, вольные
+    host_id: str = ""
+    host_said: str = ""
+    secret_aim: str = ""       # своя цель начальника, если она есть
+    roles: list = field(default_factory=list)     # из кого собран отряд
+    gear: list = field(default_factory=list)      # что взяли с собой
+    plan: list = field(default_factory=list)      # какой путь намечали
+    went: list = field(default_factory=list)      # каким прошли
+    snags: list = field(default_factory=list)     # что помешало
+    marks: list = field(default_factory=list)     # этапы: что и в каком году
+    turn: str = ""             # отчего цель переменилась
+    turn_year: int = 0
+    result: str = ""           # исход из knowing.ENDS
+    findings: list = field(default_factory=list)  # что открыли
+    told: list = field(default_factory=list)      # кому достались сведения
+    weight: int = 1            # вес в истории, 1…5
     notes: list = field(default_factory=list)
 
     @property
@@ -2956,3 +2995,249 @@ class Dominion:
         data["souls"] = self.souls
         data["lands"] = self.lands
         return data
+
+
+# --- познание мира (блок 52) -----------------------------------------
+#
+# Шесть записей ниже держат историю не географии, а знания о ней.
+# Поэтому ни одна из них не описывает сам предмет: земля, руины, народ
+# и владение живут своими сущностями и существуют независимо от того,
+# знает ли о них кто-нибудь. Тут — только чьё-то знание, чей-то поход,
+# чья-то карта и чья-то встреча.
+
+
+@dataclass
+class Knowing:
+    """Что одно общество знает об одном предмете мира.
+
+    Главное в этой записи — что у неё есть хозяин. «Земля неведома» —
+    фраза без смысла: она неведома такой-то державе и при этом хорошо
+    известна тем, кто на ней живёт. Поэтому ключ записи — пара
+    «кто знает» и «о чём», а состояние знания хранится и общим словом,
+    и порознь по вопросам: о существовании хребта знают по слухам, о
+    южных его долинах — по старой карте, а о городах в северных
+    долинах не знают вовсе.
+    """
+
+    id: str
+    about_kind: str            # земля / место / народ / владение / путь …
+    about_id: str
+    about_name: str
+    group_kind: str            # folk — народ, polity — держава
+    group_id: str
+    level: str                 # состояние знания целиком
+    since: Date = None
+    source: str = ""           # откуда это у них
+    aspects: dict = field(default_factory=dict)   # вопрос -> состояние
+    trust: float = 0.0         # насколько этому у них верят
+    truth: float = 0.0         # и насколько это верно на самом деле
+    access: str = "открыто"    # открыто / для немногих / тайна
+    secret_why: str = ""
+    confirmed: int = 0         # год, когда это в последний раз подтвердили
+    lost_year: int = 0         # год, когда знание пропало
+    lost_why: str = ""
+    kept: str = ""             # что уцелело от знания, когда оно пропало
+    from_id: str = ""          # от кого узнали
+    muddle: str = ""           # в чём именно сведения расходятся
+    warp: str = ""             # ключ искажения, если весть шла далеко
+    notes: list = field(default_factory=list)
+
+    @property
+    def known(self) -> bool:
+        """Есть ли это знание у них сейчас."""
+        from .knowing import is_known
+        return self.lost_year == 0 and is_known(self.level)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["since"] = _date_out(self.since)
+        data["known"] = self.known
+        return data
+
+
+@dataclass
+class Finding:
+    """Открытие: не появление предмета, а перемена в знании о нём.
+
+    У всякого открытия названы три первенства (`prime`) — кто дошёл на
+    самом деле, чья запись самая ранняя из уцелевших и кого принято
+    считать первым, — и они расходятся. А ошибочное толкование стоит
+    отдельной графой: найти руины и понять, чем они были, — два разных
+    дела с разницей в век.
+    """
+
+    id: str
+    about_kind: str
+    about_id: str
+    about_name: str
+    kind: str                  # вид открытия: первым дошёл, первым описал…
+    found: Date = None
+    group_kind: str = ""       # кому это стало известно
+    group_id: str = ""
+    expedition_id: str = ""
+    figure_ids: list = field(default_factory=list)
+    before: str = ""           # что знали до этого
+    gained: list = field(default_factory=list)    # на что получен ответ
+    evidence: str = ""         # чем это дошло: запись, камень, раскоп…
+    trust: float = 0.0
+    prime: dict = field(default_factory=dict)     # род первенства -> кто
+    claims: list = field(default_factory=list)    # притязания на первенство
+    twist: str = ""            # отчего признание досталось не тому
+    known_by: list = field(default_factory=list)  # кто это открытие признаёт
+    wrong: str = ""            # как это поняли неверно
+    wrong_fixed: int = 0       # год, когда поняли верно
+    wrong_by: str = ""
+    fruits: list = field(default_factory=list)    # что из этого вышло
+    weight: int = 1            # вес в истории, 1…5
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["found"] = _date_out(self.found)
+        return data
+
+
+@dataclass
+class Chart:
+    """Карта: не изображение мира, а документ со своей целью и ошибками.
+
+    Точность у карты не одна: торговая отлично знает пристани и врёт в
+    горах, военная хороша в переправах и устаревает за десятилетие,
+    потому что сведения о власти ветшают быстрее очерка берега.
+    Поэтому точность хранится по параметрам.
+    """
+
+    id: str
+    name: str
+    kind: str                  # торговая, кормчая, жреческая, древняя…
+    made: Date = None
+    maker_id: str = ""         # кто составил
+    group_kind: str = ""
+    group_id: str = ""
+    purpose: str = ""
+    covers: list = field(default_factory=list)    # какие земли покрывает
+    sources: list = field(default_factory=list)   # по чему составлена
+    marks: dict = field(default_factory=dict)     # параметр -> точность
+    errors: list = field(default_factory=list)    # известные ошибки
+    spread: int = 1            # сколько списков разошлось
+    turns: list = field(default_factory=list)     # что с ней было потом
+    lost_year: int = 0
+    secret: str = ""
+    notes: list = field(default_factory=list)
+
+    @property
+    def alive(self) -> bool:
+        return self.lost_year == 0
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["made"] = _date_out(self.made)
+        data["alive"] = self.alive
+        return data
+
+
+@dataclass
+class Meeting:
+    """Встреча двух обществ, у каждого из которых своя история.
+
+    У встречи две памяти: пришедшие записывают открытие народа, а те,
+    к кому пришли, — появление чужаков. Поэтому тут и первое толкование
+    пришедших, и то, чем это было для местных, и версии обеих сторон.
+    """
+
+    id: str
+    date: Date = None
+    kind: str = ""             # частная, торговая, посольство, стычка…
+    comer_kind: str = ""       # кто пришёл
+    comer_id: str = ""
+    host_folk: str = ""        # к кому пришли
+    region_id: str = ""
+    hex_index: int = -1
+    expedition_id: str = ""
+    starter: str = ""          # кто начал
+    steps: list = field(default_factory=list)     # пройденные стадии
+    speech: list = field(default_factory=list)    # как объяснялись
+    barrier: float = 0.0       # насколько плохо поняли друг друга
+    read_as: str = ""          # как пришедшие поняли то, что увидели
+    local_eyes: str = ""       # чем это было для местных
+    shut_why: str = ""         # отчего этот народ был в стороне от всех
+    outcome: str = ""
+    after: str = ""            # что стало с отношениями
+    versions: list = field(default_factory=list)  # кто как это запомнил
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["date"] = _date_out(self.date)
+        return data
+
+
+@dataclass
+class Settling:
+    """Попытка освоения: отдельная от открытия и не обязательно удачная.
+
+    Нанесённая на карту земля не становится чьей-то: тут названо, кто
+    этой землёй пользовался до прихода (сезонная охота, пастбище,
+    кладбище, святое место, хозяин, который людям не ровня), чем
+    местные ответили и чем всё кончилось.
+    """
+
+    id: str
+    kind: str                  # стан, торговый пост, острог, поселение…
+    started: Date = None
+    host_kind: str = ""
+    host_id: str = ""
+    region_id: str = ""
+    hex_index: int = -1
+    purpose: str = ""
+    settlers: int = 0
+    locals_use: str = ""       # как землёй пользовались до них
+    locals_folk: str = ""      # чей это был край
+    locals_answer: str = ""    # чем ответили местные
+    supply: str = ""           # откуда снабжают
+    expedition_id: str = ""
+    ended: Date = None
+    result: str = ""           # что из этого вышло
+    fail_why: str = ""
+    settlement_id: str = ""    # город, если двор дорос до города
+    notes: list = field(default_factory=list)
+
+    @property
+    def alive(self) -> bool:
+        return self.ended is None
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["started"] = _date_out(self.started)
+        data["ended"] = _date_out(self.ended)
+        data["alive"] = self.alive
+        return data
+
+
+@dataclass
+class Explorer:
+    """Исследователь: то, что добавляется к биографии, а не заменяет её.
+
+    Признание у разных народов разное, и это не придирка: тот, кто у
+    пославшей державы «первый, кто дошёл», у тех, к кому он пришёл,
+    бывает «чужак, которого пустили и пожалели».
+    """
+
+    id: str
+    figure_id: str
+    trades: list = field(default_factory=list)    # чем он занимался
+    drives: list = field(default_factory=list)    # что его вело
+    expeditions: list = field(default_factory=list)
+    findings: list = field(default_factory=list)
+    charts: list = field(default_factory=list)
+    tongues: list = field(default_factory=list)
+    patrons: list = field(default_factory=list)   # кто его снаряжал
+    rivals: list = field(default_factory=list)
+    fame: dict = field(default_factory=dict)      # народ -> каким помнят
+    credit: str = ""           # признан, признан не он, забыт
+    unsolved: str = ""         # неразрешённое исчезновение
+    goal: str = ""             # личная цель
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)

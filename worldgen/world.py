@@ -16,8 +16,9 @@ from . import races as races_mod
 from . import township
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Artifact, Battle, Bond, Cabal, Calamity, Camp, Codex,
-                     Company, Custom, CultureProfile,
+                     Chart, Company, Custom, CultureProfile,
                      Deity, Dominion,
+                     Explorer, Finding, Knowing, Meeting, Settling,
                      Discovery, Embassy, Event, Expedition, Fact, Faith, Feud,
                      Figure,
                      Folk, Fortress,
@@ -121,6 +122,8 @@ _ENTITY_TABLES = {
     "WN": ("wonders",), "DN": ("dominions",),
     "CU": ("customs",), "CP": ("culture_profiles",),
     "TW": ("townships",),
+    "KN": ("knowings",), "FD": ("findings",), "MP": ("charts",),
+    "MT": ("meetings",), "SL": ("settlings",), "XP": ("explorers",),
 }
 
 
@@ -215,6 +218,15 @@ class World:
         self.townships = {}            # биографии городов
         self.customs = {}              # обычаи народов
         self.culture_profiles = {}     # культурный облик значимых личностей
+        # --- познание мира ---
+        self.knowings = {}             # кто что знает о предметах мира
+        self.findings = {}             # открытия: перемены в знании
+        self.charts = {}               # карты со своей точностью и ошибками
+        self.meetings = {}             # встречи двух обществ
+        self.settlings = {}            # попытки освоения новых земель
+        self.explorers = {}            # исследователи: добавка к биографии
+        self._knowing_of = {}          # (кто, о чём) -> номер записи
+        self._explorer_of = {}         # личность -> номер её записи
         self._profile_of = {}          # личность -> её культурный облик
         self._town_of = {}             # поселение -> id биографии
         self._town_watch = {}          # рабочие указатели биографий
@@ -1436,6 +1448,123 @@ class World:
         """Культурный облик личности, если он для неё заведён."""
         return self.culture_profiles.get(self._profile_of.get(figure_id, ""))
 
+    # ------------------------------------------------------------------
+    # Познание мира
+    # ------------------------------------------------------------------
+    #
+    # Знание тут всегда чьё-то, поэтому спрашивается оно парой «кто — о
+    # чём» и одним методом на всю программу: иначе окно, летопись и
+    # разбор начнут отвечать по-разному на один вопрос. Указатель
+    # строится лениво — у мира, прочитанного из файла, записи приходят
+    # готовыми, и перестраивать его надо по их числу.
+
+    def add_knowing(self, **kwargs) -> Knowing:
+        item = Knowing(id=self.next_id("KN"), **kwargs)
+        self.knowings[item.id] = item
+        self._knowing_of[(item.group_id, item.about_id)] = item.id
+        return item
+
+    def _knowing_index(self) -> dict:
+        if len(self._knowing_of) != len(self.knowings):
+            self._knowing_of = {(item.group_id, item.about_id): item.id
+                                for item in self.knowings.values()}
+        return self._knowing_of
+
+    def knowing_of(self, group_id: str, about_id: str):
+        """Что это общество знает об этом предмете — или ничего."""
+        return self.knowings.get(
+            self._knowing_index().get((group_id, about_id), ""))
+
+    def knows(self, group_id: str, about_id: str, aspect: str = "") -> bool:
+        """Знает ли общество об этом — и, если спрошено, именно это.
+
+        Без указания вопроса отвечает про знание вообще. С вопросом —
+        про него одного: о существовании хребта знают все, а о том, где
+        на нём вода, не знает никто, кроме живущих.
+        """
+        from .knowing import is_known
+        record = self.knowing_of(group_id, about_id)
+        if record is None or not record.known:
+            return False
+        if not aspect:
+            return True
+        return is_known(record.aspects.get(aspect, ""))
+
+    def knowings_of_group(self, group_id: str, known_only: bool = True) -> list:
+        rows = [item for item in self.knowings.values()
+                if item.group_id == group_id and (not known_only or item.known)]
+        rows.sort(key=lambda item: item.id)
+        return rows
+
+    def knowings_about(self, about_id: str, known_only: bool = True) -> list:
+        rows = [item for item in self.knowings.values()
+                if item.about_id == about_id and (not known_only or item.known)]
+        rows.sort(key=lambda item: item.id)
+        return rows
+
+    def add_finding(self, **kwargs) -> Finding:
+        item = Finding(id=self.next_id("FD"), **kwargs)
+        self.findings[item.id] = item
+        return item
+
+    def findings_about(self, about_id: str) -> list:
+        rows = [item for item in self.findings.values()
+                if item.about_id == about_id]
+        rows.sort(key=lambda item: (item.found.ordinal if item.found else 0,
+                                    item.id))
+        return rows
+
+    def add_chart(self, **kwargs) -> Chart:
+        item = Chart(id=self.next_id("MP"), **kwargs)
+        self.charts[item.id] = item
+        return item
+
+    def charts_of(self, group_id: str, alive_only: bool = True) -> list:
+        rows = [item for item in self.charts.values()
+                if item.group_id == group_id and (not alive_only or item.alive)]
+        rows.sort(key=lambda item: (item.made.ordinal if item.made else 0,
+                                    item.id))
+        return rows
+
+    def add_meeting(self, **kwargs) -> Meeting:
+        item = Meeting(id=self.next_id("MT"), **kwargs)
+        self.meetings[item.id] = item
+        return item
+
+    def meetings_with(self, folk_id: str) -> list:
+        rows = [item for item in self.meetings.values()
+                if folk_id in (item.host_folk, item.comer_id)]
+        rows.sort(key=lambda item: (item.date.ordinal if item.date else 0,
+                                    item.id))
+        return rows
+
+    def add_settling(self, **kwargs) -> Settling:
+        item = Settling(id=self.next_id("SL"), **kwargs)
+        self.settlings[item.id] = item
+        return item
+
+    def settlings_in(self, region_id: str) -> list:
+        rows = [item for item in self.settlings.values()
+                if item.region_id == region_id]
+        rows.sort(key=lambda item: (item.started.ordinal
+                                    if item.started else 0, item.id))
+        return rows
+
+    def add_explorer(self, **kwargs) -> Explorer:
+        item = Explorer(id=self.next_id("XP"), **kwargs)
+        self.explorers[item.id] = item
+        if item.figure_id:
+            self._explorer_of[item.figure_id] = item.id
+        return item
+
+    def explorer_of(self, figure_id: str):
+        """Запись исследователя, если она для этой личности заведена."""
+        if len(self._explorer_of) != len(self.explorers):
+            self._explorer_of = {item.figure_id: item.id
+                                 for item in self.explorers.values()
+                                 if item.figure_id}
+        return self.explorers.get(self._explorer_of.get(figure_id, ""))
+
     @property
     def standing_dominions(self) -> list:
         """Владения, которые на этот час ещё стоят."""
@@ -2134,6 +2263,12 @@ class World:
             "Городских биографий": len(self.townships),
             "Праздников (всего)": len(self.holidays),
             "Праздников (отмечают)": len(self.holidays_kept()),
+            "Записей о знании": len(self.knowings),
+            "Открытий (познание)": len(self.findings),
+            "Карт": len(self.charts),
+            "Встреч обществ": len(self.meetings),
+            "Попыток освоения": len(self.settlings),
+            "Исследователей": len(self.explorers),
             "Обычаев (всего)": len(self.customs),
             "Обычаев (держатся)": len([item for item in self.customs.values()
                                        if item.ended is None]),

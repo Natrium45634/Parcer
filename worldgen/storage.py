@@ -12,9 +12,9 @@ import io
 import json
 
 from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
-                     Camp,
+                     Camp, Chart,
                      Codex, Company, Custom, CultureProfile, Deity,
-                     Discovery,
+                     Discovery, Explorer, Finding, Knowing, Meeting, Settling,
                      Embassy, EraSpan, Legend, Event, Expedition, Fact, Faith,
                      Feud, Figure,
                      Folk, Fortress, Guild, House, Law, League, Memory,
@@ -41,7 +41,7 @@ FORMAT_VERSION = 1
 _DATE_FIELDS = {"birth", "death", "founded", "ended", "date", "start", "end",
                 "created", "awakened", "revealed", "born", "opened",
                 "sent", "returned", "started", "made", "lost", "opened",
-                "signed_at",
+                "signed_at", "since",
                 "closed", "married", "signed", "built", "began",
                 "found", "entered"}
 
@@ -198,6 +198,18 @@ def world_to_dict(world: World) -> dict:
                     for item in world.wonders.values()],
         "dominions": [_compact(Dominion, item.to_dict())
                       for item in world.dominions.values()],
+        "knowings": [_compact(Knowing, item.to_dict())
+                     for item in world.knowings.values()],
+        "findings": [_compact(Finding, item.to_dict())
+                     for item in world.findings.values()],
+        "charts": [_compact(Chart, item.to_dict())
+                   for item in world.charts.values()],
+        "meetings": [_compact(Meeting, item.to_dict())
+                     for item in world.meetings.values()],
+        "settlings": [_compact(Settling, item.to_dict())
+                      for item in world.settlings.values()],
+        "explorers": [_compact(Explorer, item.to_dict())
+                      for item in world.explorers.values()],
         "customs": [_compact(Custom, item.to_dict())
                     for item in world.customs.values()],
         "culture_profiles": [_compact(CultureProfile, item.to_dict())
@@ -445,6 +457,24 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("dominions", ()):
         hold = Dominion(**_clean(Dominion, item))
         world.dominions[hold.id] = hold
+    for item in data.get("knowings", ()):
+        record = Knowing(**_clean(Knowing, item))
+        world.knowings[record.id] = record
+    for item in data.get("findings", ()):
+        finding = Finding(**_clean(Finding, item))
+        world.findings[finding.id] = finding
+    for item in data.get("charts", ()):
+        chart = Chart(**_clean(Chart, item))
+        world.charts[chart.id] = chart
+    for item in data.get("meetings", ()):
+        meeting = Meeting(**_clean(Meeting, item))
+        world.meetings[meeting.id] = meeting
+    for item in data.get("settlings", ()):
+        settling = Settling(**_clean(Settling, item))
+        world.settlings[settling.id] = settling
+    for item in data.get("explorers", ()):
+        explorer = Explorer(**_clean(Explorer, item))
+        world.explorers[explorer.id] = explorer
     for item in data.get("customs", ()):
         custom = Custom(**_clean(Custom, item))
         world.customs[custom.id] = custom
