@@ -564,6 +564,13 @@ def _lands_for(world, kind, control, pick: dict, home, rng) -> list:
     for land in sorted(home.neighbors or ()):
         if len(lands) >= room:
             break
+        # Соседняя земля могла уже прийти сюда из того, что за хозяином
+        # числилось раньше. Без этой проверки она попадала в список
+        # дважды — и у владения выходило два отрезка владения одной
+        # землёй разом, то есть ложь в ответе «кто тут хозяйничал в
+        # таком-то году». Самопроверка это и поймала.
+        if land in lands:
+            continue
         region = world.regions.get(land)
         if region is None or getattr(region, "drowned", False):
             continue

@@ -4968,9 +4968,22 @@ def check_things(world, seed: str) -> list:
     """
     problems = []
 
-    names = [item.name for item in world.artifacts.values()]
-    if len(names) != len(set(names)):
-        problems.append("сид «%s»: имена вещей повторяются" % seed)
+    # Имена вещей не повторяются — кроме одного случая: копия,
+    # обрядовая реплика и подделка носят имя подлинника нарочно, иначе
+    # «настоящая хранится у нас, а у них — список» было бы не о чем
+    # сказать. Поэтому повтор допускается только внутри родни: у одной
+    # из вещей в записи стоит, что она сделана по образцу другой.
+    by_name = {}
+    for item in world.artifacts.values():
+        by_name.setdefault(item.name, []).append(item)
+    for name, items in sorted(by_name.items()):
+        if len(items) < 2:
+            continue
+        roots = {item.parent_id or item.id for item in items}
+        if len(roots) > 1:
+            problems.append("сид «%s»: имена вещей повторяются: «%s» у "
+                            "вещей, не связанных родством" % (seed, name))
+            break
 
     for artifact in world.artifacts.values():
         if artifact.made is None:
