@@ -3037,7 +3037,8 @@ class Knowing:
     lost_year: int = 0         # год, когда знание пропало
     lost_why: str = ""
     kept: str = ""             # что уцелело от знания, когда оно пропало
-    from_id: str = ""          # от кого узнали
+    from_id: str = ""          # от кого пришло то, что знают сейчас
+    from_year: int = 0         # и в каком году это пришло
     muddle: str = ""           # в чём именно сведения расходятся
     warp: str = ""             # ключ искажения, если весть шла далеко
     notes: list = field(default_factory=list)

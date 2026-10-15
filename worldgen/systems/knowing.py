@@ -389,7 +389,8 @@ def _note_knowing(ctx, year: int, side, mark, level: str, source: str,
                               year),
             source=source, aspects=dict(aspects or {}),
             trust=round(float(trust), 2), truth=round(float(truth), 2),
-            from_id=from_id, muddle=muddle, access=access,
+            from_id=from_id, from_year=year if from_id else 0,
+            muddle=muddle, access=access,
             secret_why=secret_why, confirmed=year)
         return record
 
@@ -403,7 +404,14 @@ def _note_knowing(ctx, year: int, side, mark, level: str, source: str,
         record.level = level
         record.source = source
         if from_id:
+            # «От кого узнали» — про нынешнее состояние знания, а не про
+            # первый слух о предмете: о хребте тут знали по слухам с
+            # пятисотого года, а подробности пришли от соседей в
+            # тысяча четыреста двадцатом. Без года выходило, что весть
+            # пришла раньше, чем была у того, от кого её получили, — на
+            # этом самопроверка и поймала запись.
             record.from_id = from_id
+            record.from_year = year
     for key, value in (aspects or {}).items():
         if cat.level_depth(value) > cat.level_depth(record.aspects.get(key, "")):
             record.aspects[key] = value
@@ -978,6 +986,14 @@ def _mark_by_id(world, kind: str, key: str, name: str):
         if kin is not None:
             return Mark(kind, kin.id, kin.name,
                         (kin.regions or [""])[0] if kin.regions else "")
+    elif kind == cat.T_POLITY:
+        polity = world.polities.get(key)
+        if polity is not None:
+            capital = world.settlements.get(polity.capital_id)
+            return Mark(kind, polity.id, polity.full_name,
+                        capital.region_id if capital is not None
+                        else (polity.region_ids or [""])[0], -1,
+                        polity.founded.year if polity.founded else 0, 0.4)
     return Mark(kind, key, name or "?", "")
 
 
@@ -1121,6 +1137,38 @@ def _level_for(end: str, answers, goal) -> str:
     return cat.RUMOUR
 
 
+def _real_route(world, expedition, end: str) -> list:
+    """Каким путём отряд прошёл на самом деле.
+
+    Намеченный путь и пройденный — разные вещи, и разница эта не
+    украшение: по ней видно, где поход сломался. Не дошедший обрывается
+    на полпути, повернувший уходит в сторону от плана, а тот, у кого
+    отняли дорогу (обвал, запрет хозяина земли, непущенные местные),
+    идёт в обход — через соседнюю землю, которой в плане не было.
+
+    Жребия тут нет нарочно: путь выводится из того, что уже случилось,
+    и потому эта поправка не меняет ни одного мира.
+    """
+    plan = list(expedition.plan)
+    if not plan:
+        return plan
+    if end in (cat.E_GONE, cat.E_DARK):
+        return plan[:1]                   # вышли — и всё, что известно
+    if end == cat.E_SHORT:
+        return plan[:-1] or plan[:1]      # повернули, не дойдя
+    detour = {"cliff", "locals", "lord", "ice", "flood", "war"}
+    if expedition.turn or detour.intersection(expedition.snags):
+        for region_id in plan[:-1]:
+            region = world.regions.get(region_id)
+            if region is None:
+                continue
+            for neighbor_id in sorted(region.neighbors):
+                if neighbor_id in plan:
+                    continue
+                return plan[:-1] + [neighbor_id, plan[-1]]
+    return plan
+
+
 def _come_back(ctx, year: int) -> None:
     world = ctx.world
     for expedition_id in sorted(ctx.probe_due):
@@ -1200,7 +1248,7 @@ def _finish(ctx, expedition, year: int) -> None:
     was_lost = bool(before is not None and before.lost_year)
 
     expedition.result = end
-    expedition.went = list(expedition.plan)
+    expedition.went = _real_route(world, expedition, end)
     expedition.marks.append({"что": end, "год": year})
     world.end_expedition(expedition, date, end)
 
@@ -1704,8 +1752,16 @@ def _make_meeting(ctx, year: int, rng, expedition, side, mark, end: str,
     host_side = Side("folk", host.id, host.name, host.id, host.race_id,
                      {host.cradle_region}, {"people"}, host.population,
                      host.cradle_region)
-    comer_mark = Mark(cat.T_FOLK, side.folk_id or side.id, side.name,
-                      side.home, -1, 0, 0.35, side.folk_id)
+    # Чем пришедшие стали для местных: народом, если за ними стоит
+    # народ, и державой, если грамота есть, а народа за ней не видно.
+    # Прежде во втором случае записывался народ с номером державы — и
+    # выходило знание о народе, которого в мире нет.
+    if side.folk_id:
+        comer_mark = Mark(cat.T_FOLK, side.folk_id, side.name, side.home,
+                          -1, 0, 0.35, side.folk_id)
+    else:
+        comer_mark = Mark(cat.T_POLITY, side.id, side.name, side.home,
+                          -1, 0, 0.4)
     _note_knowing(ctx, year, host_side, comer_mark, cat.FOREIGN, "eyes",
                   aspects={cat.PEOPLE: cat.FOREIGN}, trust=0.6,
                   truth=round(0.8 - 0.4 * barrier, 2))
@@ -2423,6 +2479,32 @@ def _credit(ctx, year: int, rng) -> None:
         basis = rng.choice([item for item, _said in cat.CLAIM_BASIS])
         finding.claims.append({"кто": claimer.full_name, "год": year,
                                "на чём": cat.CLAIM_BASIS_NAMES[basis]})
+        # Спор о первенстве — это спор людей, а не держав: тот, чьё
+        # открытие оспорили, и тот, кого выставили против него, с этого
+        # дня числятся соперниками друг у друга.
+        rival_ids = []
+        for other in world.findings.values():
+            if other.id == finding.id or other.about_id != finding.about_id:
+                continue
+            if other.group_id != claimer.id:
+                continue
+            rival_ids.extend(other.figure_ids)
+        for figure_id in finding.figure_ids:
+            record = world.explorer_of(figure_id)
+            if record is None:
+                continue
+            for rival_id in rival_ids:
+                if rival_id != figure_id and rival_id not in record.rivals:
+                    record.rivals.append(rival_id)
+            if not rival_ids and claimer.full_name not in record.rivals:
+                record.rivals.append(claimer.full_name)
+        for rival_id in rival_ids:
+            record = world.explorer_of(rival_id)
+            if record is None:
+                continue
+            for figure_id in finding.figure_ids:
+                if figure_id not in record.rivals:
+                    record.rivals.append(figure_id)
         title, text = texts.credit_row(rng, world, finding, claimer)
         world.add_event(
             date=ctx.date_in(rng, year), era_index=world.era_index_at(year),

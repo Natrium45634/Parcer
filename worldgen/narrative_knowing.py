@@ -59,6 +59,7 @@ WORD_CASES = {
     cat.T_SCAR: ("шрам", "шрама", "шраму", "шраме"),
     cat.T_TOWN: ("поселение", "поселения", "поселению", "поселении"),
     cat.T_EDGE: ("край света", "края света", "краю света", "крае света"),
+    cat.T_POLITY: ("держава", "державы", "державе", "державе"),
 }
 
 CASES = {"nom": 0, "gen": 1, "dat": 2, "pre": 3}
@@ -692,6 +693,12 @@ def explorer_lines(world, explorer, figure) -> list:
         rows.append("Карта «%s» (%s)"
                     % (chart.name, spec.said if spec is not None
                        else chart.kind))
+    if explorer.rivals:
+        names = []
+        for key in explorer.rivals:
+            names.append(world.entity_name(key) if key.startswith(("F", "P"))
+                         else key)
+        rows.append("Соперники: %s" % ", ".join(names))
     if explorer.patrons:
         rows.append("Снаряжали: %s" % ", ".join(explorer.patrons))
     if explorer.tongues:

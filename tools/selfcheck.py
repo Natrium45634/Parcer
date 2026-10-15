@@ -3797,7 +3797,7 @@ def check_knowing(world, seed: str) -> list:
             cat.T_FOLK: world.folks, cat.T_DOMINION: world.dominions,
             cat.T_ROUTE: world.routes, cat.T_WONDER: world.wonders,
             cat.T_SPECIES: world.species, cat.T_SCAR: world.scars,
-            cat.T_TOWN: world.settlements,
+            cat.T_TOWN: world.settlements, cat.T_POLITY: world.polities,
         }.get(kind)
         if table is None:
             return kind == cat.T_EDGE
@@ -3817,6 +3817,10 @@ def check_knowing(world, seed: str) -> list:
             return item.began.year if item is not None and item.began else 0
         if kind == cat.T_TOWN:
             item = world.settlements.get(key)
+            return item.founded.year if item is not None and item.founded \
+                else 0
+        if kind == cat.T_POLITY:
+            item = world.polities.get(key)
             return item.founded.year if item is not None and item.founded \
                 else 0
         if kind == cat.T_SCAR:
@@ -3882,12 +3886,24 @@ def check_knowing(world, seed: str) -> list:
             if source_record is None:
                 problems.append("%s: сказано, что узнали от того, кто сам "
                                 "этого не знал" % where)
-            elif source_record.since is not None and record.since is not None \
-                    and source_record.since.year > record.since.year:
-                problems.append("%s: весть пришла раньше, чем была у того, "
-                                "от кого её получили (%d против %d)"
-                                % (where, record.since.year,
-                                   source_record.since.year))
+            else:
+                # Весть сверяется не с первым слухом о предмете, а с
+                # годом, когда она пришла: знать о хребте по слухам с
+                # пятисотого года и получить подробности от соседей в
+                # тысяча четыреста двадцатом — не противоречие.
+                came = record.from_year or (record.since.year
+                                            if record.since is not None
+                                            else 0)
+                if came and source_record.since is not None \
+                        and source_record.since.year > came:
+                    problems.append("%s: весть пришла раньше, чем была у "
+                                    "того, от кого её получили (%d против "
+                                    "%d)" % (where, came,
+                                             source_record.since.year))
+                if record.from_year and not 1 <= record.from_year <= total:
+                    problems.append("%s: год, в котором весть пришла, вне "
+                                    "истории: %d" % (where,
+                                                     record.from_year))
         if record.warp and not record.muddle:
             problems.append("%s: весть исказилась, а чем именно — не сказано"
                             % where)
