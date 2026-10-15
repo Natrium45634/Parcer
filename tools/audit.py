@@ -2589,6 +2589,214 @@ def m_kn_credit_lost(world):
     return len(lost) / float(len(rows))
 
 
+# ---------------------------------------------------------------------------
+# Вещи: материалы, биография, ценность
+# ---------------------------------------------------------------------------
+#
+# Главное тут — что **древность не равна ценности**, а вещь не равна
+# своему материалу. Свод, в котором у каждой вещи один материал, одна
+# цена и одна история, пройдёт по счёту и провалится по смыслу.
+# Поэтому меряется: сколько в мире материалов и скольких классов,
+# кончаются ли они; сколько вещей собрано из нескольких; ведётся ли
+# биография и попадает ли в летопись не всё; теряются ли вещи надолго
+# и всякая ли утрата кончается находкой; спорят ли о вещах и
+# расходятся ли оценки разных людей.
+
+
+def _relics(world):
+    from worldgen import artifacts as art
+
+    return [item for item in world.artifacts.values()
+            if item.tier >= art.T_HIST]
+
+
+def m_ar_materials(world):
+    """Сколько материалов мир завёл себе на всю историю."""
+    return len(world.materials) or None
+
+
+def m_ar_classes(world):
+    """Сколько классов материала в ходу: от обычного до первозданного."""
+    if not world.materials:
+        return None
+    return len({item.klass for item in world.materials.values()})
+
+
+def m_ar_stuff_gone(world):
+    """Доля материалов, которые кончились или умение с которыми забыто."""
+    if len(world.materials) < 4:
+        return None
+    gone = [item for item in world.materials.values() if not item.alive]
+    return len(gone) / float(len(world.materials))
+
+
+def m_ar_tiers(world):
+    """Сколько ступеней значимости в ходу."""
+    if not world.artifacts:
+        return None
+    return len({item.tier for item in world.artifacts.values()})
+
+
+def m_ar_relic_share(world):
+    """Какая доля вещей дотянула до артефакта.
+
+    Если артефакт — всякая вторая вещь, слово «артефакт» ничего не
+    значит.
+    """
+    from worldgen import artifacts as art
+
+    if len(world.artifacts) < 5:
+        return None
+    high = [item for item in world.artifacts.values()
+            if item.tier >= art.T_RELIC]
+    return len(high) / float(len(world.artifacts))
+
+
+def m_ar_parts(world):
+    """Доля вещей, собранных больше чем из одного материала."""
+    rows = [item for item in world.artifacts.values() if item.parts]
+    if len(rows) < 4:
+        return None
+    many = [item for item in rows if len(item.parts) > 1]
+    return len(many) / float(len(rows))
+
+
+def m_ar_deeds(world):
+    """Сколько событий биографии приходится на заметную вещь."""
+    rows = _relics(world)
+    if not rows:
+        return None
+    return len(world.artifact_deeds) / float(len(rows))
+
+
+def m_ar_hidden_deeds(world):
+    """Доля событий, которые в летопись не попали.
+
+    Мера против «правда равна памяти»: генератор знает больше, чем
+    знают хронисты, и это должно быть видно.
+    """
+    if len(world.artifact_deeds) < 10:
+        return None
+    hidden = [item for item in world.artifact_deeds.values()
+              if not item.known]
+    return len(hidden) / float(len(world.artifact_deeds))
+
+
+def m_ar_lost(world):
+    """Доля вещей, которые хоть раз теряли."""
+    if len(world.artifacts) < 5:
+        return None
+    lost = [item for item in world.artifacts.values() if item.losses]
+    return len(lost) / float(len(world.artifacts))
+
+
+def m_ar_longest_loss(world):
+    """Сколько лет длилась самая долгая утрата."""
+    best = 0
+    total = int(getattr(world, "total_years", 0))
+    for item in world.artifacts.values():
+        for span in item.losses:
+            began = int(span.get("с", 0) or 0)
+            over = int(span.get("по", 0) or 0) or total
+            best = max(best, over - began)
+    return best or None
+
+
+def m_ar_never_found(world):
+    """Доля утрат, которые так ничем и не кончились.
+
+    Не всякая пропажа становится сюжетом: «так и не нашли» — такой же
+    честный ответ, как находка.
+    """
+    rows = []
+    for item in world.artifacts.values():
+        rows.extend(item.losses)
+    if len(rows) < 5:
+        return None
+    open_spans = [span for span in rows if not span.get("по")]
+    return len(open_spans) / float(len(rows))
+
+
+def m_ar_claims(world):
+    """Сколько преданий приходится на заметную вещь."""
+    rows = _relics(world)
+    if not rows:
+        return None
+    return len(world.artifact_claims) / float(len(rows))
+
+
+def m_ar_argued(world):
+    """Доля вещей, о которых говорят несовместимое."""
+    rows = {}
+    for claim in world.artifact_claims.values():
+        rows.setdefault(claim.artifact_id, []).append(claim)
+    if len(rows) < 4:
+        return None
+    argued = [key for key, items in rows.items()
+              if any(item.state == "спорно" for item in items)]
+    return len(argued) / float(len(rows))
+
+
+def m_ar_fakes(world):
+    """Сколько в мире копий, обрядовых списков и подделок."""
+    if not world.artifacts:
+        return None
+    return len([item for item in world.artifacts.values()
+                if item.parent_id])
+
+
+def m_ar_worth_facets(world):
+    """Сколько мер ценности в ходу."""
+    if len(world.artifact_worths) < 5:
+        return None
+    return len({item.facet for item in world.artifact_worths.values()})
+
+
+def m_ar_worth_split(world):
+    """Доля вещей, у которых оценки расходятся.
+
+    Сломанный кинжал, который ничего не стоит на торгу и остаётся
+    главной святыней державы, — это и есть работающая система
+    ценности.
+    """
+    rows = {}
+    for worth in world.artifact_worths.values():
+        rows.setdefault(worth.artifact_id, []).append(worth.level)
+    rows = {key: levels for key, levels in rows.items() if len(levels) > 1}
+    if len(rows) < 4:
+        return None
+    split = [key for key, levels in rows.items()
+             if max(levels) - min(levels) >= 3]
+    return len(split) / float(len(rows))
+
+
+def m_ar_old_stuff(world):
+    """Доля вещей из материала, которого больше не добывают."""
+    rows = [item for item in world.artifacts.values() if item.parts]
+    if len(rows) < 5:
+        return None
+    out = 0
+    for item in rows:
+        for part in item.parts:
+            material = world.materials.get(part.get("материал", ""))
+            if material is not None and not material.alive:
+                out += 1
+                break
+    return out / float(len(rows))
+
+
+def m_ar_limits(world):
+    """Доля сильных вещей, у которых названо ограничение силы."""
+    from worldgen import artifacts as art
+
+    rows = [item for item in world.artifacts.values()
+            if item.powers and item.tier >= art.T_HIST]
+    if len(rows) < 4:
+        return None
+    limited = [item for item in rows if item.limits]
+    return len(limited) / float(len(rows))
+
+
 MEASURES = (
     Measure("были", "не про судьбу мира", m_story_small, 0.82, 0.98,
             "доля", "девять из десяти былей не спасают мир"),
@@ -2945,6 +3153,50 @@ MEASURES = (
             "штук", "у весомого места есть что рассказать"),
     Measure("земля", "строк об условиях у скудного места", m_land_words, 3,
             None, "штук", "о всяком месте есть что сказать прозой"),
+    Measure("вещи", "материалов в мире", m_ar_materials, 6, 26, "штук",
+            "материал — сущность мира, и их не три и не сорок"),
+    Measure("вещи", "классов материала в ходу", m_ar_classes, 3, None,
+            "из 6", "обычное, доброе, небывалое, звериное, волшебное, "
+            "первозданное — это разные истории"),
+    Measure("вещи", "материалов кончилось", m_ar_stuff_gone, 0.05, 0.85,
+            "доля", "жила иссякает, умение забывается — но не всё сразу",
+            min_years=4000),
+    Measure("вещи", "ступеней значимости в ходу", m_ar_tiers, 2, None,
+            "из 5", "гвоздю биография не нужна, а артефакту нужна"),
+    Measure("вещи", "дотянули до артефакта", m_ar_relic_share, 0.02, 0.60,
+            "доля", "если артефакт — всякая вторая вещь, слово ничего не "
+            "значит"),
+    Measure("вещи", "собраны из нескольких материалов", m_ar_parts, 0.10,
+            None, "доля", "у короны основа, вставка и оковка — и у каждой "
+            "своя судьба"),
+    Measure("вещи", "событий биографии на вещь", m_ar_deeds, 1.5, None,
+            "штук", "у заметной вещи есть что рассказать, кроме года "
+            "ковки"),
+    Measure("вещи", "событий не попало в летопись", m_ar_hidden_deeds, 0.01,
+            0.60, "доля", "генератор знает больше хронистов, и это видно"),
+    Measure("вещи", "теряли хоть раз", m_ar_lost, 0.15, None, "доля",
+            "вещь переживает владельцев, а значит, и теряется"),
+    Measure("вещи", "самая долгая утрата", m_ar_longest_loss, 100, None,
+            "лет", "утрата длится веками, а не десятилетиями",
+            min_years=4000),
+    Measure("вещи", "утрат без находки", m_ar_never_found, 0.05, None,
+            "доля", "не всякая пропажа становится сюжетом"),
+    Measure("вещи", "преданий на заметную вещь", m_ar_claims, 0.5, None,
+            "штук", "о вещи говорят, и говорят своё"),
+    Measure("вещи", "о которых спорят", m_ar_argued, 0.05, None, "доля",
+            "три народа об одном мече говорят несовместимое"),
+    Measure("вещи", "копий и подделок", m_ar_fakes, 1, None, "штук",
+            "подделка живёт своей историей и сама становится "
+            "свидетельством", min_years=6000),
+    Measure("вещи", "мер ценности в ходу", m_ar_worth_facets, 4, None,
+            "из 12", "одной цены у вещи не бывает"),
+    Measure("вещи", "оценки расходятся", m_ar_worth_split, 0.05, None,
+            "доля", "сломанный кинжал не стоит ничего и остаётся святыней"),
+    Measure("вещи", "из материала, которого нет", m_ar_old_stuff, 0.02,
+            None, "доля", "утраченное умение делает вещь свидетельством",
+            min_years=4000),
+    Measure("вещи", "у силы названа граница", m_ar_limits, 0.70, None,
+            "доля", "вещь, которая всё может всегда, ломает причинность"),
     Measure("познание", "походов за знанием", m_kn_probes, 6, 700, "штук",
             "поход — ответ на названный вопрос, а не ежегодное сообщение",
             min_years=2000),

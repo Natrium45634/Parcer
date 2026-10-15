@@ -3754,6 +3754,247 @@ def check_year_slices(world, seed: str) -> list:
     return problems
 
 
+def check_artifacts(world, seed: str) -> list:
+    """Вещи: сходится ли предмет сам с собой, своим материалом и своей
+    биографией.
+
+    Что тут ловится. Материал не из справочника, материал с годом
+    открытия вне истории и материал, который кончился раньше, чем его
+    нашли. Вещь, сделанная из материала, которого в её век ещё не
+    брали, — а это первое, на чём ломается хронология ремесла. Доли
+    состава, не складывающиеся в целое. Ступень, состояние,
+    подлинность и точность датировки не из справочника. Событие
+    биографии раньше, чем вещь сделали, и событие у вещи, которой
+    нет. Отрезки утраты внахлёст, утрата, кончившаяся раньше, чем
+    началась, и две открытые утраты разом — вещь не теряется дважды,
+    не найдясь между этим. Предание о несуществующей вещи и спор с
+    утверждением, которого нет. Оценка не по той мере и не тем
+    оценщиком. И обломок или копия, ссылающиеся на предмет, которого
+    в мире не бывало.
+    """
+    from worldgen import artifacts as art
+
+    problems = []
+    total = world.total_years
+    stuff_keys = set(art.STUFFS_BY_KEY)
+    kinds = set(art.ITEM_KINDS)
+    states = set(art.STATES)
+    authentic = set(art.AUTHENTICITIES)
+    precisions = set(art.PRECISIONS)
+    origin_kinds = set(art.ORIGIN_KIND_NAMES)
+    dawn_kinds = set(art.DAWN_ORIGIN_NAMES)
+    deed_kinds = set(art.DEED_NAMES)
+    claim_kinds = set(art.CLAIM_KIND_NAMES)
+    facets = set(art.WORTHS)
+    appraisers = set(art.APPRAISER_NAMES)
+    roles = set(art.ROLE_ABOUT)
+
+    # --- материалы -------------------------------------------------------
+    seen_keys = {}
+    for material in world.materials.values():
+        where = "сид «%s»: материал «%s»" % (seed, material.name)
+        if material.key not in stuff_keys:
+            problems.append("%s: род «%s» не из справочника"
+                            % (where, material.key))
+        if material.key in seen_keys:
+            problems.append("%s: второй такой же материал в одном мире"
+                            % where)
+        seen_keys[material.key] = material.id
+        if material.klass not in art.MATERIAL_CLASSES:
+            problems.append("%s: класс «%s» не из справочника"
+                            % (where, material.klass))
+        if material.state not in art.DEPLETIONS:
+            problems.append("%s: состояние «%s» не из справочника"
+                            % (where, material.state))
+        if material.found_year and not 1 <= material.found_year <= total:
+            problems.append("%s: год, с которого его берут, вне истории: %d"
+                            % (where, material.found_year))
+        if material.end_year:
+            if not 1 <= material.end_year <= total:
+                problems.append("%s: год, когда он кончился, вне истории: %d"
+                                % (where, material.end_year))
+            if material.found_year and material.end_year < material.found_year:
+                problems.append("%s: кончился раньше, чем его нашли (%d "
+                                "против %d)" % (where, material.end_year,
+                                                material.found_year))
+            if not material.end_why:
+                problems.append("%s: кончился, а отчего — не названо" % where)
+        if material.region_id and material.region_id not in world.regions:
+            problems.append("%s: его берут в земле, которой нет" % where)
+        if material.species_id and material.species_id not in world.species:
+            problems.append("%s: его берут у вида, которого нет" % where)
+        if material.deity_id and material.deity_id not in world.deities:
+            problems.append("%s: его дало божество, которого нет" % where)
+        for folk_id in material.known_by:
+            if folk_id not in world.folks:
+                problems.append("%s: с ним работает народ, которого нет"
+                                % where)
+                break
+
+    # --- вещи -------------------------------------------------------------
+    for artifact in world.artifacts.values():
+        where = "сид «%s»: вещь «%s»" % (seed, artifact.name)
+        if not 0 <= int(artifact.tier) <= 4:
+            problems.append("%s: ступень вне справочника: %s"
+                            % (where, artifact.tier))
+        for key in artifact.kinds:
+            if key not in kinds:
+                problems.append("%s: свойство «%s» не из справочника"
+                                % (where, key))
+        if artifact.state and artifact.state not in states:
+            problems.append("%s: состояние «%s» не из справочника"
+                            % (where, artifact.state))
+        if artifact.authentic and artifact.authentic not in authentic:
+            problems.append("%s: подлинность «%s» не из справочника"
+                            % (where, artifact.authentic))
+        if artifact.precision and artifact.precision not in precisions:
+            problems.append("%s: точность датировки «%s» не из справочника"
+                            % (where, artifact.precision))
+        if artifact.origin_kind and artifact.origin_kind not in origin_kinds:
+            problems.append("%s: род происхождения «%s» не из справочника"
+                            % (where, artifact.origin_kind))
+        if artifact.dawn_origin and artifact.dawn_origin not in dawn_kinds:
+            problems.append("%s: первозданное происхождение «%s» не из "
+                            "справочника" % (where, artifact.dawn_origin))
+        if artifact.told_made and not 1 <= artifact.told_made <= total:
+            problems.append("%s: летописцы датируют её годом вне истории: %d"
+                            % (where, artifact.told_made))
+        if artifact.last_seen and not 1 <= artifact.last_seen <= total:
+            problems.append("%s: последнее упоминание вне истории: %d"
+                            % (where, artifact.last_seen))
+        share = 0.0
+        for part in artifact.parts:
+            material = world.materials.get(part.get("материал", ""))
+            if material is None:
+                problems.append("%s: часть сделана из материала, которого "
+                                "в мире нет" % where)
+                continue
+            share += float(part.get("доля", 0.0) or 0.0)
+            if part.get("роль") not in art.PART_ROLES:
+                problems.append("%s: часть «%s» не из справочника"
+                                % (where, part.get("роль")))
+            if material.found_year and artifact.made is not None \
+                    and material.found_year > artifact.made.year:
+                problems.append("%s: сделана в %d году из того, что начали "
+                                "брать только в %d"
+                                % (where, artifact.made.year,
+                                   material.found_year))
+        if artifact.parts and not 0.8 <= share <= 1.2:
+            problems.append("%s: доли состава не складываются в целое: %.2f"
+                            % (where, share))
+        if artifact.parent_id and artifact.parent_id not in world.artifacts:
+            problems.append("%s: ссылается на исходную вещь, которой нет"
+                            % where)
+        for key in artifact.pieces:
+            if key not in world.artifacts:
+                problems.append("%s: её обломок или список в мире "
+                                "отсутствует" % where)
+                break
+        open_spans = 0
+        last_end = 0
+        for span in artifact.losses:
+            began = int(span.get("с", 0) or 0)
+            over = int(span.get("по", 0) or 0)
+            if began and not 1 <= began <= total:
+                problems.append("%s: утрата начинается вне истории: %d"
+                                % (where, began))
+            if over:
+                if over < began:
+                    problems.append("%s: утрата кончилась раньше, чем "
+                                    "началась (%d против %d)"
+                                    % (where, over, began))
+                if began < last_end:
+                    problems.append("%s: отрезки утраты идут внахлёст"
+                                    % where)
+                last_end = over
+            else:
+                open_spans += 1
+        if open_spans > 1:
+            problems.append("%s: она потеряна в двух местах разом" % where)
+        for repair in artifact.repairs:
+            year = int(repair.get("год", 0) or 0)
+            if year and not 1 <= year <= total:
+                problems.append("%s: починена в год вне истории: %d"
+                                % (where, year))
+
+    # --- биография ---------------------------------------------------------
+    for deed in world.artifact_deeds.values():
+        artifact = world.artifacts.get(deed.artifact_id)
+        where = "сид «%s»: событие %s" % (seed, deed.id)
+        if artifact is None:
+            problems.append("%s: событие у вещи, которой нет" % where)
+            continue
+        where = "сид «%s»: вещь «%s», событие %s" % (seed, artifact.name,
+                                                     deed.id)
+        if deed.kind not in deed_kinds:
+            problems.append("%s: род события «%s» не из справочника"
+                            % (where, deed.kind))
+        if deed.precision and deed.precision not in precisions:
+            problems.append("%s: точность датировки «%s» не из справочника"
+                            % (where, deed.precision))
+        if deed.role and deed.role not in roles:
+            problems.append("%s: роль вещи «%s» не из справочника"
+                            % (where, deed.role))
+        if deed.date is not None:
+            if not 1 <= deed.date.year <= total:
+                problems.append("%s: год вне истории: %d"
+                                % (where, deed.date.year))
+            if artifact.made is not None \
+                    and deed.date.ordinal < artifact.made.ordinal:
+                problems.append("%s: случилось раньше, чем вещь сделали "
+                                "(%d против %d)"
+                                % (where, deed.date.year,
+                                   artifact.made.year))
+        for actor_id in deed.actors:
+            if actor_id not in world.figures:
+                problems.append("%s: в нём участвует тот, кого в мире нет"
+                                % where)
+                break
+        if deed.cause_id and deed.cause_id not in world.artifact_deeds:
+            problems.append("%s: ссылается на причину, которой нет" % where)
+
+    # --- предания -----------------------------------------------------------
+    for claim in world.artifact_claims.values():
+        artifact = world.artifacts.get(claim.artifact_id)
+        where = "сид «%s»: предание %s" % (seed, claim.id)
+        if artifact is None:
+            problems.append("%s: предание о вещи, которой нет" % where)
+            continue
+        if claim.kind not in claim_kinds:
+            problems.append("%s: род утверждения «%s» не из справочника"
+                            % (where, claim.kind))
+        if claim.state not in art.CLAIM_STATES:
+            problems.append("%s: состояние «%s» не из справочника"
+                            % (where, claim.state))
+        if claim.since and not 1 <= claim.since <= total:
+            problems.append("%s: год вне истории: %d" % (where, claim.since))
+        if claim.who_id and claim.who_id not in world.folks \
+                and claim.who_id not in world.polities \
+                and claim.who_id not in world.faiths:
+            problems.append("%s: его говорит тот, кого в мире нет" % where)
+        if claim.against and claim.against not in world.artifact_claims:
+            problems.append("%s: спорит с утверждением, которого нет" % where)
+
+    # --- ценность ------------------------------------------------------------
+    for worth in world.artifact_worths.values():
+        artifact = world.artifacts.get(worth.artifact_id)
+        where = "сид «%s»: оценка %s" % (seed, worth.id)
+        if artifact is None:
+            problems.append("%s: оценка вещи, которой нет" % where)
+            continue
+        if worth.facet not in facets:
+            problems.append("%s: мера «%s» не из справочника"
+                            % (where, worth.facet))
+        if worth.who_kind and worth.who_kind not in appraisers:
+            problems.append("%s: оценщик «%s» не из справочника"
+                            % (where, worth.who_kind))
+        if not 0 <= int(worth.level) <= 5:
+            problems.append("%s: оценка вне шкалы: %s" % (where, worth.level))
+        if worth.until and worth.since and worth.until < worth.since:
+            problems.append("%s: кончилась раньше, чем началась" % where)
+    return problems
+
+
 def check_knowing(world, seed: str) -> list:
     """Познание мира: сходится ли знание само с собой.
 
@@ -5554,6 +5795,7 @@ def main(only: str = "") -> int:
         failures.extend(check_review(first, seed))
         failures.extend(check_customs(first, seed))
         failures.extend(check_knowing(first, seed))
+        failures.extend(check_artifacts(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
         failures.extend(check_tongues(first, seed))
@@ -5633,6 +5875,7 @@ def main(only: str = "") -> int:
             failures.extend(check_review(first, "карта/" + seed))
             failures.extend(check_customs(first, "карта/" + seed))
             failures.extend(check_knowing(first, "карта/" + seed))
+            failures.extend(check_artifacts(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_tongues(first, "карта/" + seed))
@@ -5700,7 +5943,7 @@ def main(only: str = "") -> int:
                       check_town_bread,
                       check_world_code,
                       check_invasions, check_subjects, check_review,
-                      check_customs, check_knowing,
+                      check_customs, check_knowing, check_artifacts,
                       check_traces, check_year_slices,
                       check_faiths, check_nations,
                       check_tongues, check_embassies, check_things,

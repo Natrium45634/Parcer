@@ -11,14 +11,15 @@ import dataclasses
 import io
 import json
 
-from .models import (ACTIVE, ONGOING, Artifact, Battle, Bond, Cabal, Calamity,
+from .models import (ACTIVE, ONGOING, Artifact, ArtifactClaim, ArtifactDeed,
+                     ArtifactWorth, Battle, Bond, Cabal, Calamity,
                      Camp, Chart,
                      Codex, Company, Custom, CultureProfile, Deity,
                      Discovery, Explorer, Finding, Knowing, Meeting, Settling,
                      Embassy, EraSpan, Legend, Event, Expedition, Fact, Faith,
                      Feud, Figure,
                      Folk, Fortress, Guild, House, Law, League, Memory,
-                     Migration, Monster, Pact,
+                     Material, Migration, Monster, Pact,
                      Plot,
                      Polity,
                      LifePath,
@@ -198,6 +199,14 @@ def world_to_dict(world: World) -> dict:
                     for item in world.wonders.values()],
         "dominions": [_compact(Dominion, item.to_dict())
                       for item in world.dominions.values()],
+        "materials": [_compact(Material, item.to_dict())
+                      for item in world.materials.values()],
+        "artifact_deeds": [_compact(ArtifactDeed, item.to_dict())
+                           for item in world.artifact_deeds.values()],
+        "artifact_claims": [_compact(ArtifactClaim, item.to_dict())
+                            for item in world.artifact_claims.values()],
+        "artifact_worths": [_compact(ArtifactWorth, item.to_dict())
+                            for item in world.artifact_worths.values()],
         "knowings": [_compact(Knowing, item.to_dict())
                      for item in world.knowings.values()],
         "findings": [_compact(Finding, item.to_dict())
@@ -457,6 +466,19 @@ def dict_to_world(data: dict) -> World:
     for item in data.get("dominions", ()):
         hold = Dominion(**_clean(Dominion, item))
         world.dominions[hold.id] = hold
+    for item in data.get("materials", ()):
+        material = Material(**_clean(Material, item))
+        world.materials[material.id] = material
+    for item in data.get("artifact_deeds", ()):
+        deed = ArtifactDeed(**_clean(ArtifactDeed, item))
+        world.artifact_deeds[deed.id] = deed
+        world._deeds_of.setdefault(deed.artifact_id, []).append(deed.id)
+    for item in data.get("artifact_claims", ()):
+        claim = ArtifactClaim(**_clean(ArtifactClaim, item))
+        world.artifact_claims[claim.id] = claim
+    for item in data.get("artifact_worths", ()):
+        worth = ArtifactWorth(**_clean(ArtifactWorth, item))
+        world.artifact_worths[worth.id] = worth
     for item in data.get("knowings", ()):
         record = Knowing(**_clean(Knowing, item))
         world.knowings[record.id] = record

@@ -16,6 +16,7 @@ from . import races as races_mod
 from . import township
 from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Artifact, Battle, Bond, Cabal, Calamity, Camp, Codex,
+                     ArtifactClaim, ArtifactDeed, ArtifactWorth,
                      Chart, Company, Custom, CultureProfile,
                      Deity, Dominion,
                      Explorer, Finding, Knowing, Meeting, Settling,
@@ -30,6 +31,7 @@ from .models import (ACTIVE, ENDED, EXTINCT, FALLEN, GONE, ONGOING, RUINED,
                      Monster, Pact,
                      Plot,
                      Polity,
+                     Material,
                      Region,
                      Reign,
                      Godhead, Renown,
@@ -124,6 +126,8 @@ _ENTITY_TABLES = {
     "TW": ("townships",),
     "KN": ("knowings",), "FD": ("findings",), "MP": ("charts",),
     "MT": ("meetings",), "SL": ("settlings",), "XP": ("explorers",),
+    "ML": ("materials",), "AD": ("artifact_deeds",),
+    "AC": ("artifact_claims",), "AW": ("artifact_worths",),
 }
 
 
@@ -227,6 +231,12 @@ class World:
         self.explorers = {}            # исследователи: добавка к биографии
         self._knowing_of = {}          # (кто, о чём) -> номер записи
         self._explorer_of = {}         # личность -> номер её записи
+        # --- вещи как исторические предметы ---
+        self.materials = {}            # материалы мира со своей судьбой
+        self.artifact_deeds = {}       # события биографии вещей
+        self.artifact_claims = {}      # что о вещах говорят
+        self.artifact_worths = {}      # чего они для кого стоят
+        self._deeds_of = {}            # вещь -> её события по порядку
         self._profile_of = {}          # личность -> её культурный облик
         self._town_of = {}             # поселение -> id биографии
         self._town_watch = {}          # рабочие указатели биографий
@@ -1557,6 +1567,79 @@ class World:
             self._explorer_of[item.figure_id] = item.id
         return item
 
+    # ------------------------------------------------------------------
+    # Вещи: материалы, биография, легенды, ценность
+    # ------------------------------------------------------------------
+    #
+    # Сама вещь живёт в `artifacts` и жила там всегда: второй системы
+    # предметов тут нет и быть не должно. Ниже — то, что к ней
+    # прибавилось, и спрашивается оно одним способом на всю программу.
+
+    def add_material(self, **kwargs) -> Material:
+        item = Material(id=self.next_id("ML"), **kwargs)
+        self.materials[item.id] = item
+        return item
+
+    def material_by_key(self, key: str):
+        """Материал мира по ключу справочника — или ничего.
+
+        Ключ в мире один: двух записей об одном и том же железе не
+        бывает, иначе у железа окажутся две разные судьбы.
+        """
+        for item in self.materials.values():
+            if item.key == key:
+                return item
+        return None
+
+    def add_artifact_deed(self, **kwargs) -> ArtifactDeed:
+        item = ArtifactDeed(id=self.next_id("AD"), **kwargs)
+        self.artifact_deeds[item.id] = item
+        self._deeds_of.setdefault(item.artifact_id, []).append(item.id)
+        return item
+
+    def deeds_of_artifact(self, artifact_id: str, known_only: bool = False):
+        """Биография вещи по годам — и, если спрошено, только та, что
+        дошла до летописи."""
+        rows = [item for item in self.artifact_deeds.values()
+                if item.artifact_id == artifact_id
+                and (not known_only or item.known)]
+        rows.sort(key=lambda item: (item.date.ordinal if item.date else 0,
+                                    item.id))
+        return rows
+
+    def add_artifact_claim(self, **kwargs) -> ArtifactClaim:
+        item = ArtifactClaim(id=self.next_id("AC"), **kwargs)
+        self.artifact_claims[item.id] = item
+        return item
+
+    def claims_of_artifact(self, artifact_id: str) -> list:
+        rows = [item for item in self.artifact_claims.values()
+                if item.artifact_id == artifact_id]
+        rows.sort(key=lambda item: (item.since, item.id))
+        return rows
+
+    def add_artifact_worth(self, **kwargs) -> ArtifactWorth:
+        item = ArtifactWorth(id=self.next_id("AW"), **kwargs)
+        self.artifact_worths[item.id] = item
+        return item
+
+    def worths_of_artifact(self, artifact_id: str, year: int = 0) -> list:
+        """Чего вещь стоила — на нынешний час или на названный год."""
+        rows = []
+        for item in self.artifact_worths.values():
+            if item.artifact_id != artifact_id:
+                continue
+            if year:
+                if item.since > year:
+                    continue
+                if item.until and item.until < year:
+                    continue
+            elif item.until:
+                continue
+            rows.append(item)
+        rows.sort(key=lambda item: (item.facet, item.id))
+        return rows
+
     def explorer_of(self, figure_id: str):
         """Запись исследователя, если она для этой личности заведена."""
         if len(self._explorer_of) != len(self.explorers):
@@ -2263,6 +2346,10 @@ class World:
             "Городских биографий": len(self.townships),
             "Праздников (всего)": len(self.holidays),
             "Праздников (отмечают)": len(self.holidays_kept()),
+            "Материалов мира": len(self.materials),
+            "Событий в биографиях вещей": len(self.artifact_deeds),
+            "Преданий о вещах": len(self.artifact_claims),
+            "Оценок вещей": len(self.artifact_worths),
             "Записей о знании": len(self.knowings),
             "Открытий (познание)": len(self.findings),
             "Карт": len(self.charts),

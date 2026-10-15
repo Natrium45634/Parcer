@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from .morph import accusative_noun
 from .narrative import cap
+from .timeline import plural
 
 
 def thing(artifact) -> str:
@@ -265,3 +266,159 @@ def curse_strikes(rng, artifact, figure) -> tuple:
         "curse": artifact.curse or "берёт своё",
     }
     return ("Проклятие: %s" % artifact.name), cap(text)
+
+
+# ---------------------------------------------------------------------------
+# Материалы, биография, предания
+# ---------------------------------------------------------------------------
+#
+# Тут держится одно правило языка: материал — не свойство вещи, а своя
+# запись мира, и говорить о нём надо как о своём: «жила такого-то
+# металла иссякла», а не «меч стал реже».
+
+
+def stuff_lost(rng, material, year: int) -> tuple:
+    title = "Кончился материал: %s" % material.name
+    rows = ["То, из чего делали лучшее, взять больше негде: %s."
+            % material.end_why]
+    if material.origin_note:
+        rows.append("Брали его так: %s." % material.origin_note)
+    if material.state == "умение забыто":
+        rows.append("Вещи остались, а повторить их некому: умение ушло "
+                    "вместе с мастерами.")
+    else:
+        rows.append("Вещи из него остались, и теперь каждая из них "
+                    "свидетельство, а не просто работа.")
+    rows.append(rng.choice((
+        "Кузнецы берутся за то, что под рукой, и выходит хуже.",
+        "Старые изделия начинают беречь, а не пускать в дело.",
+        "Цена на уцелевшее поднимается втрое за одно поколение.")))
+    return title, " ".join(rows)
+
+
+def stuff_back(rng, material, year: int, how: str) -> tuple:
+    title = "Снова в ходу: %s" % material.name
+    said = {
+        "newvein": "нашли вторую жилу",
+        "dig": "раскопали старую выработку",
+        "learn": "разобрали по уцелевшим вещам, как это делали",
+        "trade": "стали привозить издалека",
+        "beast": "снова добыли с существа",
+    }.get(how, "нашли заново")
+    rows = ["То, что считалось кончившимся, вернулось: %s." % said]
+    rows.append(rng.choice((
+        "Старые вещи из него разом подешевели.",
+        "Мастера спорят, то ли это самое вещество или похожее.",
+        "Первую работу из нового запаса поднесли государю.")))
+    return title, " ".join(rows)
+
+
+def deed_line(rng, world, artifact, deed, owner) -> tuple:
+    """Одно событие биографии вещи — заголовком и строкой."""
+    from . import artifacts as art
+
+    title = "%s: %s" % (thing_nom(artifact),
+                        art.DEED_NAMES.get(deed.kind, deed.kind))
+    rows = [deed.truth + "."]
+    if deed.role:
+        rows.append("Чем она тут была: %s — %s."
+                    % (deed.role, art.ROLE_ABOUT.get(deed.role, "")))
+    if deed.outcome:
+        rows.append("Чем кончилось: %s." % deed.outcome)
+    if not deed.known and deed.told:
+        rows.append("А записано другое: %s." % deed.told)
+    if owner is not None:
+        rows.append("Хозяин на тот час — %s." % owner.name)
+    return title, " ".join(rows)
+
+
+def twin_found(rng, artifact, twin, kind: str, folk) -> tuple:
+    title = "Вторая такая же: %s" % artifact.name
+    said = {
+        "признанная копия": "это список, и его таковым и называют",
+        "обрядовая копия": "это обрядовая копия, и её выносят вместо "
+                           "подлинника",
+        "подделка": "это подделка, сделанная ради обмана",
+    }.get(kind, kind)
+    rows = ["Объявилась вторая вещь с тем же именем: %s." % said]
+    if folk is not None:
+        rows.append("У народа по имени %s её держат за настоящую."
+                    % folk.name)
+    rows.append("Подделка при этом живёт своей историей: через двести лет "
+                "она станет свидетельством о том, какой видели древнюю "
+                "власть поздние мастера.")
+    return title, " ".join(rows)
+
+
+def unearthed(rng, artifact, finder, site, year: int) -> tuple:
+    where = "в руинах" if site is None else ("в месте по имени %s" % site.name)
+    title = "Поднята из земли: %s" % artifact.name
+    rows = ["%s нашли %s." % (thing_acc(artifact).capitalize(), where)]
+    if finder is not None:
+        rows.append("Нашёл %s." % finder.name)
+    span = None
+    for row in artifact.losses:
+        if row.get("по") == year:
+            span = row
+            break
+    if span is not None:
+        years = int(span.get("по", year)) - int(span.get("с", year))
+        rows.append("Пролежала %d %s: %s."
+                    % (years, plural(years, "год", "года", "лет"),
+                       span.get("отчего", "отчего — не записано")))
+    return title, " ".join(rows)
+
+
+def material_line(world, material) -> str:
+    """Материал одной строкой — для летописи и для карточки вещи."""
+    rows = ["%s (%s, %s)" % (material.name, material.klass, material.family)]
+    if material.origin_note:
+        rows.append("— %s" % material.origin_note)
+    if material.props:
+        rows.append("[%s]" % ", ".join(material.props))
+    if not material.alive:
+        rows.append("— %s%s" % (material.state,
+                                " с %d года" % material.end_year
+                                if material.end_year else ""))
+    return " ".join(rows)
+
+
+def worth_line(world, worth) -> str:
+    from . import artifacts as art
+
+    ladder = ("ничего", "мало", "кое-что", "дорого", "очень дорого",
+              "дороже всего")
+    said = ladder[max(0, min(5, int(worth.level)))]
+    who = art.APPRAISER_NAMES.get(worth.who_kind, worth.who_kind)
+    line = "%s — %s: %s" % (worth.facet, who, said)
+    if worth.why:
+        line += " (%s)" % worth.why
+    if worth.since:
+        line += ", с %d года" % worth.since
+    return line
+
+
+def claim_line(world, claim) -> str:
+    who = world.entity_name(claim.who_id) if claim.who_id else "кто-то"
+    line = "%s: «%s»" % (who, claim.said)
+    if claim.source:
+        line += " — %s" % claim.source
+    if claim.state and claim.state != "неизвестно":
+        line += "; %s" % claim.state
+    return line
+
+
+def life_line(world, deed) -> str:
+    """Строка биографии вещи для летописи."""
+    from . import artifacts as art
+
+    year = deed.date.year if deed.date is not None else 0
+    line = "%d — %s" % (year, deed.truth or art.DEED_NAMES.get(deed.kind,
+                                                               deed.kind))
+    if deed.role:
+        line += " (%s)" % deed.role
+    if deed.outcome:
+        line += "; %s" % deed.outcome
+    if not deed.known:
+        line += " — в летопись это не попало"
+    return line

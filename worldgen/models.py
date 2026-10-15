@@ -1088,6 +1088,28 @@ class Artifact:
     fame: float = 1.0
     lost: Date = None
     status: str = ACTIVE
+    # --- вещь как исторический предмет (блок 53) ---------------------
+    # Поля ниже пустые у вещей, которым биография не нужна: гвоздю её
+    # не заводят. Ступень решает, насколько глубоко записана вещь, и
+    # зависит она не от цены и не от возраста, а от роли в истории.
+    tier: int = 0              # 0 обычная … 4 первозданная
+    kinds: list = field(default_factory=list)   # историческая, святыня…
+    parts: list = field(default_factory=list)   # [{материал, доля, роль}]
+    origin_kind: str = ""      # работа мастера, дар бога, творение мира…
+    dawn_origin: str = ""      # если вещь старше людей — как именно
+    deity_id: str = ""         # чей дар или чья часть
+    origin_event: str = ""     # событие мира, из которого она вышла
+    precision: str = ""        # насколько точно известен год создания
+    told_made: int = 0         # каким годом её датируют летописцы
+    state: str = "цела"        # цела / повреждена / разобрана / …
+    authentic: str = ""        # подлинник, копия, подделка, спорная
+    parent_id: str = ""        # исходная вещь: для обломка или копии
+    pieces: list = field(default_factory=list)  # её обломки и копии
+    repairs: list = field(default_factory=list)  # [{год, кто, чем, что}]
+    losses: list = field(default_factory=list)   # отрезки утраты
+    limits: list = field(default_factory=list)   # чем сила ограничена
+    legacy: list = field(default_factory=list)   # что от неё осталось миру
+    last_seen: int = 0         # год последнего достоверного упоминания
     notes: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -3238,6 +3260,146 @@ class Explorer:
     credit: str = ""           # признан, признан не он, забыт
     unsolved: str = ""         # неразрешённое исчезновение
     goal: str = ""             # личная цель
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+# --- вещи: материалы, биография, легенды, ценность (блок 53) ----------
+#
+# Запись о вещи (`Artifact`) в генераторе была и остаётся одна: ТЗ прямо
+# запрещает заводить вторую систему предметов. Ниже — то, чего у неё не
+# было: материал как сущность мира со своей судьбой, событие биографии
+# вещи, чужое утверждение о ней и оценка её ценности кем-то в какой-то
+# век. Всё это отдельными записями, а не полями, потому что их много и у
+# каждой своя дата.
+
+
+@dataclass
+class Material:
+    """Материал как сущность мира, а не слово в описании вещи.
+
+    У него есть происхождение, свойства, умельцы и своя история: жилу
+    находят, её осваивают, беда заваливает выработку, умение теряется —
+    и через тысячу лет найденный клинок приписывают богам, потому что
+    повторить его больше некому.
+    """
+
+    id: str
+    key: str                   # ключ рода из справочника artifacts.STUFFS
+    name: str
+    gen: str                   # «из звёздного железа» — сразу в падеже
+    klass: str                 # класс I–VI словами
+    family: str                # металл, камень, дерево, кость, ткань…
+    origin: str                # жила, лес, существо, небо, бог, разлом
+    props: list = field(default_factory=list)
+    needs: str = ""            # что нужно, чтобы с ним работать
+    worth: float = 1.0
+    rarity: str = ""
+    region_id: str = ""        # где его берут, если место известно
+    species_id: str = ""       # с кого берут, если это существо
+    deity_id: str = ""         # кто его дал, если это дар
+    origin_note: str = ""      # как он появился в этом мире, словами
+    found_year: int = 0        # когда его впервые взяли в дело
+    known_by: list = field(default_factory=list)      # народы-умельцы
+    state: str = "доступен"
+    end_year: int = 0          # когда он кончился или умение забылось
+    end_why: str = ""
+    back_year: int = 0         # когда вернулся, если вернулся
+    marks: list = field(default_factory=list)         # [{год, что}]
+    notes: list = field(default_factory=list)
+
+    @property
+    def alive(self) -> bool:
+        return self.state in ("доступен", "на исходе")
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["alive"] = self.alive
+        return data
+
+
+@dataclass
+class ArtifactDeed:
+    """Что случилось с вещью: одно событие её биографии.
+
+    Главное тут — графа «знают ли»: генератор может знать, что венец
+    тайно передали изгнаннику, а летопись помнит только, что он пропал
+    из сокровищницы. Поэтому правда и память хранятся врозь.
+    """
+
+    id: str
+    artifact_id: str
+    kind: str                  # ключ рода события из artifacts.DEEDS
+    date: Date = None
+    precision: str = "год в год"
+    region_id: str = ""
+    site_id: str = ""
+    settlement_id: str = ""
+    actors: list = field(default_factory=list)        # личности
+    polity_id: str = ""
+    event_id: str = ""         # событие мира, если оно есть
+    cause_id: str = ""         # событие биографии, из которого это вышло
+    role: str = ""             # свидетель / орудие / ключ
+    tie: str = ""              # как вещь связана с событием
+    outcome: str = ""          # чем кончилось
+    weight: int = 1
+    truth: str = ""            # что было на самом деле
+    told: str = ""             # что об этом знают
+    known: bool = True         # попало ли это в летопись вообще
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["date"] = _date_out(self.date)
+        return data
+
+
+@dataclass
+class ArtifactClaim:
+    """Что о вещи говорят — отдельно от того, что с ней было.
+
+    Три народа могут считать один меч даром своего бога, трофеем и
+    оружием героя, спасшего мир, — и генератор при этом знает, что его
+    выковал смертный кузнец из метеоритного железа. Сводить эти версии
+    к одной не нужно.
+    """
+
+    id: str
+    artifact_id: str
+    kind: str                  # ключ рода утверждения
+    said: str                  # само утверждение словами
+    who_kind: str = ""         # folk / polity / faith
+    who_id: str = ""
+    since: int = 0
+    source: str = ""           # на чём оно держится
+    trust: float = 0.0         # насколько ему верят
+    state: str = "неизвестно"  # подтверждено / опровергнуто / спорно
+    against: str = ""          # с каким утверждением оно спорит
+    notes: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class ArtifactWorth:
+    """Чего вещь стоит — для кого-то и в какой-то век.
+
+    Сломанный кинжал может почти ничего не стоить на торгу и быть
+    главной святыней державы. Поэтому мера не одна, а оценщик назван.
+    """
+
+    id: str
+    artifact_id: str
+    facet: str                 # в деньгах / для власти / для веры …
+    who_kind: str = ""         # trader / king / priest / scholar …
+    who_id: str = ""
+    level: int = 1             # 0…5
+    why: str = ""
+    since: int = 0
+    until: int = 0
     notes: list = field(default_factory=list)
 
     def to_dict(self) -> dict:

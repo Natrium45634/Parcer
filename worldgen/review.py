@@ -2634,6 +2634,53 @@ def audit(world) -> list:
                       "проклятых %d), рук в самой заслуженной %d"
                       % (len(world.artifacts), with_owner, in_places, cursed,
                          hands[-1])))
+
+        # Вещь как исторический предмет: материал со своей судьбой,
+        # биография, утраты и то, что о ней говорят.
+        from . import artifacts as art_cat
+
+        relics = [item for item in world.artifacts.values()
+                  if item.tier >= art_cat.T_RELIC]
+        lost_now = [item for item in world.artifacts.values()
+                    if item.losses and not item.losses[-1].get("по")]
+        longest = 0
+        for item in world.artifacts.values():
+            for span in item.losses:
+                began = int(span.get("с", 0) or 0)
+                over = int(span.get("по", 0) or 0) or world.total_years
+                longest = max(longest, over - began)
+        hidden = [item for item in world.artifact_deeds.values()
+                  if not item.known]
+        gone_stuff = [item for item in world.materials.values()
+                      if not item.alive]
+        found.append(("=", "вещи: материалов %d (кончилось %d), артефактов "
+                      "%d, событий биографии %d (не попало в летопись %d), "
+                      "потеряно сейчас %d, самая долгая утрата %d лет, "
+                      "преданий %d, оценок %d"
+                      % (len(world.materials), len(gone_stuff), len(relics),
+                         len(world.artifact_deeds), len(hidden),
+                         len(lost_now), longest, len(world.artifact_claims),
+                         len(world.artifact_worths))))
+        if world.materials and not gone_stuff and world.total_years >= 4000:
+            note("ни один материал за всю историю не кончился: жилы в этом "
+                 "мире бездонны")
+        if world.artifact_deeds and not hidden:
+            note("в летопись попало всё, что было с вещами: правда и "
+                 "память нигде не разошлись")
+        for item in world.artifacts.values():
+            open_spans = [span for span in item.losses
+                          if not span.get("по")]
+            if len(open_spans) > 1:
+                bad("вещь «%s» потеряна в двух местах разом" % item.name)
+                break
+        for deed in world.artifact_deeds.values():
+            artifact = world.artifacts.get(deed.artifact_id)
+            if artifact is None or artifact.made is None or deed.date is None:
+                continue
+            if deed.date.ordinal < artifact.made.ordinal:
+                bad("с вещью «%s» что-то случилось раньше, чем её сделали"
+                    % artifact.name)
+                break
         lonely = [item for item in world.artifacts.values()
                   if len(item.trail) <= 1 and item.made.year
                   < world.total_years - 1500]

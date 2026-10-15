@@ -1438,12 +1438,51 @@ def render_guilds(world) -> str:
 
 
 def render_artifacts(world) -> str:
-    """Вещи с именами: кто сделал, через чьи руки прошли, где лежат."""
+    """Вещи с именами: из чего, кем, через чьи руки — и что о них говорят.
+
+    Раздел отвечает по порядку ТЗ о предметах: сперва материалы мира
+    (у них своя судьба, и она объясняет половину историй о вещах),
+    потом сами вещи — состав, происхождение, биография по годам,
+    отрезки утраты, ценность по мерам и предания, которые между собой
+    не сходятся.
+
+    Главное тут — что **древность не равна ценности**, а правда не
+    равна памяти: генератор может знать, что венец тайно передали
+    изгнаннику, а летопись помнит только, что он пропал из
+    сокровищницы.
+    """
     from . import artifacts as art
+    from . import narrative_artifacts as art_texts
 
     rows = ["ВЕЩИ, У КОТОРЫХ ЕСТЬ ИМЯ", ""]
-    if not world.artifacts:
+    if not world.artifacts and not world.materials:
         rows.append("  Таких вещей этот мир не сделал.")
+        return "\n".join(rows)
+
+    # --- материалы -------------------------------------------------------
+    if world.materials:
+        alive = [item for item in world.materials.values() if item.alive]
+        gone = [item for item in world.materials.values() if not item.alive]
+        rows.append("  ИЗ ЧЕГО ТУТ ДЕЛАЮТ")
+        rows.append("    Материалов в мире: %d, из них ещё берут: %d."
+                    % (len(world.materials), len(alive)))
+        classes = {}
+        for item in world.materials.values():
+            classes[item.klass] = classes.get(item.klass, 0) + 1
+        rows.append("    По классам: %s."
+                    % ", ".join("%s — %d" % pair for pair
+                                in sorted(classes.items(),
+                                          key=lambda row: -row[1])))
+        for item in sorted(world.materials.values(),
+                           key=lambda row: (row.klass, row.key)):
+            rows.append("    %s" % art_texts.material_line(world, item))
+        if gone:
+            rows.append("    Кончилось и не вернулось: %s."
+                        % ", ".join(item.name for item in gone))
+        rows.append("")
+
+    if not world.artifacts:
+        rows.append("  Вещей с именами в этом мире нет.")
         return "\n".join(rows)
 
     items = sorted(world.artifacts.values(),
@@ -1451,26 +1490,70 @@ def render_artifacts(world) -> str:
     where = {}
     for item in items:
         where[item.where] = where.get(item.where, 0) + 1
-    rows.append("  Всего вещей: %d. Из них с проклятием: %d."
+    tiers = {}
+    for item in items:
+        tiers[item.tier] = tiers.get(item.tier, 0) + 1
+    lost_now = [item for item in items
+                if item.losses and not item.losses[-1].get("по")]
+    fakes = [item for item in items
+             if item.authentic in (art.A_FAKE, art.A_COPY, art.A_RITE)]
+    rows.append("  ВЕЩИ")
+    rows.append("    Всего вещей: %d. Из них с проклятием: %d."
                 % (len(items), sum(1 for item in items if item.curse)))
-    rows.append("  Где они сейчас: %s." % ", ".join(
+    rows.append("    По ступеням: %s."
+                % ", ".join("%s — %d" % (art.TIER_NAMES.get(key, key), count)
+                            for key, count in sorted(tiers.items())))
+    rows.append("    Где они сейчас: %s." % ", ".join(
         "%s %d" % (key, count) for key, count in
         sorted(where.items(), key=lambda pair: (-pair[1], pair[0]))))
+    rows.append("    Потеряны прямо сейчас: %d; копий и подделок: %d."
+                % (len(lost_now), len(fakes)))
     rows.append("")
 
-    for item in items:
+    # Подробно — только о тех, у кого есть что рассказать: у гвоздя
+    # биографии нет, и выписывать её нечего.
+    shown = sorted(items, key=lambda item: (-item.tier, -item.fame,
+                                            item.id))[:40]
+    shown = sorted(shown, key=lambda item: item.made.ordinal)
+    for item in shown:
         maker = world.figures.get(item.maker_id)
         rows.append("  %s — %s, %s" % (item.name, item.word.lower(),
                                        item.material_gen))
-        line = "      сделана в %d году" % item.made.year
+        line = "      %s в %d году" % (
+            art.said_of(item.gender, ("сделан", "сделана", "сделано")),
+            item.made.year)
+        if item.precision and item.precision != art.P_EXACT:
+            line += " (%s)" % item.precision
         if maker is not None:
             line += "; мастер: %s" % maker.name
-        line += "; %s" % art.ORIGIN_NAMES.get(item.origin, item.origin)
+        line += "; %s" % art.ORIGIN_KIND_NAMES.get(
+            item.origin_kind, art.ORIGIN_NAMES.get(item.origin, item.origin))
         rows.append(line)
+        rows.append("      ступень: %s — %s"
+                    % (art.TIER_NAMES.get(item.tier, item.tier),
+                       art.TIER_ABOUT.get(item.tier, "")))
+        if item.kinds:
+            rows.append("      чем она бывает разом: %s"
+                        % ", ".join(item.kinds))
+        if item.parts:
+            parts = []
+            for part in item.parts:
+                material = world.materials.get(part.get("материал", ""))
+                if material is None:
+                    continue
+                parts.append("%s — %s (%d%%)"
+                             % (part.get("роль", "часть"), material.name,
+                                int(round(float(part.get("доля", 0)) * 100))))
+            if parts:
+                rows.append("      состав: %s" % "; ".join(parts))
         if item.powers:
             rows.append("      за ней числится: %s" % "; ".join(item.powers))
+        if item.limits:
+            rows.append("      но: %s" % "; ".join(item.limits))
         if item.curse:
             rows.append("      проклятие: %s" % item.curse)
+        if item.authentic and item.authentic != art.A_TRUE:
+            rows.append("      подлинность: %s" % item.authentic)
         site = world.sites.get(item.site_id)
         owner = world.figures.get(item.owner_id)
         place = item.where
@@ -1478,11 +1561,45 @@ def render_artifacts(world) -> str:
             place = "%s (%s)" % (item.where, site.name)
         elif owner is not None:
             place = "%s — %s" % (item.where, owner.name)
-        rows.append("      ныне: %s; слава: %.1f" % (place, item.fame))
+        rows.append("      ныне: %s; %s; слава: %.1f"
+                    % (place, art.state_said(item.state, item.gender),
+                       item.fame))
+        deeds = world.deeds_of_artifact(item.id)
+        if len(deeds) > 1:
+            rows.append("      что с этой вещью было:")
+            for deed in deeds[:10]:
+                rows.append("        %s" % art_texts.life_line(world, deed))
+        for span in item.losses[:3]:
+            tail = "по сей день" if not span.get("по") else \
+                "до %d года" % span["по"]
+            rows.append("      %s с %d года %s: %s"
+                        % (art.said_of(item.gender,
+                                       ("потерян", "потеряна", "потеряно")),
+                           span.get("с", 0), tail,
+                           span.get("отчего", "отчего — не записано")))
+            if span.get("чем кончилось"):
+                rows.append("        %s" % span["чем кончилось"])
+        worths = world.worths_of_artifact(item.id)
+        for worth in worths[:4]:
+            rows.append("      ценность: %s"
+                        % art_texts.worth_line(world, worth))
+        claims = world.claims_of_artifact(item.id)
+        for claim in claims[:4]:
+            rows.append("      говорят: %s"
+                        % art_texts.claim_line(world, claim))
+        if item.repairs:
+            for repair in item.repairs[:2]:
+                rows.append("      чинили в %d году: %s, %s"
+                            % (repair.get("год", 0), repair.get("что", ""),
+                               repair.get("чем", "")))
         if item.trail:
             hands = ["%d — %s" % (step.get("year", 0), step.get("who") or "—")
                      for step in item.trail]
             rows.append("      руки: %s" % " → ".join(hands[:8]))
+        rows.append("")
+    if len(items) > len(shown):
+        rows.append("  Прочих вещей, о которых сказать почти нечего: %d."
+                    % (len(items) - len(shown)))
         rows.append("")
     return "\n".join(rows)
 

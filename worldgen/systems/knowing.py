@@ -1340,6 +1340,22 @@ def _finish(ctx, expedition, year: int) -> None:
                           aspects={cat.DANGER: cat.TRACES}, trust=0.3,
                           truth=0.5)
 
+    # --- что подняли из земли -------------------------------------------
+    # Поход за прошлым не только приносит сведения: в руинах лежат
+    # вещи, и вещь, пролежавшая там тысячу лет, возвращается в мир
+    # именно так. Запись о ней при этом не заводится заново — это та
+    # же вещь, которую когда-то потеряли.
+    if cat.end_good(end) >= 0.5 and mark.kind in (cat.T_SITE, cat.T_SCAR,
+                                                  cat.T_REGION):
+        from . import artifacts as artifacts_sys
+
+        sleeping = artifacts_sys.sleeping_in(
+            world, mark.region_id,
+            mark.id if mark.kind == cat.T_SITE else "")
+        if sleeping and rng.chance(0.45):
+            artifacts_sys.unearth(ctx, sleeping[0], year, rng, finder=leader,
+                                  site=world.sites.get(mark.id))
+
     # --- остались там ---------------------------------------------------
     if end == cat.E_STAYED and side is not None:
         _start_settling(ctx, year, rng, side, mark, expedition,
