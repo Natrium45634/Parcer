@@ -684,8 +684,14 @@ def explorer_lines(world, explorer, figure) -> list:
             rows.append("Открытие: %s" % finding_line(world, finding))
     for chart_id in explorer.charts:
         chart = world.charts.get(chart_id)
-        if chart is not None:
-            rows.append("Карта «%s» (%s)" % (chart.name, chart.kind))
+        if chart is None:
+            continue
+        # Род карты в записи лежит ключом («peril»), а в летопись идёт
+        # словами: ключи справочников в русский вывод не выпускаются.
+        spec = cat.CHART_KINDS_BY_KEY.get(chart.kind)
+        rows.append("Карта «%s» (%s)"
+                    % (chart.name, spec.said if spec is not None
+                       else chart.kind))
     if explorer.patrons:
         rows.append("Снаряжали: %s" % ", ".join(explorer.patrons))
     if explorer.tongues:

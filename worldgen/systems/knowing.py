@@ -349,6 +349,7 @@ def upkeep(ctx, year: int, period: int) -> None:
     _launch(ctx, year, rng, sides, marks)
     _chart_life(ctx, year, rng)
     _spread(ctx, year, rng, sides, by_id)
+    _unwarp(ctx, year, rng, sides)
     _forget(ctx, year, rng)
     _meet_outside(ctx, year, rng, sides, lands)
     _hold_life(ctx, year, rng)
@@ -406,6 +407,18 @@ def _note_knowing(ctx, year: int, side, mark, level: str, source: str,
     for key, value in (aspects or {}).items():
         if cat.level_depth(value) > cat.level_depth(record.aspects.get(key, "")):
             record.aspects[key] = value
+    # Независимое подтверждение выправляет искажение: весть, дошедшая
+    # через третьи руки как рассказ о нелюдях, перестаёт быть таким
+    # рассказом, когда до того места доходят сами. Это и есть история
+    # избавления мира от неверных представлений — и она тут отдельно от
+    # истории находок.
+    if record.muddle and float(trust) >= 0.7 \
+            and cat.level_depth(level) >= 0.55:
+        record.notes.append(
+            "%d: %s" % (year, cat.WARP_FIXES.get(record.warp,
+                                                 "сведения проверили заново")))
+        record.muddle = ""
+        record.warp = ""
     record.trust = round(max(record.trust, float(trust)), 2)
     record.truth = round(max(record.truth, float(truth)), 2)
     if muddle:
@@ -2204,6 +2217,47 @@ def _spread(ctx, year: int, rng, sides, by_id) -> None:
             if key == "beasts" and mark.kind == cat.T_FOLK:
                 new.notes.append(
                     "%d: о живущих там рассказывают как о нелюдях" % year)
+
+
+def _unwarp(ctx, year: int, rng, sides) -> None:
+    """Независимое подтверждение выправляет искажённую весть.
+
+    Рассказ о нелюдях перестаёт быть рассказом о нелюдях не сам собой:
+    кто-то должен прийти с теми же сведениями другой дорогой. Поэтому
+    тут нужны двое — тот, у кого весть искажена, и тот, кто знает то же
+    самое вернее, — и между ними должна быть связь.
+    """
+    world = ctx.world
+    rows = [record for record in world.knowings.values()
+            if record.muddle and record.since is not None
+            and year - record.since.year >= 60]
+    if not rows or not rng.chance(0.35 * ctx.density()):
+        return
+    by_side = {side.id: side for side in sides}
+    record = rows[rng.randint(0, len(rows) - 1)]
+    holder = by_side.get(record.group_id)
+    if holder is None:
+        return
+    for other in world.knowings_about(record.about_id):
+        if other.group_id == record.group_id:
+            continue
+        if other.truth < record.truth + 0.2:
+            continue
+        side = by_side.get(other.group_id)
+        if side is None:
+            continue
+        if not _channels_between(world, side, holder, other):
+            continue
+        record.notes.append(
+            "%d: %s — то же самое пришло от %s"
+            % (year, cat.WARP_FIXES.get(record.warp,
+                                        "сведения проверили заново"),
+               side.name))
+        record.muddle = ""
+        record.warp = ""
+        record.truth = round(min(0.95, (record.truth + other.truth) / 2.0), 2)
+        record.trust = round(min(0.95, record.trust + 0.1), 2)
+        return
 
 
 def _forget(ctx, year: int, rng) -> None:
