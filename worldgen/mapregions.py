@@ -87,13 +87,41 @@ _TRANSLIT_PAIRS = (
 )
 
 
+def _is_cyrillic(ch: str) -> bool:
+    low = ch.lower()
+    return "а" <= low <= "я" or low == "ё"
+
+
 def translit(name: str) -> str:
-    """Латинское имя карты — кириллицей, чтобы читалось вместе с летописью."""
+    """Латинское имя карты — кириллицей, чтобы читалось вместе с летописью.
+
+    Имя бывает смешанным: карта пишет вулкан как «влк. Vishenara» —
+    приставка по-русски, имя латиницей. Прежде такое имя считалось
+    кириллическим целиком и уходило в летопись как есть; самопроверка
+    нашла это на странице места. Поэтому кириллические куски остаются
+    как были, а латинские переводятся по одному.
+    """
     if not name:
         return ""
-    if any("а" <= ch.lower() <= "я" or ch.lower() == "ё" for ch in name):
-        return name           # уже кириллица
-    source = str(name).lower()
+    text = str(name)
+    if any(_is_cyrillic(ch) for ch in text) and any(
+            "a" <= ch.lower() <= "z" for ch in text):
+        out = []
+        chunk = []
+        for ch in text:
+            if "a" <= ch.lower() <= "z":
+                chunk.append(ch)
+                continue
+            if chunk:
+                out.append(translit("".join(chunk)))
+                chunk = []
+            out.append(ch)
+        if chunk:
+            out.append(translit("".join(chunk)))
+        return "".join(out)
+    if any(_is_cyrillic(ch) for ch in text):
+        return text           # уже кириллица целиком
+    source = text.lower()
     out = []
     position = 0
     while position < len(source):

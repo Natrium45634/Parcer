@@ -38,6 +38,7 @@
 from __future__ import annotations
 
 from . import worldmap as wm
+from . import mapworld
 from .mapregions import FEATURE_NOUNS, translit
 from .rng import RngHub
 from .timeline import plural
@@ -246,7 +247,8 @@ def portrait(world, index: int, year: int = 0) -> list:
         facts["глубина"] = abs(round(wmap.elevation_m(index)))
     for volcano in (wmap.volcanoes or ()):
         if volcano.get("i") == index:
-            facts["вулкан"] = volcano.get("status", "спящий")
+            facts["вулкан"] = mapworld.volcano_state(
+                volcano.get("status", "спящий"))
             break
     for peak in (wmap.peaks or ()):
         if peak.get("i") == index:
@@ -575,7 +577,7 @@ def features(world, index: int) -> list:
         if volcano.get("i") == index:
             out.append("вулкан по имени %s (%s)"
                        % (translit(volcano.get("name", "")),
-                          volcano.get("status")))
+                          mapworld.volcano_state(volcano.get("status"))))
     for lair in (wmap.lairs or ()):
         if lair.get("i") == index:
             out.append("логово: %s по имени %s"

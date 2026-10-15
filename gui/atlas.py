@@ -33,6 +33,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from worldgen import landlore
+from worldgen import mapworld
 from worldgen import worldmap as wm
 from worldgen.mapregions import FEATURE_NOUNS, translit
 from worldgen.worldforge import BIOME_COLORS, BIOME_NAMES
@@ -1920,7 +1921,8 @@ class Atlas(ttk.Frame):
             if volcano.get("i") == index:
                 story.append("вулкан по имени %s (%s)"
                              % (translit(volcano.get("name", "")),
-                                volcano.get("status")))
+                                mapworld.volcano_state(
+                                    volcano.get("status"))))
         for lair in (wmap.lairs or ()):
             if lair.get("i") == index:
                 story.append("логово: %s по имени %s"

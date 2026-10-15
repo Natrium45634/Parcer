@@ -70,6 +70,17 @@ LAIR_RELIC_KIND = {
 # Насколько давно логово лежит: «ancient» просыпается неохотно, но страшно.
 LAIR_POTENCY = {"ancient": 5, "dormant": 3, "remnant": 2}
 
+# Состояние вулкана уезжает в .world по-английски (так устроен формат), а
+# читают его по-русски. Перевод живёт тут, у читателя карты: писатель
+# формата (worldforge/export.py) знает обратную таблицу.
+VOLCANO_STATE = {"active": "активный", "dormant": "спящий",
+                 "extinct": "потухший"}
+
+
+def volcano_state(status: str) -> str:
+    """Состояние вулкана по-русски, как бы его ни записала карта."""
+    return VOLCANO_STATE.get(str(status or "").strip(), status or "спящий")
+
 
 class MapLink:
     """Всё, что движок истории берёт у карты."""
