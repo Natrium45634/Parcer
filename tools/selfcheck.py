@@ -3754,6 +3754,371 @@ def check_year_slices(world, seed: str) -> list:
     return problems
 
 
+def check_knowing(world, seed: str) -> list:
+    """Познание мира: сходится ли знание само с собой.
+
+    Что тут ловится. Знание без хозяина или о том, чего в мире нет:
+    запись «кто — о чём» бессмысленна, если одного из двоих не
+    существует. Состояние, вопрос или источник не из справочника —
+    такого не прочтёт ни человек, ни окно. «Знают живущие» у державы:
+    так знают свою землю народы, а держава знает её грамотами. Знание,
+    полученное раньше, чем оно появилось у того, от кого его получили —
+    весть, обогнавшая саму себя. Потерянное знание без года или без
+    причины. Поход с целью, поводом, составом или исходом не из
+    справочника; поход, который вёл человек, в тот год ещё не
+    родившийся или уже умерший; потерь больше, чем людей; смена цели
+    раньше выхода или позже возвращения. Находка раньше, чем появился
+    её предмет; выправленная ошибка без самой ошибки; притязание,
+    датированное раньше находки. Карта с точностью вне долей и с
+    параметром не из справочника. Встреча с народом, которого нет, и с
+    барьером вне долей. Попытка освоения, кончившаяся и провалом, и
+    удачей разом; поселение, выросшее из двора раньше, чем двор
+    поставили. И запись исследователя, ссылающаяся на несуществующего
+    человека, поход или карту.
+    """
+    from worldgen import knowing as cat
+
+    problems = []
+    total = world.total_years
+    levels = set(cat.LEVELS_BY_KEY)
+    aspects = set(cat.ASPECTS_BY_KEY)
+    sources = set(cat.SOURCES_BY_KEY)
+    ends = set(cat.ENDS_BY_KEY)
+    kinds = set(cat.SUBJECT_KINDS)
+
+    def group_name(kind: str, key: str) -> str:
+        table = world.polities if kind == "polity" else world.folks
+        item = table.get(key)
+        return getattr(item, "name", "")
+
+    def subject_exists(kind: str, key: str) -> bool:
+        table = {
+            cat.T_REGION: world.regions, cat.T_SITE: world.sites,
+            cat.T_FOLK: world.folks, cat.T_DOMINION: world.dominions,
+            cat.T_ROUTE: world.routes, cat.T_WONDER: world.wonders,
+            cat.T_SPECIES: world.species, cat.T_SCAR: world.scars,
+            cat.T_TOWN: world.settlements,
+        }.get(kind)
+        if table is None:
+            return kind == cat.T_EDGE
+        return key in table
+
+    def subject_born(kind: str, key: str) -> int:
+        """Год, раньше которого о предмете нельзя было узнать."""
+        if kind == cat.T_SITE:
+            item = world.sites.get(key)
+            return item.created.year if item is not None and item.created \
+                else 0
+        if kind == cat.T_FOLK:
+            item = world.folks.get(key)
+            return item.born.year if item is not None and item.born else 0
+        if kind == cat.T_DOMINION:
+            item = world.dominions.get(key)
+            return item.began.year if item is not None and item.began else 0
+        if kind == cat.T_TOWN:
+            item = world.settlements.get(key)
+            return item.founded.year if item is not None and item.founded \
+                else 0
+        if kind == cat.T_SCAR:
+            item = world.scars.get(key)
+            return item.created.year if item is not None and item.created \
+                else 0
+        return 0
+
+    # --- записи о знании ------------------------------------------------
+    for record in world.knowings.values():
+        where = "сид «%s»: знание %s о «%s»" % (seed, record.id,
+                                                record.about_name)
+        if record.level not in levels:
+            problems.append("%s: состояние «%s» не из справочника"
+                            % (where, record.level))
+        if record.source and record.source not in sources:
+            problems.append("%s: источник «%s» не из справочника"
+                            % (where, record.source))
+        if record.group_kind not in ("folk", "polity"):
+            problems.append("%s: хозяин знания непонятного рода «%s»"
+                            % (where, record.group_kind))
+        elif not group_name(record.group_kind, record.group_id):
+            problems.append("%s: знание у общества, которого в мире нет"
+                            % where)
+        if record.about_kind not in kinds:
+            problems.append("%s: предмет знания непонятного рода «%s»"
+                            % (where, record.about_kind))
+        elif not subject_exists(record.about_kind, record.about_id):
+            problems.append("%s: знание о предмете, которого в мире нет"
+                            % where)
+        if record.level == cat.LOCAL and record.group_kind != "folk":
+            problems.append("%s: «знают живущие» стоит у державы — так "
+                            "знают землю народы, а держава знает её "
+                            "грамотами" % where)
+        for key, value in record.aspects.items():
+            if key not in aspects:
+                problems.append("%s: вопрос «%s» не из справочника"
+                                % (where, key))
+            if value not in levels:
+                problems.append("%s: по вопросу «%s» состояние «%s» не из "
+                                "справочника" % (where, key, value))
+        if record.since is not None and not 1 <= record.since.year <= total:
+            problems.append("%s: год, с которого знают, вне истории: %d"
+                            % (where, record.since.year))
+        if record.lost_year:
+            if not 1 <= record.lost_year <= total:
+                problems.append("%s: год утраты вне истории: %d"
+                                % (where, record.lost_year))
+            if not record.lost_why:
+                problems.append("%s: знание потеряно, а причина не названа"
+                                % where)
+            if record.known:
+                problems.append("%s: знание и потеряно, и считается живым"
+                                % where)
+        elif record.lost_why:
+            problems.append("%s: причина утраты названа, а года утраты нет"
+                            % where)
+        if not 0.0 <= record.trust <= 1.0 or not 0.0 <= record.truth <= 1.0:
+            problems.append("%s: уверенность или точность вне долей (%.2f, "
+                            "%.2f)" % (where, record.trust, record.truth))
+        if record.from_id:
+            source_record = world.knowing_of(record.from_id, record.about_id)
+            if source_record is None:
+                problems.append("%s: сказано, что узнали от того, кто сам "
+                                "этого не знал" % where)
+            elif source_record.since is not None and record.since is not None \
+                    and source_record.since.year > record.since.year:
+                problems.append("%s: весть пришла раньше, чем была у того, "
+                                "от кого её получили (%d против %d)"
+                                % (where, record.since.year,
+                                   source_record.since.year))
+        if record.warp and not record.muddle:
+            problems.append("%s: весть исказилась, а чем именно — не сказано"
+                            % where)
+
+    # --- походы за знанием ----------------------------------------------
+    for expedition in world.expeditions.values():
+        if not expedition.goal:
+            continue
+        where = "сид «%s»: поход «%s»" % (seed, expedition.name)
+        goal = cat.GOALS_BY_KEY.get(expedition.goal)
+        if goal is None:
+            problems.append("%s: цель «%s» не из справочника"
+                            % (where, expedition.goal))
+        elif goal.group != expedition.goal_group:
+            problems.append("%s: цель из другой группы, чем записано"
+                            % where)
+        if expedition.spur not in cat.SPURS_BY_KEY:
+            problems.append("%s: повод «%s» не из справочника"
+                            % (where, expedition.spur))
+        if expedition.haze not in cat.HAZES_BY_KEY:
+            problems.append("%s: неопределённость «%s» не из справочника"
+                            % (where, expedition.haze))
+        for key in expedition.roles:
+            if key not in cat.ROLES_BY_KEY:
+                problems.append("%s: роль «%s» не из справочника"
+                                % (where, key))
+        for key in expedition.gear:
+            if key not in cat.GEAR_BY_KEY:
+                problems.append("%s: снаряжение «%s» не из справочника"
+                                % (where, key))
+        if expedition.aim_kind and expedition.aim_kind not in kinds:
+            problems.append("%s: цель непонятного рода «%s»"
+                            % (where, expedition.aim_kind))
+        elif expedition.aim_kind \
+                and not subject_exists(expedition.aim_kind, expedition.aim_id):
+            problems.append("%s: поход шёл к тому, чего в мире нет" % where)
+        if expedition.host_kind and not group_name(expedition.host_kind,
+                                                   expedition.host_id):
+            problems.append("%s: снарядившего похода в мире нет" % where)
+        if expedition.end is not None:
+            if expedition.result not in ends:
+                problems.append("%s: исход «%s» не из справочника"
+                                % (where, expedition.result))
+            if expedition.end.ordinal < expedition.start.ordinal:
+                problems.append("%s: вернулся раньше, чем вышел" % where)
+        if expedition.deaths > expedition.crew:
+            problems.append("%s: погибло больше, чем шло (%d из %d)"
+                            % (where, expedition.deaths, expedition.crew))
+        if expedition.turn_year:
+            end_year = expedition.end.year if expedition.end is not None \
+                else total
+            if not expedition.start.year <= expedition.turn_year <= end_year:
+                problems.append("%s: цель переменилась вне срока похода: %d"
+                                % (where, expedition.turn_year))
+        leader = world.figures.get(expedition.leader_id)
+        if leader is None:
+            problems.append("%s: похода никто не вёл" % where)
+        else:
+            if leader.birth is not None \
+                    and leader.birth.year > expedition.start.year:
+                problems.append("%s: его ведёт тот, кто ещё не родился"
+                                % where)
+            if leader.death is not None \
+                    and leader.death.year < expedition.start.year:
+                problems.append("%s: его ведёт тот, кто уже умер" % where)
+
+    # --- находки ---------------------------------------------------------
+    for finding in world.findings.values():
+        where = "сид «%s»: открытие %s («%s»)" % (seed, finding.id,
+                                                  finding.about_name)
+        if finding.kind not in cat.FINDS_BY_KEY:
+            problems.append("%s: род открытия «%s» не из справочника"
+                            % (where, finding.kind))
+        if finding.about_kind not in kinds:
+            problems.append("%s: предмет непонятного рода «%s»"
+                            % (where, finding.about_kind))
+        elif not subject_exists(finding.about_kind, finding.about_id):
+            problems.append("%s: открыто то, чего в мире нет" % where)
+        if finding.found is not None:
+            year = finding.found.year
+            if not 1 <= year <= total:
+                problems.append("%s: год открытия вне истории: %d"
+                                % (where, year))
+            born = subject_born(finding.about_kind, finding.about_id)
+            if born and year < born:
+                problems.append("%s: открыто в %d году то, что появилось в "
+                                "%d" % (where, year, born))
+            for row in finding.claims:
+                claim_year = int(row.get("год", 0) or 0)
+                if claim_year and claim_year < year:
+                    problems.append("%s: притязание датировано раньше самой "
+                                    "находки (%d против %d)"
+                                    % (where, claim_year, year))
+            if finding.wrong_fixed and finding.wrong_fixed < year:
+                problems.append("%s: ошибку выправили раньше, чем сделали "
+                                "находку" % where)
+        for key in finding.prime:
+            if key not in cat.PRIME_NAMES:
+                problems.append("%s: род первенства «%s» не из справочника"
+                                % (where, key))
+        if finding.wrong_fixed and not finding.wrong:
+            problems.append("%s: выправлена ошибка, которой не было" % where)
+        if finding.expedition_id \
+                and finding.expedition_id not in world.expeditions:
+            problems.append("%s: ссылается на поход, которого нет" % where)
+        if finding.group_kind and not group_name(finding.group_kind,
+                                                 finding.group_id):
+            problems.append("%s: открытие записано обществу, которого нет"
+                            % where)
+
+    # --- карты -----------------------------------------------------------
+    for chart in world.charts.values():
+        where = "сид «%s»: карта «%s»" % (seed, chart.name)
+        if chart.kind not in cat.CHART_KINDS_BY_KEY:
+            problems.append("%s: род карты «%s» не из справочника"
+                            % (where, chart.kind))
+        for key, value in chart.marks.items():
+            if key not in cat.CHART_MARKS:
+                problems.append("%s: мера точности «%s» не из справочника"
+                                % (where, key))
+            if not 0.0 <= float(value) <= 1.0:
+                problems.append("%s: точность вне долей: %s" % (where, value))
+        if chart.made is not None and not 1 <= chart.made.year <= total:
+            problems.append("%s: год составления вне истории: %d"
+                            % (where, chart.made.year))
+        if chart.lost_year and not 1 <= chart.lost_year <= total:
+            problems.append("%s: год утраты вне истории: %d"
+                            % (where, chart.lost_year))
+        if chart.spread < 1:
+            problems.append("%s: списков меньше одного" % where)
+        if chart.group_kind and not group_name(chart.group_kind,
+                                               chart.group_id):
+            problems.append("%s: карта у общества, которого в мире нет"
+                            % where)
+
+    # --- встречи ---------------------------------------------------------
+    speech_said = {item.said for item in cat.SPEECHES}
+    for meeting in world.meetings.values():
+        where = "сид «%s»: встреча %s" % (seed, meeting.id)
+        if meeting.kind not in cat.MEET_KIND_NAMES:
+            problems.append("%s: род встречи «%s» не из справочника"
+                            % (where, meeting.kind))
+        if meeting.host_folk not in world.folks:
+            problems.append("%s: встретились с народом, которого нет" % where)
+        if meeting.comer_kind and not group_name(meeting.comer_kind,
+                                                 meeting.comer_id):
+            problems.append("%s: пришедших в мире нет" % where)
+        if not 0.0 <= meeting.barrier <= 1.0:
+            problems.append("%s: языковой барьер вне долей: %.2f"
+                            % (where, meeting.barrier))
+        if meeting.outcome not in cat.MEET_END_NAMES.values():
+            problems.append("%s: исход «%s» не из справочника"
+                            % (where, meeting.outcome))
+        for key in meeting.steps:
+            if key not in cat.MEET_STEP_NAMES:
+                problems.append("%s: стадия «%s» не из справочника"
+                                % (where, key))
+        for said in meeting.speech:
+            if said not in speech_said:
+                problems.append("%s: способ объясниться «%s» не из "
+                                "справочника" % (where, said))
+        if meeting.date is not None and not 1 <= meeting.date.year <= total:
+            problems.append("%s: год встречи вне истории: %d"
+                            % (where, meeting.date.year))
+
+    # --- освоение --------------------------------------------------------
+    fates = set(cat.HOLD_FATE_NAMES.values()) | {"не прижилось"}
+    for settling in world.settlings.values():
+        where = "сид «%s»: освоение %s" % (seed, settling.id)
+        if settling.kind not in cat.HOLDS_BY_KEY:
+            problems.append("%s: форма освоения «%s» не из справочника"
+                            % (where, settling.kind))
+        if settling.locals_use \
+                and settling.locals_use not in cat.LOCAL_USE_NAMES.values():
+            problems.append("%s: прежнее пользование землёй «%s» не из "
+                            "справочника" % (where, settling.locals_use))
+        if settling.result and settling.result not in fates:
+            problems.append("%s: исход «%s» не из справочника"
+                            % (where, settling.result))
+        if settling.fail_why and settling.result != "не прижилось":
+            problems.append("%s: названа причина провала у того, что "
+                            "прижилось" % where)
+        if settling.region_id and settling.region_id not in world.regions:
+            problems.append("%s: земля освоения в мире отсутствует" % where)
+        if settling.started is not None and settling.ended is not None \
+                and settling.ended.ordinal < settling.started.ordinal:
+            problems.append("%s: кончилось раньше, чем началось" % where)
+        if settling.settlement_id:
+            town = world.settlements.get(settling.settlement_id)
+            if town is None:
+                problems.append("%s: ссылается на поселение, которого нет"
+                                % where)
+            elif settling.started is not None and town.founded is not None \
+                    and town.founded.year < settling.started.year:
+                problems.append("%s: поселение основано раньше, чем начали "
+                                "осваивать (%d против %d)"
+                                % (where, town.founded.year,
+                                   settling.started.year))
+        if settling.locals_folk and settling.locals_folk not in world.folks:
+            problems.append("%s: прежние хозяева земли — народ, которого нет"
+                            % where)
+
+    # --- исследователи ---------------------------------------------------
+    for explorer in world.explorers.values():
+        where = "сид «%s»: исследователь %s" % (seed, explorer.id)
+        figure = world.figures.get(explorer.figure_id)
+        if figure is None:
+            problems.append("%s: запись о человеке, которого в мире нет"
+                            % where)
+        for key in explorer.trades:
+            if key not in cat.TRADES_BY_KEY:
+                problems.append("%s: занятие «%s» не из справочника"
+                                % (where, key))
+        for key in explorer.expeditions:
+            if key not in world.expeditions:
+                problems.append("%s: ссылается на поход, которого нет"
+                                % where)
+        for key in explorer.findings:
+            if key not in world.findings:
+                problems.append("%s: ссылается на открытие, которого нет"
+                                % where)
+        for key in explorer.charts:
+            if key not in world.charts:
+                problems.append("%s: ссылается на карту, которой нет" % where)
+        for key in explorer.fame:
+            if key not in world.folks and key not in world.polities:
+                problems.append("%s: его помнят у общества, которого нет"
+                                % where)
+    return problems
+
+
 def check_customs(world, seed: str) -> list:
     """Обычаи: сходится ли заведённый порядок сам с собой.
 
@@ -5172,6 +5537,7 @@ def main(only: str = "") -> int:
         failures.extend(check_year_slices(first, seed))
         failures.extend(check_review(first, seed))
         failures.extend(check_customs(first, seed))
+        failures.extend(check_knowing(first, seed))
         failures.extend(check_faiths(first, seed))
         failures.extend(check_nations(first, seed))
         failures.extend(check_tongues(first, seed))
@@ -5250,6 +5616,7 @@ def main(only: str = "") -> int:
             failures.extend(check_year_slices(first, "карта/" + seed))
             failures.extend(check_review(first, "карта/" + seed))
             failures.extend(check_customs(first, "карта/" + seed))
+            failures.extend(check_knowing(first, "карта/" + seed))
             failures.extend(check_faiths(first, "карта/" + seed))
             failures.extend(check_nations(first, "карта/" + seed))
             failures.extend(check_tongues(first, "карта/" + seed))
@@ -5317,7 +5684,7 @@ def main(only: str = "") -> int:
                       check_town_bread,
                       check_world_code,
                       check_invasions, check_subjects, check_review,
-                      check_customs,
+                      check_customs, check_knowing,
                       check_traces, check_year_slices,
                       check_faiths, check_nations,
                       check_tongues, check_embassies, check_things,

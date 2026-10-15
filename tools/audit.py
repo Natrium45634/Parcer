@@ -2196,6 +2196,399 @@ def m_wonder_reach(world):
     return far / float(len(wild))
 
 
+# ---------------------------------------------------------------------------
+# Познание мира
+# ---------------------------------------------------------------------------
+#
+# Главный вопрос тут не «сколько открытий», а **чьи они**. Свод, в
+# котором всякое открытие принадлежит одной державе, а все прочие народы
+# ждут, пока их откроют, пройдёт по счёту и провалится по смыслу.
+# Поэтому меряется: есть ли у мира местное знание; расходятся ли
+# сведения об одном предмете у разных обществ; не забивает ли одна
+# группа целей прочие; бывают ли походы без полного успеха и дают ли
+# неудачи знание; расходится ли первенство по делу с первенством по
+# признанию; остаются ли ошибки толкования и выправляют ли их; и
+# становится ли нанесённая на карту земля своей сама собой.
+
+
+def _probes(world):
+    return [item for item in world.expeditions.values() if item.goal]
+
+
+def m_kn_probes(world):
+    """Сколько походов за ответом на названный вопрос снарядил мир."""
+    return len(_probes(world)) or None
+
+
+def m_kn_goal_groups(world):
+    """Сколько групп целей в ходу: земля, природа, прошлое, народы…"""
+    probes = _probes(world)
+    if not probes:
+        return None
+    return len({item.goal_group for item in probes})
+
+
+def m_kn_goal_top(world):
+    """Какую долю занимает самая частая группа целей."""
+    probes = _probes(world)
+    if len(probes) < 8:
+        return None
+    counts = {}
+    for item in probes:
+        counts[item.goal_group] = counts.get(item.goal_group, 0) + 1
+    return max(counts.values()) / float(len(probes))
+
+
+def m_kn_spurs(world):
+    """Сколько разных поводов для похода нашлось в мире."""
+    probes = _probes(world)
+    if not probes:
+        return None
+    return len({item.spur for item in probes if item.spur})
+
+
+def m_kn_spur_named(world):
+    """У какой доли походов названа предпосылка."""
+    probes = _probes(world)
+    if not probes:
+        return None
+    return len([item for item in probes if item.spur]) / float(len(probes))
+
+
+def m_kn_hosts(world):
+    """Какую долю походов снарядила держава, а не цех, храм или вольные."""
+    probes = _probes(world)
+    if len(probes) < 8:
+        return None
+    crown = [item for item in probes if item.host_kind == "polity"]
+    return len(crown) / float(len(probes))
+
+
+def m_kn_ends(world):
+    """Сколько разных исходов у походов в ходу."""
+    probes = [item for item in _probes(world) if item.result]
+    if not probes:
+        return None
+    return len({item.result for item in probes})
+
+
+def m_kn_win_share(world):
+    """Какая доля походов взяла свою цель целиком."""
+    from worldgen import knowing as cat
+    probes = [item for item in _probes(world) if item.result]
+    if len(probes) < 8:
+        return None
+    won = [item for item in probes if item.result == cat.E_WON]
+    return len(won) / float(len(probes))
+
+
+def m_kn_fail_tells(world):
+    """Какая доля походов, не взявших цель, всё же принесла сведения."""
+    from worldgen import knowing as cat
+    probes = [item for item in _probes(world)
+              if item.result and item.result != cat.E_WON]
+    if len(probes) < 6:
+        return None
+    useful = [item for item in probes if cat.end_tells(item.result)]
+    return len(useful) / float(len(probes))
+
+
+def m_kn_gone(world):
+    """Какая доля походов не вернулась вовсе."""
+    from worldgen import knowing as cat
+    probes = [item for item in _probes(world) if item.result]
+    if len(probes) < 8:
+        return None
+    gone = [item for item in probes
+            if item.result in (cat.E_GONE, cat.E_DARK)]
+    return len(gone) / float(len(probes))
+
+
+def m_kn_records(world):
+    """Сколько записей о знании держит мир."""
+    return len(world.knowings) or None
+
+
+def m_kn_levels(world):
+    """Сколько разных состояний знания в ходу."""
+    if not world.knowings:
+        return None
+    return len({item.level for item in world.knowings.values()})
+
+
+def m_kn_local(world):
+    """Какая доля записей — знание живущих о своей земле.
+
+    Если его нет вовсе, мир читается так, будто неизвестная земля
+    объективно пуста, — и вся история познания становится историей
+    одной державы.
+    """
+    if not world.knowings:
+        return None
+    from worldgen import knowing as cat
+    local = [item for item in world.knowings.values()
+             if item.level == cat.LOCAL]
+    return len(local) / float(len(world.knowings))
+
+
+def m_kn_relative(world):
+    """Доля предметов, о которых разные общества знают по-разному.
+
+    Это и есть мера относительности знания: если о всяком предмете все
+    знают одно и то же, графа «кто знает» не нужна.
+    """
+    if not world.knowings:
+        return None
+    rows = {}
+    for item in world.knowings.values():
+        rows.setdefault(item.about_id, set()).add(item.level)
+    many = [key for key, levels in rows.items() if len(levels) > 1]
+    shared = [key for key, levels in rows.items() if len(levels) >= 1]
+    if len(shared) < 5:
+        return None
+    return len(many) / float(len(shared))
+
+
+def m_kn_reach(world):
+    """Насколько широко знание об одном предмете — против живого мира.
+
+    Мера против мгновенного распространения. Считается не числом
+    обществ, а долей от того, сколько их в мире стоит разом: «о предмете
+    знают восемь обществ» ничего не говорит, пока не сказано, восемь из
+    двадцати пяти или восемь из восьми. Сломанная передача сведений
+    даёт здесь единицу — знают все.
+    """
+    if not world.knowings:
+        return None
+    rows = {}
+    for item in world.knowings.values():
+        rows.setdefault(item.about_id, set()).add(item.group_id)
+    if not rows:
+        return None
+    living = len(world.active_polities) + len(
+        [item for item in world.folks.values() if item.status == ACTIVE])
+    if living < 4:
+        return None
+    mean = sum(len(value) for value in rows.values()) / float(len(rows))
+    return mean / float(living)
+
+
+def m_kn_warp(world):
+    """Какая доля вестей дошла искажённой."""
+    if not world.knowings:
+        return None
+    warped = [item for item in world.knowings.values() if item.warp]
+    return len(warped) / float(len(world.knowings))
+
+
+def m_kn_lost(world):
+    """Сколько знаний мир потерял."""
+    if not world.knowings:
+        return None
+    return len([item for item in world.knowings.values() if item.lost_year])
+
+
+def m_kn_secret(world):
+    """Сколько знаний держали при себе.
+
+    Считается не нынешняя тайна, а бывшая: тайна — состояние, а не
+    свойство знания, и за десять тысяч лет почти всякую успевают
+    выдать. «Держали в тайне и выдали» — такая же часть истории
+    знания, как «держат до сих пор».
+    """
+    if not world.knowings:
+        return None
+    return len([item for item in world.knowings.values()
+                if item.secret_why or item.access != "открыто"])
+
+
+def m_kn_findings(world):
+    """Сколько открытий записано."""
+    return len(world.findings) or None
+
+
+def m_kn_find_kinds(world):
+    """Сколько родов открытия в ходу: дошёл, описал, положил на карту…"""
+    if not world.findings:
+        return None
+    return len({item.kind for item in world.findings.values()})
+
+
+def m_kn_regained(world):
+    """Сколько открытий — возвращение утраченного знания."""
+    from worldgen import knowing as cat
+    if not world.findings:
+        return None
+    return len([item for item in world.findings.values()
+                if item.kind == cat.F_BACK])
+
+
+def m_kn_prime_split(world):
+    """Доля открытий, где первенство по делу и по признанию расходятся."""
+    from worldgen import knowing as cat
+    rows = [item for item in world.findings.values() if item.prime]
+    if len(rows) < 5:
+        return None
+    split = [item for item in rows
+             if item.prime.get(cat.P_FACT) != item.prime.get(cat.P_FAME)]
+    return len(split) / float(len(rows))
+
+
+def m_kn_locals_first(world):
+    """Доля открытий, где первым по делу был тот, кто там жил."""
+    from worldgen import knowing as cat
+    rows = [item for item in world.findings.values() if item.prime]
+    if len(rows) < 5:
+        return None
+    theirs = [item for item in rows
+              if "по имени" in (item.prime.get(cat.P_FACT) or "")]
+    return len(theirs) / float(len(rows))
+
+
+def m_kn_wrong(world):
+    """Доля открытий, понятых неверно."""
+    if len(world.findings) < 5:
+        return None
+    wrong = [item for item in world.findings.values() if item.wrong]
+    return len(wrong) / float(len(world.findings))
+
+
+def m_kn_wrong_fixed(world):
+    """Доля неверных толкований, выправленных позднейшими."""
+    wrong = [item for item in world.findings.values() if item.wrong]
+    if len(wrong) < 4:
+        return None
+    fixed = [item for item in wrong if item.wrong_fixed]
+    return len(fixed) / float(len(wrong))
+
+
+def m_kn_claims(world):
+    """Сколько открытий, о первенстве в которых спорили."""
+    if not world.findings:
+        return None
+    return len([item for item in world.findings.values()
+                if len(item.claims) > 1])
+
+
+def m_kn_fruits(world):
+    """Сколько разных последствий у открытий в ходу."""
+    rows = []
+    for item in world.findings.values():
+        rows.extend(item.fruits or ())
+    if len(rows) < 6:
+        return None
+    return len(set(rows))
+
+
+def m_kn_charts(world):
+    """Сколько карт начертил мир."""
+    return len(world.charts) or None
+
+
+def m_kn_chart_kinds(world):
+    """Сколько родов карт в ходу."""
+    if not world.charts:
+        return None
+    return len({item.kind for item in world.charts.values()})
+
+
+def m_kn_chart_errors(world):
+    """Доля карт, у которых названа своя ошибка."""
+    if len(world.charts) < 4:
+        return None
+    bad = [item for item in world.charts.values() if item.errors]
+    return len(bad) / float(len(world.charts))
+
+
+def m_kn_chart_folk(world):
+    """Доля карт, которые чертили не державы, а народы."""
+    if len(world.charts) < 4:
+        return None
+    theirs = [item for item in world.charts.values()
+              if item.group_kind == "folk"]
+    return len(theirs) / float(len(world.charts))
+
+
+def m_kn_meetings(world):
+    """Сколько встреч двух обществ записано."""
+    return len(world.meetings) or None
+
+
+def m_kn_meet_ends(world):
+    """Сколько разных исходов у встреч."""
+    if not world.meetings:
+        return None
+    return len({item.outcome for item in world.meetings.values()})
+
+
+def m_kn_meet_peace(world):
+    """Доля встреч, кончившихся не кровью.
+
+    Мера против шаблона «каждый неизвестный народ враждебен».
+    """
+    from worldgen import knowing as cat
+    rows = list(world.meetings.values())
+    if len(rows) < 5:
+        return None
+    hard = {cat.MEET_END_NAMES[key] for key in ("fight", "seize", "gone")}
+    peace = [item for item in rows if item.outcome not in hard]
+    return len(peace) / float(len(rows))
+
+
+def m_kn_barrier(world):
+    """Доля встреч, прошедших через языковой барьер."""
+    rows = list(world.meetings.values())
+    if len(rows) < 5:
+        return None
+    hard = [item for item in rows if item.barrier > 0.5]
+    return len(hard) / float(len(rows))
+
+
+def m_kn_settlings(world):
+    """Сколько попыток освоения новых земель было."""
+    return len(world.settlings) or None
+
+
+def m_kn_hold_fail(world):
+    """Доля попыток освоения, кончившихся ничем."""
+    rows = [item for item in world.settlings.values() if item.result]
+    if len(rows) < 4:
+        return None
+    failed = [item for item in rows if item.result == "не прижилось"]
+    return len(failed) / float(len(rows))
+
+
+def m_kn_hold_locals(world):
+    """Доля попыток на земле, которой до прихода уже пользовались.
+
+    Отсутствие построек не означает отсутствия прав: по земле ходят на
+    охоту, пасут скот, хоронят и ведут перегон.
+    """
+    rows = list(world.settlings.values())
+    if len(rows) < 4:
+        return None
+    used = [item for item in rows
+            if item.locals_use and not item.locals_use.startswith("ею не")]
+    return len(used) / float(len(rows))
+
+
+def m_kn_explorers(world):
+    """Сколько исследователей получили имя в истории."""
+    return len(world.explorers) or None
+
+
+def m_kn_credit_lost(world):
+    """Доля исследователей, которым признание не досталось.
+
+    Мера против шаблона «каждый первопроходец становится героем».
+    """
+    rows = [item for item in world.explorers.values() if item.credit]
+    if len(rows) < 5:
+        return None
+    lost = [item for item in rows if item.credit != "признан"]
+    return len(lost) / float(len(rows))
+
+
 MEASURES = (
     Measure("были", "не про судьбу мира", m_story_small, 0.82, 0.98,
             "доля", "девять из десяти былей не спасают мир"),
@@ -2552,6 +2945,100 @@ MEASURES = (
             "штук", "у весомого места есть что рассказать"),
     Measure("земля", "строк об условиях у скудного места", m_land_words, 3,
             None, "штук", "о всяком месте есть что сказать прозой"),
+    Measure("познание", "походов за знанием", m_kn_probes, 6, 700, "штук",
+            "поход — ответ на названный вопрос, а не ежегодное сообщение",
+            min_years=2000),
+    Measure("познание", "групп целей в ходу", m_kn_goal_groups, 4, None,
+            "из 6", "мир спрашивает не об одном"),
+    Measure("познание", "доля самой частой цели", m_kn_goal_top, None, 0.55,
+            "доля", "одна группа целей не забивает прочие"),
+    Measure("познание", "поводов в ходу", m_kn_spurs, 5, None, "из 14",
+            "поход снаряжают из-за случившегося, а не из-за нужды в "
+            "открытии"),
+    Measure("познание", "поход с названным поводом", m_kn_spur_named, 1.0,
+            None, "доля", "нет повода — нет похода"),
+    Measure("познание", "снаряжено державой", m_kn_hosts, None, 0.85, "доля",
+            "походы снаряжает не только казна: цех, храм, вольные и сам "
+            "здешний народ"),
+    Measure("познание", "исходов в ходу", m_kn_ends, 5, None, "из 13",
+            "исход не делится на удачу и неудачу"),
+    Measure("познание", "взяли цель целиком", m_kn_win_share, 0.03, 0.55,
+            "доля", "не всякий поход достигает полного успеха"),
+    Measure("познание", "неудача дала сведения", m_kn_fail_tells, 0.35, None,
+            "доля", "подтвердить, что там ничего нет, — тоже работа"),
+    Measure("познание", "не вернулись вовсе", m_kn_gone, 0.005, 0.30, "доля",
+            "пропавшие походы есть, но не каждый третий"),
+    Measure("познание", "записей о знании", m_kn_records, 20, None, "штук",
+            "знание в мире есть, и оно чьё-то"),
+    Measure("познание", "состояний знания в ходу", m_kn_levels, 4, None,
+            "из 9", "«знают» и «не знают» — не вся лестница; трёх из "
+            "двенадцати состояний тут нет нарочно: «неведомо» — это "
+            "отсутствие записи, «держат в тайне» — графа доступа, а "
+            "«знали и забыли» — год утраты"),
+    Measure("познание", "знание живущих", m_kn_local, 0.02, None, "доля",
+            "без местного знания неизвестная земля читается как пустая"),
+    Measure("познание", "сведения расходятся", m_kn_relative, 0.10, None,
+            "доля", "неизвестность всегда чья-то: об одном предмете знают "
+            "по-разному"),
+    Measure("познание", "ширина знания об одном", m_kn_reach, None, 0.75,
+            "доля", "открытие не становится достоянием всего мира"),
+    Measure("познание", "дошло искажённым", m_kn_warp, 0.02, 0.60, "доля",
+            "весть по дороге усыхает, но не всякая"),
+    Measure("познание", "знаний потеряно", m_kn_lost, 1, None, "штук",
+            "утраченное знание — то, из чего выходят повторные открытия",
+            min_years=4000),
+    Measure("познание", "знаний держали в тайне", m_kn_secret, 1, None,
+            "штук", "кто один знает дорогу, тот один и везёт товар",
+            min_years=4000),
+    Measure("познание", "открытий", m_kn_findings, 3, None, "штук",
+            "открытие — перемена в знании, и она записана"),
+    Measure("познание", "родов открытия в ходу", m_kn_find_kinds, 4, None,
+            "из 10", "«открыл землю» — не ответ: дошёл, описал, положил на "
+            "карту и понял, что это, — разные дела"),
+    Measure("познание", "вернули утраченное", m_kn_regained, 1, None, "штук",
+            "забытое открывают заново", min_years=6000),
+    Measure("познание", "первенство расходится", m_kn_prime_split, 0.10,
+            0.97, "доля", "кто дошёл и кого признали — два разных ответа"),
+    Measure("познание", "первым был живущий", m_kn_locals_first, 0.05, None,
+            "доля", "первооткрыватель — не первый, кто там был"),
+    Measure("познание", "поняли неверно", m_kn_wrong, 0.05, 0.75, "доля",
+            "найти — не значит понять"),
+    Measure("познание", "ошибку выправили", m_kn_wrong_fixed, 0.05, None,
+            "доля", "мир избавляется от неверных представлений, но не сразу",
+            min_years=4000),
+    Measure("познание", "спорных открытий", m_kn_claims, 1, None, "штук",
+            "о первенстве спорят", min_years=6000),
+    Measure("познание", "последствий в ходу", m_kn_fruits, 4, None, "штук",
+            "не всякое открытие ведёт к войне и не всякая земля богата"),
+    Measure("познание", "карт", m_kn_charts, 2, None, "штук",
+            "карта — документ со своей целью, и их чертят"),
+    Measure("познание", "родов карт в ходу", m_kn_chart_kinds, 3, None,
+            "из 12", "торговая, кормчая и жреческая отвечают на разные "
+            "вопросы"),
+    Measure("познание", "у карты названа ошибка", m_kn_chart_errors, 0.25,
+            None, "доля", "карта точна в одном и врёт в другом"),
+    Measure("познание", "карт не у держав", m_kn_chart_folk, 0.03, None,
+            "доля", "свою землю чертят и те, кто на ней живёт"),
+    Measure("познание", "встреч обществ", m_kn_meetings, 1, None, "штук",
+            "народы узнаю́т друг о друге"),
+    Measure("познание", "исходов встреч в ходу", m_kn_meet_ends, 3, None,
+            "из 14", "встреча кончается не только дружбой и не только боем"),
+    Measure("познание", "встреча не кровью", m_kn_meet_peace, 0.45, None,
+            "доля", "не каждый незнакомый народ враждебен"),
+    Measure("познание", "через языковой барьер", m_kn_barrier, 0.10, None,
+            "доля", "первое знакомство не даёт полного взаимопонимания"),
+    Measure("познание", "попыток освоения", m_kn_settlings, 1, None, "штук",
+            "освоение — отдельный путь, а не следствие открытия",
+            min_years=2000),
+    Measure("познание", "освоение не удалось", m_kn_hold_fail, 0.10, 0.90,
+            "доля", "двор приживается не всегда и не всегда гибнет"),
+    Measure("познание", "землёй уже пользовались", m_kn_hold_locals, 0.25,
+            None, "доля",
+            "отсутствие построек не значит отсутствия прав на землю"),
+    Measure("познание", "исследователей", m_kn_explorers, 2, None, "штук",
+            "у походов есть имена"),
+    Measure("познание", "признание досталось не им", m_kn_credit_lost, 0.03,
+            None, "доля", "не каждый первопроходец становится героем"),
     Measure("обычаи", "обычаев за историю", m_cu_count, 8, 260, "штук",
             "обычай — ответ на случай, а не строка в справочнике",
             min_years=2000),
