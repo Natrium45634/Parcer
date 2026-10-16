@@ -861,6 +861,12 @@ def _stuff_life(ctx, year: int, rng, scale: float) -> None:
     world = ctx.world
     if not world.materials:
         return
+    uses = {}
+    for thing in world.artifacts.values():
+        for part in thing.parts or ():
+            key = part.get("материал", "")
+            if key:
+                uses[key] = uses.get(key, 0) + 1
     for item in sorted(world.materials.values(), key=lambda row: row.id):
         if item.alive:
             # Обычное железо, дерево и камень из мира не исчезают:
@@ -869,7 +875,8 @@ def _stuff_life(ctx, year: int, rng, scale: float) -> None:
             # мира пропадает кузнечное дело как таковое.
             if item.klass == art.M_PLAIN:
                 continue
-            if rng.chance(STUFF_END_CHANCE * scale * _end_urge(item)):
+            urge = _end_urge(item, uses.get(item.id, 0))
+            if rng.chance(STUFF_END_CHANCE * scale * urge):
                 _stuff_ends(ctx, item, year, rng)
         else:
             gone = year - item.end_year if item.end_year else 0
@@ -878,7 +885,7 @@ def _stuff_life(ctx, year: int, rng, scale: float) -> None:
                 _stuff_back(ctx, item, year, rng)
 
 
-def _end_urge(item) -> float:
+def _end_urge(item, uses: int) -> float:
     """Насколько этот материал на пути к концу.
 
     Жила иссякает оттого, что в неё копают, зверя переводят оттого, что
@@ -890,12 +897,19 @@ def _end_urge(item) -> float:
     Без этого выходила обратная неправда: кончались ровно те материалы,
     которых никто не касался, потому что бросок их не различал, а взять
     в дело кончившийся уже нельзя. Мир оставался с полным набором
-    рабочих материалов и тремя мёртвыми строчками в описи, а вещи,
-    повторить которую больше некому, в нём не было ни одной.
+    рабочих материалов и мёртвыми строчками в описи, к которым не
+    привязано ни одной вещи, — а вещь, повторить которую больше некому,
+    и есть то, ради чего материал заводился сущностью мира.
+
+    Считается это по вещам, а не по умельцам. Умельцы — знак косвенный
+    и неверный: материал попадает в дело и тогда, когда народ-мастер
+    неизвестен, так что в описи попадается драконья кость с тремя
+    клинками и без единого умельца. Вещь же — прямой след того, что
+    материал брали.
     """
-    if not item.known_by and not item.found_year:
-        return 0.3
-    return min(2.0, 0.7 + 0.45 * len(item.known_by))
+    if not uses and not item.known_by and not item.found_year:
+        return 0.25
+    return min(2.5, 0.5 + 0.35 * uses + 0.2 * len(item.known_by))
 
 
 def _stuff_ends(ctx, item, year: int, rng) -> None:
