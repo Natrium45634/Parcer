@@ -869,13 +869,33 @@ def _stuff_life(ctx, year: int, rng, scale: float) -> None:
             # мира пропадает кузнечное дело как таковое.
             if item.klass == art.M_PLAIN:
                 continue
-            if rng.chance(STUFF_END_CHANCE * scale):
+            if rng.chance(STUFF_END_CHANCE * scale * _end_urge(item)):
                 _stuff_ends(ctx, item, year, rng)
         else:
             gone = year - item.end_year if item.end_year else 0
             urge = 1.0 + min(STUFF_BACK_AGE_CAP, gone / STUFF_BACK_AGE)
             if rng.chance(STUFF_BACK_CHANCE * scale * urge):
                 _stuff_back(ctx, item, year, rng)
+
+
+def _end_urge(item) -> float:
+    """Насколько этот материал на пути к концу.
+
+    Жила иссякает оттого, что в неё копают, зверя переводят оттого, что
+    на него охотятся, а умение забывают оттого, что мастеров было двое.
+    Материал, которого никто не берёт, сам собой не кончается — его
+    разве что завалит обвалом; и наоборот, тот, на котором держится
+    ремесло трёх народов, кончается первым.
+
+    Без этого выходила обратная неправда: кончались ровно те материалы,
+    которых никто не касался, потому что бросок их не различал, а взять
+    в дело кончившийся уже нельзя. Мир оставался с полным набором
+    рабочих материалов и тремя мёртвыми строчками в описи, а вещи,
+    повторить которую больше некому, в нём не было ни одной.
+    """
+    if not item.known_by and not item.found_year:
+        return 0.3
+    return min(2.0, 0.7 + 0.45 * len(item.known_by))
 
 
 def _stuff_ends(ctx, item, year: int, rng) -> None:
