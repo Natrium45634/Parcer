@@ -56,13 +56,24 @@ MIN_ERA = 1
 STUFF_LOW = 9
 STUFF_HIGH = 17
 
-# Жизнь материала: иссякание и возвращение. Числа малы — это события на
-# века, а не на десятилетия. И они нарочно несимметричны в пользу
-# возвращения: на десяти тысячах лет при прежних числах кончались все
-# материалы мира до одного, включая железо, — то есть выходил мир, в
-# котором ковать не из чего вовсе. Мера смотра это и поймала.
-STUFF_END_CHANCE = 0.022
-STUFF_BACK_CHANCE = 0.055
+# Жизнь материала: иссякание и возвращение. Числа — на один материал за
+# такт, а не на мир, и это главное. Пока бросок был общий, число
+# иссякших материалов шло случайным блужданием с постоянными
+# скоростями, а у такого блуждания нет равновесия: при перевесе
+# иссякания оно съедало все материалы мира до одного, включая железо
+# (мир, в котором ковать не из чего), а при перевесе возвращения почти
+# всё время стояло на нуле (мир, в котором ничего не кончается). Обе
+# крайности поймала одна и та же мера смотра. При счёте на каждый
+# материал врозь доля иссякших держится сама собой около
+# end / (end + back) и не зависит ни от числа материалов в мире, ни от
+# длины его истории.
+STUFF_END_CHANCE = 0.0045
+STUFF_BACK_CHANCE = 0.0022
+# Чем дольше материала нет, тем охотнее о нём вспоминают: старую
+# выработку раскапывают, а по уцелевшим вещам разбирают, как это
+# делали. За две тысячи лет забвения — втрое охотнее.
+STUFF_BACK_AGE = 1000.0
+STUFF_BACK_AGE_CAP = 2.0
 
 # Биография ведётся не всякой вещи, а той, что ступенью не ниже
 # исторической: у прочих и событий-то не бывает.
@@ -839,62 +850,73 @@ def stuff_for(ctx, rng, year: int, folk=None, rich: float = 1.0):
 
 
 def _stuff_life(ctx, year: int, rng, scale: float) -> None:
-    """Жила кончается, зверь переводится, умение забывается — и наоборот."""
+    """Жила кончается, зверь переводится, умение забывается — и наоборот.
+
+    Счёт идёт по каждому материалу врозь: у звёздного железа своя
+    судьба, у драконьей кости своя, и то, что кончилось одно, ничего не
+    говорит о другом. Общий бросок на мир этого не умел — он решал
+    только, случится ли в этот век хоть что-нибудь, а с кем, выбирал
+    потом.
+    """
     world = ctx.world
     if not world.materials:
         return
-    if rng.chance(STUFF_END_CHANCE * scale):
-        # Обычное железо, дерево и камень из мира не исчезают: кончается
-        # жила, а не вещество. Такой материал бывает «на исходе», но
-        # совсем взять его неоткуда не станет — иначе у мира пропадает
-        # кузнечное дело как таковое.
-        pool = [item for item in world.materials.values()
-                if item.alive and item.klass != art.M_PLAIN]
-        if pool:
-            item = pool[rng.randint(0, len(pool) - 1)]
-            key = _end_why(ctx, item, year, rng)
-            if item.state == art.D_OPEN and key not in ("masters", "ban") \
-                    and rng.chance(0.45):
-                item.state = art.D_SCARCE      # сперва на исходе
-            else:
-                item.state = art.D_FORGOT if key == "masters" else art.D_SPENT
-                item.end_year = year
-                item.end_why = art.STUFF_END_NAMES[key]
-            item.marks.append({"год": year,
-                               "что": art.STUFF_END_NAMES[key]})
-            if item.state != art.D_SCARCE and item.klass != art.M_PLAIN:
-                title, text = texts.stuff_lost(rng, item, year)
-                world.add_event(
-                    date=ctx.date_in(rng, year),
-                    era_index=world.era_index_at(year), kind="stuff_lost",
-                    title=title, text=text, importance=2,
-                    subjects=[item.id], region_id=item.region_id)
-    if rng.chance(STUFF_BACK_CHANCE * scale):
-        pool = [item for item in world.materials.values() if not item.alive]
-        if pool:
-            # Чем дольше его нет, тем вероятнее, что о нём вспомнят:
-            # старую выработку раскапывают, а по уцелевшим вещам
-            # разбирают, как это делали.
-            pairs = [(item, 1.0 + min(4.0, (year - item.end_year) / 500.0)
-                      if item.end_year else 1.0) for item in pool]
-            item = rng.weighted(pairs)
-            key = rng.choice([row for row, _said in art.STUFF_BACKS])
-            item.state = art.D_OPEN
-            item.back_year = year
-            item.marks.append({"год": year,
-                               "что": art.STUFF_BACK_NAMES[key]})
-            # Конец его кончился: год и причина остаются в памяти
-            # материала, а графа состояния говорит о нынешнем дне.
-            # Иначе выходит материал, который кончился в трёхсотом и
-            # впервые взят в тысяча сто сороковом.
-            item.end_year = 0
-            item.end_why = ""
-            title, text = texts.stuff_back(rng, item, year, key)
-            world.add_event(
-                date=ctx.date_in(rng, year),
-                era_index=world.era_index_at(year), kind="stuff_back",
-                title=title, text=text, importance=2, subjects=[item.id],
-                region_id=item.region_id)
+    for item in sorted(world.materials.values(), key=lambda row: row.id):
+        if item.alive:
+            # Обычное железо, дерево и камень из мира не исчезают:
+            # кончается жила, а не вещество. Такой материал бывает «на
+            # исходе», но совсем взять его неоткуда не станет — иначе у
+            # мира пропадает кузнечное дело как таковое.
+            if item.klass == art.M_PLAIN:
+                continue
+            if rng.chance(STUFF_END_CHANCE * scale):
+                _stuff_ends(ctx, item, year, rng)
+        else:
+            gone = year - item.end_year if item.end_year else 0
+            urge = 1.0 + min(STUFF_BACK_AGE_CAP, gone / STUFF_BACK_AGE)
+            if rng.chance(STUFF_BACK_CHANCE * scale * urge):
+                _stuff_back(ctx, item, year, rng)
+
+
+def _stuff_ends(ctx, item, year: int, rng) -> None:
+    """Материал кончился — или только пошёл на убыль."""
+    world = ctx.world
+    key = _end_why(ctx, item, year, rng)
+    if item.state == art.D_OPEN and key not in ("masters", "ban") \
+            and rng.chance(0.45):
+        item.state = art.D_SCARCE      # сперва на исходе
+    else:
+        item.state = art.D_FORGOT if key == "masters" else art.D_SPENT
+        item.end_year = year
+        item.end_why = art.STUFF_END_NAMES[key]
+    item.marks.append({"год": year, "что": art.STUFF_END_NAMES[key]})
+    if item.state != art.D_SCARCE:
+        title, text = texts.stuff_lost(rng, item, year)
+        world.add_event(
+            date=ctx.date_in(rng, year),
+            era_index=world.era_index_at(year), kind="stuff_lost",
+            title=title, text=text, importance=2,
+            subjects=[item.id], region_id=item.region_id)
+
+
+def _stuff_back(ctx, item, year: int, rng) -> None:
+    """Выработку раскопали, умение разобрали по вещам, зверь развёлся."""
+    world = ctx.world
+    key = rng.choice([row for row, _said in art.STUFF_BACKS])
+    item.state = art.D_OPEN
+    item.back_year = year
+    item.marks.append({"год": year, "что": art.STUFF_BACK_NAMES[key]})
+    # Конец его кончился: год и причина остаются в памяти материала, а
+    # графа состояния говорит о нынешнем дне. Иначе выходит материал,
+    # который кончился в трёхсотом и впервые взят в тысяча сто сороковом.
+    item.end_year = 0
+    item.end_why = ""
+    title, text = texts.stuff_back(rng, item, year, key)
+    world.add_event(
+        date=ctx.date_in(rng, year),
+        era_index=world.era_index_at(year), kind="stuff_back",
+        title=title, text=text, importance=2, subjects=[item.id],
+        region_id=item.region_id)
 
 
 def _end_why(ctx, item, year: int, rng) -> str:
