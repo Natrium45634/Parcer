@@ -57,9 +57,12 @@ STUFF_LOW = 9
 STUFF_HIGH = 17
 
 # Жизнь материала: иссякание и возвращение. Числа малы — это события на
-# века, а не на десятилетия.
-STUFF_END_CHANCE = 0.035
-STUFF_BACK_CHANCE = 0.020
+# века, а не на десятилетия. И они нарочно несимметричны в пользу
+# возвращения: на десяти тысячах лет при прежних числах кончались все
+# материалы мира до одного, включая железо, — то есть выходил мир, в
+# котором ковать не из чего вовсе. Мера смотра это и поймала.
+STUFF_END_CHANCE = 0.022
+STUFF_BACK_CHANCE = 0.055
 
 # Биография ведётся не всякой вещи, а той, что ступенью не ниже
 # исторической: у прочих и событий-то не бывает.
@@ -592,8 +595,13 @@ def _found(ctx, artifact, year: int, rng, finder=None, how: str = "chance",
               actors=[finder.id] if finder is not None else (),
               precision=art.P_YEAR)
     # Найденное не всегда опознают: вещь бывает лежит в сокровищнице
-    # под чужим именем, пока книжник не разберёт надпись.
-    if artifact.tier >= art.T_HIST and rng.chance(0.35):
+    # под чужим именем, пока книжник не разберёт надпись. Но о вещи,
+    # про которую уже известно, что она копия или подделка, находка
+    # этого знания не отменяет: иначе список со временем снова
+    # становится «подлинником не установленной подлинности», а с него
+    # потом делают список со списка.
+    if artifact.tier >= art.T_HIST and not artifact.parent_id \
+            and artifact.authentic == art.A_TRUE and rng.chance(0.35):
         artifact.authentic = art.A_UNSURE
         artifact.notes.append("%d: нашли, но чья она, сразу не поняли" % year)
 
@@ -836,7 +844,12 @@ def _stuff_life(ctx, year: int, rng, scale: float) -> None:
     if not world.materials:
         return
     if rng.chance(STUFF_END_CHANCE * scale):
-        pool = [item for item in world.materials.values() if item.alive]
+        # Обычное железо, дерево и камень из мира не исчезают: кончается
+        # жила, а не вещество. Такой материал бывает «на исходе», но
+        # совсем взять его неоткуда не станет — иначе у мира пропадает
+        # кузнечное дело как таковое.
+        pool = [item for item in world.materials.values()
+                if item.alive and item.klass != art.M_PLAIN]
         if pool:
             item = pool[rng.randint(0, len(pool) - 1)]
             key = _end_why(ctx, item, year, rng)
@@ -859,7 +872,12 @@ def _stuff_life(ctx, year: int, rng, scale: float) -> None:
     if rng.chance(STUFF_BACK_CHANCE * scale):
         pool = [item for item in world.materials.values() if not item.alive]
         if pool:
-            item = pool[rng.randint(0, len(pool) - 1)]
+            # Чем дольше его нет, тем вероятнее, что о нём вспомнят:
+            # старую выработку раскапывают, а по уцелевшим вещам
+            # разбирают, как это делали.
+            pairs = [(item, 1.0 + min(4.0, (year - item.end_year) / 500.0)
+                      if item.end_year else 1.0) for item in pool]
+            item = rng.weighted(pairs)
             key = rng.choice([row for row, _said in art.STUFF_BACKS])
             item.state = art.D_OPEN
             item.back_year = year
@@ -1101,8 +1119,9 @@ def _claims(ctx, year: int, rng, scale: float) -> None:
 def _doubt(ctx, artifact, year: int, rng, folk) -> None:
     """Подлинность под сомнением — а то и объявилась вторая такая же."""
     world = ctx.world
-    if artifact.authentic in (art.A_FAKE, art.A_COPY, art.A_RITE):
-        return
+    if artifact.authentic in (art.A_FAKE, art.A_COPY, art.A_RITE) \
+            or artifact.parent_id:
+        return                      # со списка списка не делают
     roll = rng.random()
     if roll < 0.35:
         artifact.authentic = art.A_ARGUED

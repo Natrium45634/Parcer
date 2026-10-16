@@ -4976,10 +4976,25 @@ def check_things(world, seed: str) -> list:
     by_name = {}
     for item in world.artifacts.values():
         by_name.setdefault(item.name, []).append(item)
+    def root_of(item):
+        """Подлинник, от которого пошла вся эта родня.
+
+        Цепочка, а не один шаг: список со списка — всё ещё та же
+        семья вещей с одним именем.
+        """
+        seen = set()
+        while item.parent_id and item.parent_id not in seen:
+            seen.add(item.id)
+            parent = world.artifacts.get(item.parent_id)
+            if parent is None:
+                break
+            item = parent
+        return item.id
+
     for name, items in sorted(by_name.items()):
         if len(items) < 2:
             continue
-        roots = {item.parent_id or item.id for item in items}
+        roots = {root_of(item) for item in items}
         if len(roots) > 1:
             problems.append("сид «%s»: имена вещей повторяются: «%s» у "
                             "вещей, не связанных родством" % (seed, name))
