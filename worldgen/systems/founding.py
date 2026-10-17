@@ -885,12 +885,30 @@ def upkeep(ctx, year: int, period: int) -> None:
                 region_id=settlement.region_id, race_id=settlement.race_id,
             )
 
+    # Лагерь кормится с той же дикой земли, что племена, и делит её хлеб
+    # с ними (`peoples.wild_shares`). Прежде он не делил ничего и не
+    # упирался ни во что: рос чистой экспонентой, и лагерь, проживший
+    # историю, доходил до сотен миллиардов душ — при шкале прироста на
+    # максимуме 697 580 037 220 гоблинов в одном стойбище, при племени в
+    # шесть тысяч и городе в сто. Потолок тут нужен не ради числа, а
+    # ради того, чтобы ползунок прироста оставался множителем, а не
+    # слагаемым в показателе.
+    wild = peoples.wild_shares(ctx, year)
     for camp_id in list(world.active_camps):
         camp = world.camps[camp_id]
         race = races_mod.get_race(camp.race_id)
-        population = camp.population * (
-            1.0 + ctx.growth(race.growth, camp.region_id) * period
-            * rng.uniform(-0.6, 1.0))
+        capacity = wild.get(camp_id) or peoples.wild_appetite(
+            ctx, race, world.regions.get(camp.region_id), year, camp=True)
+        population = camp.population
+        # Та же логистика, что у города и племени. Разброс лагерю оставлен
+        # свой и широкий — орда то набухает налётами, то расходится, —
+        # но стоит он отдельным множителем, а не внутри логистики.
+        # Внутри он менял бы знак: у лагеря, переросшего свой потолок,
+        # скобка отрицательна, и неудачный бросок, помноженный на неё,
+        # дал бы не убыль, а рост.
+        population += (population * ctx.growth(race.growth, camp.region_id)
+                       * period * (1.0 - population / capacity))
+        population *= rng.uniform(0.93, 1.06)
         camp.population = max(0, int(population))
         world.note_census(camp, year)
         if camp.population < 20 or rng.chance(0.0022 * spec.turmoil * period * ctx.growth_scale):

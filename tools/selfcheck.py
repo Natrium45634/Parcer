@@ -2927,6 +2927,93 @@ def check_town_bread(world, seed: str) -> list:
     return problems
 
 
+def check_wild_bread(world, seed: str) -> list:
+    """Хлеб дикой земли: племена и лагеря делят его, а лагерь — не исключение.
+
+    Беда, которую это сторожит, была тихой и очень большой. Город и
+    племя растут логистически и упираются в то, сколько кормит земля, а
+    лагерь рос чистой экспонентой без всякого потолка. Лагерь, которому
+    повезло прожить историю, доходил до сотен миллиардов душ — на одном
+    сиде 697 580 037 220 гоблинов в одном стойбище, при самом большом
+    племени того же мира в шесть тысяч и самом большом городе в сто.
+
+    И ни одна прежняя проверка этого не видела: `refresh_folks` лагеря в
+    людность народа не считает, так что по народам мир выглядел
+    приличным, — а `population_at` их считает, и разбор мира с
+    временной шкалой говорили о миллиардах.
+
+    Границы тут взяты такие, чтобы они не зависели от настроек. Людность
+    двигают три шкалы разом (прирост народов, людность мира, ёмкость
+    земли), и абсолютное число душ при них гуляет в разы — а вот
+    отношение орды к племени не гуляет: и то и другое кормится с одной
+    дикой земли и одними шкалами. Поэтому главная мера тут
+    относительная, а абсолютная поставлена там, где число перестаёт
+    что-либо значить, а не там, где мир перестаёт нравиться.
+
+    Считается по наибольшему за историю, а не по живым на конец: лагерь,
+    который раздулся до миллиардов и погиб в шестом тысячелетии, всё
+    равно стоял в летописи и в срезах тех веков.
+    """
+    problems = []
+
+    def peak_of(place):
+        return max(int(place.peak_population or 0), int(place.population or 0))
+
+    camps = [peak_of(camp) for camp in world.camps.values()]
+    tribes = [peak_of(tribe) for tribe in world.tribes.values()]
+    biggest_camp = max(camps) if camps else 0
+    biggest_tribe = max(tribes) if tribes else 0
+
+    # Орда против племени. Аппетит лагеря больше племенного (CAMP_APPETITE),
+    # и племя вдобавок делится, не дожидаясь потолка, — так что
+    # пятикратный разрыв законен. Двадцатипятикратный значит, что потолка
+    # у лагеря нет вовсе.
+    if biggest_camp and biggest_tribe and biggest_camp > biggest_tribe * 25:
+        problems.append("сид «%s»: самый большой лагерь держал %d душ при "
+                        "самом большом племени в %d — у лагеря нет потолка"
+                        % (seed, biggest_camp, biggest_tribe))
+
+    # Там, где число перестаёт что-либо значить. Это не вкус, а разряд:
+    # стойбище на пятьдесят миллионов душ — не стойбище.
+    if not problems:
+        for registry, word in ((world.camps, "лагерь"),
+                               (world.tribes, "племя")):
+            for place in registry.values():
+                if peak_of(place) > 50000000:
+                    problems.append("сид «%s»: %s по имени %s держал %d душ"
+                                    % (seed, word, place.name, peak_of(place)))
+                    break
+            if problems:
+                break
+
+    # И хлеб земли: все, кто с неё живёт, вместе не держат больше, чем она
+    # кормит. Запас тут большой — хлеб считается на год такта и на судьбу
+    # мира, а людность сверяется на конец истории, — поэтому ловится не
+    # превышение, а превышение в разы.
+    if not problems:
+        from worldgen.systems import peoples
+
+        wild = {}
+        for registry, alive in ((world.tribes, world.active_tribes),
+                                (world.camps, world.active_camps)):
+            for place_id in alive:
+                place = registry[place_id]
+                wild[place.region_id] = wild.get(place.region_id, 0) \
+                    + int(place.population or 0)
+        for region_id, souls in sorted(wild.items()):
+            region = world.regions.get(region_id)
+            if region is None or region.capacity <= 0:
+                continue
+            bread = peoples.WILD_BREAD * region.capacity
+            if souls > bread * 8.0:
+                problems.append(
+                    "сид «%s»: на земле по имени %s живёт с неё %d душ, а "
+                    "кормит она около %d"
+                    % (seed, region.name, souls, int(bread)))
+                break
+    return problems
+
+
 def check_ranks(world, seed: str) -> list:
     """Ступень поселения: она считается из людности и не врёт о нём.
 
@@ -5814,6 +5901,7 @@ def main(only: str = "") -> int:
         failures.extend(check_mortality(first, seed))
         failures.extend(check_ranks(first, seed))
         failures.extend(check_town_bread(first, seed))
+        failures.extend(check_wild_bread(first, seed))
         failures.extend(check_war_cost(first, seed))
         failures.extend(check_world_code(first, seed))
         failures.extend(check_invasions(first, seed))
@@ -5894,6 +5982,7 @@ def main(only: str = "") -> int:
             failures.extend(check_mortality(first, "карта/" + seed))
             failures.extend(check_ranks(first, "карта/" + seed))
             failures.extend(check_town_bread(first, "карта/" + seed))
+            failures.extend(check_wild_bread(first, "карта/" + seed))
             failures.extend(check_war_cost(first, "карта/" + seed))
             failures.extend(check_world_code(first, "карта/" + seed))
             failures.extend(check_invasions(first, "карта/" + seed))
