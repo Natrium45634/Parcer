@@ -1584,6 +1584,57 @@ def m_town_biggest(world):
     return max(item.population for item in towns)
 
 
+def _peak_of(place):
+    """Наибольшее за историю, а не нынешнее."""
+    return max(int(place.peak_population or 0), int(place.population or 0))
+
+
+def m_souls_world(world):
+    """Сколько душ в мире на конец истории."""
+    return world.population_at(int(world.total_years))
+
+
+def m_horde_vs_tribe(world):
+    """Во сколько раз самая большая орда больше самого большого племени.
+
+    Мера относительная нарочно. Людность мира двигают три шкалы разом —
+    прирост народов, людность мира, ёмкость земли, — и абсолютное число
+    душ при них ходит в разы, так что абсолютной границей тут ничего не
+    поймаешь. А вот это отношение от шкал не зависит: и орда, и племя
+    кормятся с одной дикой земли и одними числами.
+
+    Поэтому оно и ловит ту поломку, которую не поймала ни одна из ста
+    прежних мер: у лагеря не было потолка вовсе, он рос чистой
+    экспонентой, и на одном сиде орда дошла до 697 580 037 220 душ при
+    племени того же мира в шесть тысяч. Отношение было 10**8; теперь
+    оно меньше двух.
+    """
+    camps = [_peak_of(camp) for camp in world.camps.values()]
+    tribes = [_peak_of(tribe) for tribe in world.tribes.values()]
+    if not camps or not tribes:
+        return None
+    biggest_tribe = max(tribes)
+    if biggest_tribe <= 0:
+        return None
+    return max(camps) / float(biggest_tribe)
+
+
+def m_camp_share(world):
+    """Какая доля мира живёт в лагерях.
+
+    Лагерь — это ватага, а не держава: в нём живут единицы процентов
+    мира. Пока у лагеря не было потолка, один разросшийся лагерь
+    составлял почти весь мир, и доля шла к единице.
+    """
+    last = int(world.total_years)
+    total = world.population_at(last)
+    if total <= 0:
+        return None
+    camps = sum(int(world.souls_at(camp, last) or 0)
+                for camp in world.camps.values())
+    return camps / float(total)
+
+
 def m_town_primacy(world):
     """Во сколько раз первый город мира больше середняка.
 
@@ -2882,6 +2933,14 @@ MEASURES = (
     Measure("вес", "тяжёлых имён без титула", m_weigh_untitled, 1, None,
             "штук", "вес считается по делам, а не по должности",
             min_years=3000),
+    Measure("людность", "душ в мире", m_souls_world, 300000, 60000000,
+            "душ", "мир — это мир, а не муравейник: душ в нём миллионы, "
+            "а не миллиарды"),
+    Measure("людность", "орда против племени", m_horde_vs_tribe, None, 6.0,
+            "раз", "орда и племя кормятся с одной дикой земли, и разрыв "
+            "между ними в разы, а не в разряды"),
+    Measure("людность", "доля мира в лагерях", m_camp_share, None, 0.10,
+            "доля", "лагерь — ватага, а не держава"),
     Measure("расы", "дожило до конца", m_races_alive, 8, None, "из 21",
             "мир не сводится к трём народам"),
     Measure("расы", "ушло из мира", m_races_gone, None, 7, "штук",
